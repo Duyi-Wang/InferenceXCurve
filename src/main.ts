@@ -74,6 +74,38 @@ interface PendingImportDraft {
   draft: SeriesDraft;
 }
 
+interface PersistedAppState {
+  theme?: Theme;
+  activeSeriesIds?: string[];
+  selectedPrecisions?: string[];
+  modelFilter?: string;
+  islOslFilter?: string;
+  mtpFilter?: string;
+  showNonOptimalPoints?: boolean;
+  hidePointLabels?: boolean;
+  useAdvancedLabels?: boolean;
+  showGradientLabels?: boolean;
+  showLineLabels?: boolean;
+  highContrast?: boolean;
+  logY?: boolean;
+  search?: string;
+}
+
+interface PersistedAppData {
+  version: 1;
+  savedAt: string;
+  currentSeries: InferenceCurveSeries[];
+  seriesDrafts: SeriesDraft[];
+  state: PersistedAppState;
+}
+
+interface InitialDataState {
+  currentSeries: InferenceCurveSeries[];
+  seriesDrafts: SeriesDraft[];
+  state: AppState;
+  loadedFromStorage: boolean;
+}
+
 interface ColorPreset {
   name: string;
   value: string;
@@ -140,6 +172,8 @@ const DEFAULT_MODEL = 'Default Model';
 const DEFAULT_ISL_OSL = 'Default ISL/OSL';
 const DEFAULT_PRECISION = 'default';
 const DEFAULT_LINE_STYLE = 'solid';
+const LOCAL_STORAGE_KEY = 'inferencex-curve:user-data:v1';
+const LOCAL_SAVE_DEBOUNCE_MS = 350;
 
 const DB_MODEL_TO_DISPLAY: Record<string, string> = {
   dsr1: 'DeepSeek-R1-0528',
@@ -276,10 +310,250 @@ const lineStyleOptions: LineStyleOption[] = [
   { value: 'long-dash', label: 'Long Dash', dasharray: '12 5' }
 ];
 
-let currentSeries: InferenceCurveSeries[] = structuredClone(exampleSeries);
-let seriesDrafts: SeriesDraft[] = seriesToDrafts(currentSeries);
+function createInitialDataState(): InitialDataState {
+  const defaultSeries = structuredClone(exampleSeries);
+  const persisted = loadPersistedAppData();
+  if (!persisted) {
+    return {
+      currentSeries: defaultSeries,
+      seriesDrafts: draftsFromSeriesForRestore(defaultSeries),
+      state: createInitialState(defaultSeries),
+      loadedFromStorage: false
+    };
+  }
+
+  const restoredDrafts = persisted.seriesDrafts.length
+    ? persisted.seriesDrafts
+    : draftsFromSeriesForRestore(persisted.currentSeries);
+  let restoredSeries = persisted.currentSeries;
+  try {
+    const draftSeries = draftsToSeriesAllowEmpty(restoredDrafts);
+    if (draftSeries.length > 0 || persisted.currentSeries.length === 0) {
+      restoredSeries = draftSeries;
+    }
+  } catch {
+    restoredSeries = persisted.currentSeries;
+  }
+
+  return {
+    currentSeries: restoredSeries,
+    seriesDrafts: restoredDrafts.length ? restoredDrafts : [makeRestoredEmptySeriesDraft(0)],
+    state: restoreAppState(createInitialState(restoredSeries), persisted.state, restoredSeries),
+    loadedFromStorage: true
+  };
+}
+
+function loadPersistedAppData(): PersistedAppData | null {
+  try {
+    const raw = window.localStorage.getItem(LOCAL_STORAGE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw) as unknown;
+    if (!isRecord(data) || data.version !== 1) return null;
+
+    return {
+      version: 1,
+      savedAt: readPersistedText(data, 'savedAt'),
+      currentSeries: Array.isArray(data.currentSeries) ? readNativeSeries(data.currentSeries) : [],
+      seriesDrafts: restorePersistedSeriesDrafts(data.seriesDrafts),
+      state: restorePersistedState(data.state)
+    };
+  } catch (error) {
+    console.warn('Could not load saved browser data.', error);
+    return null;
+  }
+}
+
+function draftsFromSeriesForRestore(series: InferenceCurveSeries[]): SeriesDraft[] {
+  return series.length > 0 ? seriesToDrafts(series) : [makeRestoredEmptySeriesDraft(0)];
+}
+
+function makeRestoredEmptySeriesDraft(index: number): SeriesDraft {
+  return {
+    id: `line-${index + 1}`,
+    name: `Line ${index + 1}`,
+    model: DEFAULT_MODEL,
+    islOsl: DEFAULT_ISL_OSL,
+    precision: DEFAULT_PRECISION,
+    mtp: NON_MTP_VALUE,
+    marker: '',
+    title: '',
+    color: '',
+    lineStyle: DEFAULT_LINE_STYLE,
+    collapsed: true,
+    points: [makeEmptyPointRow()]
+  };
+}
+
+function restorePersistedSeriesDrafts(value: unknown): SeriesDraft[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isRecord).map((draft, index) => ({
+    id: readPersistedText(draft, 'id', `line-${index + 1}`),
+    name: readPersistedText(draft, 'name', `Line ${index + 1}`),
+    model: readPersistedText(draft, 'model', DEFAULT_MODEL),
+    islOsl: readPersistedText(draft, 'islOsl', DEFAULT_ISL_OSL),
+    precision: readPersistedText(draft, 'precision', DEFAULT_PRECISION),
+    mtp: normalizeMtpValue(readPersistedText(draft, 'mtp', NON_MTP_VALUE)),
+    marker: normalizePointShapeValue(readPersistedText(draft, 'marker')),
+    title: readPersistedText(draft, 'title'),
+    color: readPersistedText(draft, 'color'),
+    lineStyle: readPersistedText(draft, 'lineStyle', DEFAULT_LINE_STYLE) || DEFAULT_LINE_STYLE,
+    collapsed: typeof draft.collapsed === 'boolean' ? draft.collapsed : true,
+    points: restorePersistedPointRows(draft.points)
+  }));
+}
+
+function restorePersistedPointRows(value: unknown): PointRow[] {
+  if (!Array.isArray(value)) return [makeEmptyPointRow()];
+  const rows = value.filter(isRecord).map((point) => {
+    const row = makeEmptyPointRow();
+    [...pointColumns.map((column) => column.key), ...hiddenPointKeys].forEach((key) => {
+      row[key] = formatPointFieldValue(point[key]);
+    });
+    row.shape = normalizePointShapeValue(row.shape);
+    return row;
+  });
+  return rows.length ? rows : [makeEmptyPointRow()];
+}
+
+function restorePersistedState(value: unknown): PersistedAppState {
+  if (!isRecord(value)) return {};
+  return {
+    theme: value.theme === 'light' || value.theme === 'dark' ? value.theme : undefined,
+    activeSeriesIds: readPersistedStringArray(value.activeSeriesIds),
+    selectedPrecisions: readPersistedStringArray(value.selectedPrecisions),
+    modelFilter: readPersistedText(value, 'modelFilter') || undefined,
+    islOslFilter: readPersistedText(value, 'islOslFilter') || undefined,
+    mtpFilter: readPersistedText(value, 'mtpFilter') || undefined,
+    showNonOptimalPoints: readPersistedBoolean(value.showNonOptimalPoints),
+    hidePointLabels: readPersistedBoolean(value.hidePointLabels),
+    useAdvancedLabels: readPersistedBoolean(value.useAdvancedLabels),
+    showGradientLabels: readPersistedBoolean(value.showGradientLabels),
+    showLineLabels: readPersistedBoolean(value.showLineLabels),
+    highContrast: readPersistedBoolean(value.highContrast),
+    logY: readPersistedBoolean(value.logY),
+    search: readPersistedText(value, 'search')
+  };
+}
+
+function restoreAppState(defaults: AppState, saved: PersistedAppState, series: InferenceCurveSeries[]): AppState {
+  const ids = new Set(series.map((line) => line.id));
+  const activeSeriesIds = (saved.activeSeriesIds ?? []).filter((id) => ids.has(id));
+  const precisionValues = new Set(getAvailablePrecisions(series));
+  const selectedPrecisions = (saved.selectedPrecisions ?? []).filter((precision) =>
+    precisionValues.has(precision)
+  );
+
+  return {
+    theme: saved.theme ?? defaults.theme,
+    activeSeriesIds:
+      activeSeriesIds.length > 0 || series.length === 0
+        ? new Set(activeSeriesIds)
+        : new Set(defaults.activeSeriesIds),
+    selectedPrecisions:
+      selectedPrecisions.length > 0 || precisionValues.size === 0
+        ? new Set(selectedPrecisions)
+        : new Set(defaults.selectedPrecisions),
+    modelFilter: saved.modelFilter ?? defaults.modelFilter,
+    islOslFilter: saved.islOslFilter ?? defaults.islOslFilter,
+    mtpFilter: saved.mtpFilter ?? defaults.mtpFilter,
+    showNonOptimalPoints: saved.showNonOptimalPoints ?? defaults.showNonOptimalPoints,
+    hidePointLabels: saved.hidePointLabels ?? defaults.hidePointLabels,
+    useAdvancedLabels: saved.useAdvancedLabels ?? defaults.useAdvancedLabels,
+    showGradientLabels: saved.showGradientLabels ?? defaults.showGradientLabels,
+    showLineLabels: saved.showLineLabels ?? defaults.showLineLabels,
+    highContrast: saved.highContrast ?? defaults.highContrast,
+    logY: saved.logY ?? defaults.logY,
+    search: saved.search ?? defaults.search
+  };
+}
+
+function serializeAppState(): PersistedAppState {
+  return {
+    theme: state.theme,
+    activeSeriesIds: Array.from(state.activeSeriesIds),
+    selectedPrecisions: Array.from(state.selectedPrecisions),
+    modelFilter: state.modelFilter,
+    islOslFilter: state.islOslFilter,
+    mtpFilter: state.mtpFilter,
+    showNonOptimalPoints: state.showNonOptimalPoints,
+    hidePointLabels: state.hidePointLabels,
+    useAdvancedLabels: state.useAdvancedLabels,
+    showGradientLabels: state.showGradientLabels,
+    showLineLabels: state.showLineLabels,
+    highContrast: state.highContrast,
+    logY: state.logY,
+    search: state.search
+  };
+}
+
+function getSeriesForPersistence(): InferenceCurveSeries[] {
+  try {
+    const parsedSeries = draftsToSeriesAllowEmpty(seriesDrafts);
+    if (parsedSeries.length > 0 || currentSeries.length === 0) return parsedSeries;
+  } catch {
+    return currentSeries;
+  }
+  return currentSeries;
+}
+
+function scheduleLocalSave(): void {
+  if (localSaveTimer !== null) window.clearTimeout(localSaveTimer);
+  localSaveTimer = window.setTimeout(() => {
+    localSaveTimer = null;
+    saveLocalDataNow();
+  }, LOCAL_SAVE_DEBOUNCE_MS);
+}
+
+function saveLocalDataNow(): void {
+  if (localSaveTimer !== null) {
+    window.clearTimeout(localSaveTimer);
+    localSaveTimer = null;
+  }
+
+  try {
+    const payload: PersistedAppData = {
+      version: 1,
+      savedAt: new Date().toISOString(),
+      currentSeries: getSeriesForPersistence(),
+      seriesDrafts,
+      state: serializeAppState()
+    };
+    window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(payload));
+    localStorageWarningShown = false;
+  } catch (error) {
+    if (!localStorageWarningShown) {
+      console.warn('Could not save browser data.', error);
+      localStorageWarningShown = true;
+    }
+  }
+}
+
+function readPersistedText(record: Record<string, unknown>, key: string, fallback = ''): string {
+  const value = record[key];
+  if (value === null || value === undefined) return fallback;
+  return normalizeCellText(String(value));
+}
+
+function readPersistedStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const values = value.map((item) => normalizeCellText(String(item))).filter(Boolean);
+  return values.length ? values : undefined;
+}
+
+function readPersistedBoolean(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+const initialData = createInitialDataState();
+let currentSeries: InferenceCurveSeries[] = initialData.currentSeries;
+let seriesDrafts: SeriesDraft[] = initialData.seriesDrafts;
 let pendingImportDrafts: PendingImportDraft[] = [];
-let state: AppState = createInitialState(currentSeries);
+let state: AppState = initialData.state;
+let localSaveTimer: number | null = null;
+let localStorageWarningShown = false;
+
+reconcileFiltersForSeries(currentSeries);
+reconcileActiveSeriesForChart();
 
 app.innerHTML = `
   <main class="container page">
@@ -333,7 +607,7 @@ app.innerHTML = `
       <div class="data-card-header">
         <div>
           <h2>Line Projects</h2>
-          <p>Edit shared line fields once, then paste point rows from Excel into that line's table.</p>
+          <p>Edit shared line fields once, then paste point rows from Excel. Changes are auto-saved in this browser.</p>
         </div>
         <div class="data-header-actions">
           <button id="add-series" class="action-button" type="button">
@@ -412,6 +686,9 @@ applyTheme();
 renderFilterControls();
 renderSeriesEditor();
 renderAll();
+if (initialData.loadedFromStorage) {
+  setStatus('Loaded saved browser data');
+}
 
 document.querySelector('#render-data')?.addEventListener('click', () => {
   try {
@@ -423,6 +700,7 @@ document.querySelector('#render-data')?.addEventListener('click', () => {
     renderSeriesEditor();
     renderAll();
     setStatus(`${currentSeries.length} lines rendered from ${countPointRows(seriesDrafts)} point rows`);
+    scheduleLocalSave();
   } catch (error) {
     setStatus(error instanceof Error ? error.message : 'Invalid line data', true);
   }
@@ -440,6 +718,7 @@ document.querySelector('#reset-data')?.addEventListener('click', () => {
   setImportStatus('');
   pendingImportDrafts = [];
   renderImportPreview();
+  scheduleLocalSave();
 });
 
 document.querySelector('#clear-data')?.addEventListener('click', () => {
@@ -454,6 +733,7 @@ document.querySelector('#clear-data')?.addEventListener('click', () => {
   setImportStatus('');
   pendingImportDrafts = [];
   renderImportPreview();
+  scheduleLocalSave();
 });
 
 document.querySelector('#add-series')?.addEventListener('click', () => {
@@ -476,6 +756,7 @@ document.querySelector('#add-series')?.addEventListener('click', () => {
     points: [makeEmptyPointRow()]
   });
   renderSeriesEditor();
+  scheduleLocalSave();
 });
 
 importActionDataEl.addEventListener('click', () => {
@@ -489,6 +770,10 @@ document.querySelector('#download-png')?.addEventListener('click', downloadPng);
 document.querySelector('#download-csv')?.addEventListener('click', downloadCsv);
 document.querySelector('#reset-zoom')?.addEventListener('click', resetInferenceCurveZoom);
 window.addEventListener('resize', renderAll);
+window.addEventListener('beforeunload', () => {
+  commitSeriesDom();
+  saveLocalDataNow();
+});
 
 function getChartOptions(): InferenceCurveChartOptions {
   return {
@@ -533,6 +818,7 @@ function renderFilterControls(): void {
     renderFilterControls();
     renderSeriesEditor();
     renderAll();
+    scheduleLocalSave();
   };
   islOslFilterEl.onchange = () => {
     state.islOslFilter = islOslFilterEl.value;
@@ -541,6 +827,7 @@ function renderFilterControls(): void {
     renderFilterControls();
     renderSeriesEditor();
     renderAll();
+    scheduleLocalSave();
   };
   precisionFilterEl.onchange = () => {
     const precision = precisionFilterEl.value;
@@ -549,6 +836,7 @@ function renderFilterControls(): void {
       precision === ALL_VALUE ? new Set(availablePrecisions) : new Set([precision]);
     renderSeriesEditor();
     renderAll();
+    scheduleLocalSave();
   };
   mtpFilterEl.onchange = () => {
     state.mtpFilter = mtpFilterEl.value;
@@ -557,6 +845,7 @@ function renderFilterControls(): void {
     renderFilterControls();
     renderSeriesEditor();
     renderAll();
+    scheduleLocalSave();
   };
 }
 
@@ -989,6 +1278,7 @@ function attachSeriesEditorEvents(): void {
       if (field === 'color') {
         syncColorPicker(seriesIndex, draft.color || getEditorResolvedColor(seriesIndex), draft.color);
       }
+      scheduleLocalSave();
     });
   });
 
@@ -1006,6 +1296,7 @@ function attachSeriesEditorEvents(): void {
             : '8 4'
           : option;
       renderSeriesEditor();
+      scheduleLocalSave();
     });
   });
 
@@ -1015,6 +1306,7 @@ function attachSeriesEditorEvents(): void {
       const draft = seriesDrafts[seriesIndex];
       if (!draft) return;
       draft.lineStyle = normalizeCellText(input.value) || '8 4';
+      scheduleLocalSave();
     });
   });
 
@@ -1026,6 +1318,7 @@ function attachSeriesEditorEvents(): void {
       draft.color = input.value;
       syncSeriesSwatch(seriesIndex, input.value);
       syncPresetSelection(seriesIndex, input.value);
+      scheduleLocalSave();
     });
   });
 
@@ -1036,6 +1329,7 @@ function attachSeriesEditorEvents(): void {
       if (!draft) return;
       draft.color = '';
       renderSeriesEditor();
+      scheduleLocalSave();
     });
   });
 
@@ -1050,6 +1344,7 @@ function attachSeriesEditorEvents(): void {
       if (picker) picker.value = toColorInputValue(color, seriesIndex);
       syncSeriesSwatch(seriesIndex, color);
       syncPresetSelection(seriesIndex, color);
+      scheduleLocalSave();
     });
   });
 
@@ -1081,6 +1376,7 @@ function attachSeriesEditorEvents(): void {
       }
 
       renderSeriesEditor();
+      scheduleLocalSave();
     });
   });
 
@@ -1091,6 +1387,7 @@ function attachSeriesEditorEvents(): void {
       const key = select.dataset.key!;
       ensurePointRow(seriesIndex, rowIndex);
       seriesDrafts[seriesIndex]!.points[rowIndex]![key] = normalizeCellText(select.value);
+      scheduleLocalSave();
     });
   });
 
@@ -1101,6 +1398,7 @@ function attachSeriesEditorEvents(): void {
       const key = cell.dataset.key!;
       ensurePointRow(seriesIndex, rowIndex);
       seriesDrafts[seriesIndex]!.points[rowIndex]![key] = normalizeCellText(cell.textContent ?? '');
+      scheduleLocalSave();
     });
     cell.addEventListener('paste', handlePointTablePaste);
     cell.addEventListener('keydown', handlePointTableKeydown);
@@ -1147,6 +1445,7 @@ function handlePointTablePaste(event: ClipboardEvent): void {
 
   renderSeriesEditor();
   focusPointCell(seriesIndex, startRow, startCol);
+  scheduleLocalSave();
 }
 
 function handlePointTableKeydown(event: KeyboardEvent): void {
@@ -1163,6 +1462,7 @@ function handlePointTableKeydown(event: KeyboardEvent): void {
   ensurePointRow(seriesIndex, nextRow);
   renderSeriesEditor();
   focusPointCell(seriesIndex, nextRow, boundedCol);
+  scheduleLocalSave();
 }
 
 function focusPointCell(seriesIndex: number, rowIndex: number, colIndex: number): void {
@@ -1278,10 +1578,12 @@ function renderLegend(): void {
   legendEl.querySelector('#legend-search')?.addEventListener('input', (event) => {
     state.search = (event.currentTarget as HTMLInputElement).value;
     renderLegend();
+    scheduleLocalSave();
   });
   legendEl.querySelector('#legend-clear')?.addEventListener('click', () => {
     state.search = '';
     renderLegend();
+    scheduleLocalSave();
   });
   legendEl.querySelectorAll<HTMLInputElement>('input[data-series]').forEach((input) => {
     input.addEventListener('change', () => {
@@ -1294,6 +1596,7 @@ function renderLegend(): void {
         input.checked = true;
       }
       renderAll();
+      scheduleLocalSave();
     });
   });
   legendEl.querySelectorAll<HTMLInputElement>('input[data-switch]').forEach((input) => {
@@ -1305,6 +1608,7 @@ function renderLegend(): void {
         (state[key] as boolean) = input.checked;
       }
       renderAll();
+      scheduleLocalSave();
     });
   });
   legendEl.querySelectorAll<HTMLInputElement>('input[data-precision]').forEach((input) => {
@@ -1320,6 +1624,7 @@ function renderLegend(): void {
       renderFilterControls();
       renderSeriesEditor();
       renderAll();
+      scheduleLocalSave();
     });
   });
   legendEl.querySelector('#reset-filter')?.addEventListener('click', () => {
@@ -1329,6 +1634,7 @@ function renderLegend(): void {
     renderFilterControls();
     renderSeriesEditor();
     renderAll();
+    scheduleLocalSave();
   });
 }
 
@@ -1802,6 +2108,18 @@ function resetSelectionsForSeries(series: InferenceCurveSeries[]): void {
   state.selectedPrecisions = firstPrecisionSelection(series);
 }
 
+function reconcileActiveSeriesForChart(): void {
+  const visibleSeries = getFilteredSeriesForChart();
+  if (visibleSeries.length === 0) {
+    state.activeSeriesIds = new Set();
+    return;
+  }
+
+  const visibleIds = new Set(visibleSeries.map((line) => line.id));
+  const selected = Array.from(state.activeSeriesIds).filter((id) => visibleIds.has(id));
+  state.activeSeriesIds = selected.length > 0 ? new Set(selected) : visibleIds;
+}
+
 function reconcileFiltersForSeries(series: InferenceCurveSeries[]): void {
   const models = new Set(series.map(getSeriesModel));
   const sortedModels = uniqueSorted(series.map(getSeriesModel));
@@ -2263,6 +2581,7 @@ function addSelectedImportLines(): void {
     setImportStatus(formatImportSummary(selectedSeries, currentSeries, seriesDrafts));
     pendingImportDrafts = [];
     renderImportPreview();
+    scheduleLocalSave();
   } catch (error) {
     setImportStatus(error instanceof Error ? error.message : 'Could not add selected import lines.', true);
   }
@@ -2287,7 +2606,7 @@ async function importGitHubActionData(): Promise<void> {
     }));
     renderImportPreview();
     setImportStatus(
-      `Fetched ${importedSeries.length} lines. Review, edit, then click Add Selected. Current data was not changed.`
+      `Fetched ${importedSeries.length} lines. Line IDs include the CI run id suffix. Review, edit, then click Add Selected. Current data was not changed.`
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Could not import GitHub Actions data.';
@@ -2323,12 +2642,20 @@ async function loadGitHubActionSeries(runUrl: string, token: string): Promise<In
     }
   }
 
-  const merged = mergeImportedSeries(imported);
+  const merged = appendGitHubRunIdToSeriesIds(mergeImportedSeries(imported), run.runId);
   if (merged.length === 0) {
     const suffix = failures.length ? ` Last error: ${failures.at(-1)}` : '';
     throw new Error(`No benchmark CSV/JSON data found in the action artifacts.${suffix}`);
   }
   return merged;
+}
+
+function appendGitHubRunIdToSeriesIds(series: InferenceCurveSeries[], runId: string): InferenceCurveSeries[] {
+  const suffix = `-ci-${runId}`;
+  return series.map((line) => ({
+    ...line,
+    id: line.id.endsWith(suffix) ? line.id : `${line.id}${suffix}`
+  }));
 }
 
 function parseGitHubRunUrl(value: string): GitHubRunRef {
@@ -3053,6 +3380,7 @@ function formatRateLimitReset(value: string | null): string {
 
 function downloadCsv(): void {
   commitSeriesDom();
+  scheduleLocalSave();
   const rows = [
     [...seriesCsvColumns.map((column) => column.label), ...pointColumns.map((column) => column.label)],
     ...seriesDrafts.flatMap((series) =>
