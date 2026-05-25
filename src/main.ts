@@ -1222,6 +1222,7 @@ function renderPointTable(series: SeriesDraft, seriesIndex: number, pointCount: 
         <thead>
           <tr>
             <th class="row-num">#</th>
+            <th class="point-actions-head">Actions</th>
             ${pointColumns
               .map(
                 (column) =>
@@ -1286,6 +1287,30 @@ function renderPointRow(row: PointRow, seriesIndex: number, rowIndex: number): s
   return `
     <tr>
       <td class="row-num">${rowIndex + 1}</td>
+      <td class="point-actions-cell">
+        <button
+          type="button"
+          class="point-action-button"
+          data-point-action="copy"
+          data-series-index="${seriesIndex}"
+          data-row="${rowIndex}"
+          title="Copy point"
+          aria-label="Copy point ${rowIndex + 1}"
+        >
+          ${renderIcon('copy')}
+        </button>
+        <button
+          type="button"
+          class="point-action-button danger"
+          data-point-action="delete"
+          data-series-index="${seriesIndex}"
+          data-row="${rowIndex}"
+          title="Delete point"
+          aria-label="Delete point ${rowIndex + 1}"
+        >
+          ${renderIcon('trash')}
+        </button>
+      </td>
       ${pointColumns
         .map((column, colIndex) =>
           column.key === 'shape'
@@ -1470,6 +1495,36 @@ function attachSeriesEditorEvents(): void {
       const key = select.dataset.key!;
       ensurePointRow(seriesIndex, rowIndex);
       seriesDrafts[seriesIndex]!.points[rowIndex]![key] = normalizeCellText(select.value);
+      scheduleLocalSave();
+    });
+  });
+
+  seriesEditorEl.querySelectorAll<HTMLButtonElement>('button[data-point-action]').forEach((button) => {
+    button.addEventListener('click', () => {
+      commitSeriesDom();
+      const seriesIndex = Number(button.dataset.seriesIndex);
+      const rowIndex = Number(button.dataset.row);
+      const action = button.dataset.pointAction;
+      const draft = seriesDrafts[seriesIndex];
+      if (!draft || !Number.isInteger(rowIndex)) return;
+
+      if (action === 'copy') {
+        ensurePointRow(seriesIndex, rowIndex);
+        draft.points.splice(rowIndex + 1, 0, structuredClone(draft.points[rowIndex]!));
+        renderSeriesEditor();
+        focusPointCell(seriesIndex, rowIndex + 1, 0);
+        setStatus(`Copied point ${rowIndex + 1} in ${draft.name || `Line ${seriesIndex + 1}`}`);
+      } else if (action === 'delete') {
+        if (draft.points.length <= 1) {
+          draft.points = [makeEmptyPointRow()];
+        } else {
+          draft.points.splice(rowIndex, 1);
+        }
+        renderSeriesEditor();
+        focusPointCell(seriesIndex, Math.min(rowIndex, draft.points.length - 1), 0);
+        setStatus(`Deleted point ${rowIndex + 1} in ${draft.name || `Line ${seriesIndex + 1}`}`);
+      }
+
       scheduleLocalSave();
     });
   });
