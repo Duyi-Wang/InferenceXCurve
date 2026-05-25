@@ -88,6 +88,20 @@ interface StrategyLabel {
   color: string;
 }
 
+interface ChartInteractionState {
+  hoveredSeriesId: string | null;
+  selectedSeriesId: string | null;
+}
+
+interface PillLabel {
+  key: string;
+  seriesId: string;
+  x: number;
+  y: number;
+  label: string;
+  color: string;
+}
+
 type ContinuousScale = d3.ScaleLinear<number, number> | d3.ScaleLogarithmic<number, number>;
 type ShapeKey = 'circle' | 'square' | 'triangle' | 'diamond' | 'star' | 'plus' | 'cross';
 
@@ -134,6 +148,7 @@ const SHAPE_ORDER: ShapeKey[] = ['circle', 'square', 'triangle', 'diamond'];
 const POINT_SIZE = 3.5;
 const HOVER_POINT_SIZE = 6;
 const HIT_AREA_RADIUS = 12;
+const DIMMED_SERIES_OPACITY = 0.16;
 const CHART_MARGIN = { top: 18, right: 24, bottom: 48, left: 82 };
 
 type Vendor = 'nvidia' | 'amd' | 'unknown';
@@ -553,6 +568,21 @@ export function renderInferenceCurveChart(
 
   const strategyColor = buildStrategyColorMap(visibleSeries);
   const current = { xScale: xScale as ContinuousScale, yScale };
+  const interaction: ChartInteractionState = {
+    hoveredSeriesId: null,
+    selectedSeriesId: null
+  };
+
+  const applyInteraction = () => applySeriesInteraction(zoomGroup, interaction, options);
+  const setHoveredSeries = (seriesId: string | null) => {
+    interaction.hoveredSeriesId = seriesId;
+    applyInteraction();
+  };
+  const toggleSelectedSeries = (event: MouseEvent, seriesId: string) => {
+    event.stopPropagation();
+    interaction.selectedSeriesId = interaction.selectedSeriesId === seriesId ? null : seriesId;
+    applyInteraction();
+  };
 
   const renderGridAxes = (xs: ContinuousScale, ys: ContinuousScale) => {
     renderGrid(grid, xs, ys, innerWidth, innerHeight, options.logY);
@@ -563,7 +593,17 @@ export function renderInferenceCurveChart(
     current.xScale = xs;
     current.yScale = ys;
 
-    drawRooflines(defs, zoomGroup, visibleSeries, xs, ys, strategyColor, options);
+    drawRooflines(
+      defs,
+      zoomGroup,
+      visibleSeries,
+      xs,
+      ys,
+      strategyColor,
+      options,
+      setHoveredSeries,
+      toggleSelectedSeries
+    );
     drawScatterPoints(
       zoomGroup,
       allVisiblePoints,
@@ -576,10 +616,13 @@ export function renderInferenceCurveChart(
       verticalRuler,
       horizontalRuler,
       container,
-      options
+      options,
+      setHoveredSeries,
+      toggleSelectedSeries
     );
     drawStrategyLabels(zoomGroup, visibleSeries, xs, ys, strategyColor, options);
     drawLineLabels(zoomGroup, visibleSeries, xs, ys, options);
+    applyInteraction();
   };
 
   renderGridAxes(xScale, yScale);
@@ -606,6 +649,11 @@ export function renderInferenceCurveChart(
     });
 
   svg.call(zoom).on('dblclick.zoom', null);
+  svg.on('click', () => {
+    if (!interaction.selectedSeriesId) return;
+    interaction.selectedSeriesId = null;
+    applyInteraction();
+  });
   svg.on('dblclick', () => {
     svg.transition().duration(180).call(zoom.transform, d3.zoomIdentity);
   });
@@ -621,7 +669,9 @@ function drawRooflines(
   xScale: ContinuousScale,
   yScale: ContinuousScale,
   strategyColor: Map<string, string>,
-  options: Required<Omit<InferenceCurveChartOptions, 'activeSeriesIds' | 'selectedPrecisions'>>
+  options: Required<Omit<InferenceCurveChartOptions, 'activeSeriesIds' | 'selectedPrecisions'>>,
+  setHoveredSeries: (seriesId: string | null) => void,
+  toggleSelectedSeries: (event: MouseEvent, seriesId: string) => void
 ): void {
   const lineGenerator = d3
     .line<ChartPoint>()
@@ -677,13 +727,24 @@ function drawRooflines(
           .attr('fill', 'none')
           .attr('stroke-width', 2.5)
           .attr('stroke-linecap', 'round')
-          .attr('stroke-linejoin', 'round'),
+          .attr('stroke-linejoin', 'round')
+          .attr('cursor', 'pointer')
+          .style('pointer-events', 'stroke'),
       (update) => update,
       (exit) => exit.remove()
     )
     .attr('stroke', (entry) => entry.stroke)
     .attr('stroke-dasharray', (entry) => entry.lineDasharray)
-    .attr('d', (entry) => lineGenerator(entry.points));
+    .attr('d', (entry) => lineGenerator(entry.points))
+    .on('mouseenter', (_event, entry) => {
+      setHoveredSeries(entry.key);
+    })
+    .on('mouseleave', () => {
+      setHoveredSeries(null);
+    })
+    .on('click', (event, entry) => {
+      toggleSelectedSeries(event, entry.key);
+    });
 }
 
 function drawScatterPoints(
@@ -698,7 +759,9 @@ function drawScatterPoints(
   verticalRuler: d3.Selection<SVGLineElement, unknown, null, undefined>,
   horizontalRuler: d3.Selection<SVGLineElement, unknown, null, undefined>,
   container: HTMLElement,
-  options: Required<Omit<InferenceCurveChartOptions, 'activeSeriesIds' | 'selectedPrecisions'>>
+  options: Required<Omit<InferenceCurveChartOptions, 'activeSeriesIds' | 'selectedPrecisions'>>,
+  setHoveredSeries: (seriesId: string | null) => void,
+  toggleSelectedSeries: (event: MouseEvent, seriesId: string) => void
 ): void {
   const key = (point: ChartPoint) =>
     `${point.seriesId}-${point.precision}-${point.x}-${point.y}-${point.concurrency ?? ''}-${point.shape ?? ''}-${point.label ?? ''}`;
@@ -710,6 +773,7 @@ function drawScatterPoints(
 
   merged
     .attr('transform', (point) => `translate(${xScale(point.x)},${yScale(point.y)})`)
+    .attr('cursor', 'pointer')
     .style('opacity', (point) => (isPointVisible(point, options) ? 1 : 0))
     .style('pointer-events', (point) => (isPointVisible(point, options) ? 'auto' : 'none'));
 
@@ -751,6 +815,7 @@ function drawScatterPoints(
 
   merged
     .on('mouseenter', function (_event, point) {
+      setHoveredSeries(point.seriesId);
       const shapeKey = getPointShapeKey(point, selectedPrecisions);
       applyShapeState(d3.select(this).select<SVGElement>('.visible-shape'), shapeKey, true);
       rulerGroup.style('display', 'block');
@@ -766,8 +831,12 @@ function drawScatterPoints(
     .on('mouseleave', function (_event, point) {
       const shapeKey = getPointShapeKey(point, selectedPrecisions);
       applyShapeState(d3.select(this).select<SVGElement>('.visible-shape'), shapeKey, false);
+      setHoveredSeries(null);
       tooltip.style('opacity', 0).style('display', 'none');
       rulerGroup.style('display', 'none');
+    })
+    .on('click', (event, point) => {
+      toggleSelectedSeries(event, point.seriesId);
     });
 }
 
@@ -784,7 +853,7 @@ function drawStrategyLabels(
     return;
   }
 
-  const labels: { key: string; x: number; y: number; label: string; color: string }[] = [];
+  const labels: PillLabel[] = [];
   series.forEach((line) => {
     const segments: { label: string; color: string; points: ChartPoint[] }[] = [];
     line.roofline.forEach((point) => {
@@ -802,6 +871,7 @@ function drawStrategyLabels(
       const point = segment.points[Math.floor(segment.points.length / 2)]!;
       labels.push({
         key: `${line.id}-${index}-${segment.label}`,
+        seriesId: line.id,
         x: xScale(point.x),
         y: yScale(point.y) - 14,
         label: segment.label,
@@ -826,7 +896,7 @@ function drawLineLabels(
   }
 
   const placed: { x: number; y: number }[] = [];
-  const labels: { key: string; x: number; y: number; label: string; color: string }[] = [];
+  const labels: PillLabel[] = [];
   const sorted = [...series]
     .filter((line) => line.roofline.length >= 2)
     .sort((a, b) => yScale(a.roofline[0]!.y) - yScale(b.roofline[0]!.y));
@@ -848,7 +918,7 @@ function drawLineLabels(
     const px = xScale(chosen.x);
     const py = yScale(chosen.y);
     placed.push({ x: px, y: py });
-    labels.push({ key: line.id, x: px + 8, y: py - 14, label: line.name, color: line.color });
+    labels.push({ key: line.id, seriesId: line.id, x: px + 8, y: py - 14, label: line.name, color: line.color });
   });
 
   drawPillJoin(zoomGroup, '.line-label', labels, 'start');
@@ -857,7 +927,7 @@ function drawLineLabels(
 function drawPillJoin(
   layer: d3.Selection<SVGGElement, unknown, null, undefined>,
   selector: string,
-  labels: { key: string; x: number; y: number; label: string; color: string }[],
+  labels: PillLabel[],
   anchor: 'start' | 'middle'
 ): void {
   const groups = layer
@@ -890,6 +960,60 @@ function drawPillJoin(
       .attr('height', bbox.height + 6)
       .attr('fill', label.color);
   });
+}
+
+function applySeriesInteraction(
+  zoomGroup: d3.Selection<SVGGElement, unknown, null, undefined>,
+  interaction: ChartInteractionState,
+  options: Required<Omit<InferenceCurveChartOptions, 'activeSeriesIds' | 'selectedPrecisions'>>
+): void {
+  const selectedSeriesId = interaction.selectedSeriesId;
+  const layerSeriesId = interaction.hoveredSeriesId ?? selectedSeriesId;
+
+  zoomGroup
+    .selectAll<SVGPathElement, { key: string }>('.roofline-path')
+    .classed('selected-series', (entry) => entry.key === selectedSeriesId)
+    .classed('dimmed-series', (entry) => Boolean(selectedSeriesId && entry.key !== selectedSeriesId))
+    .style('opacity', (entry) => getSeriesOpacity(entry.key, selectedSeriesId));
+
+  zoomGroup
+    .selectAll<SVGGElement, ChartPoint>('.dot-group')
+    .classed('selected-series', (point) => point.seriesId === selectedSeriesId)
+    .classed('dimmed-series', (point) => Boolean(selectedSeriesId && point.seriesId !== selectedSeriesId))
+    .style('opacity', (point) =>
+      isPointVisible(point, options) ? getSeriesOpacity(point.seriesId, selectedSeriesId) : 0
+    )
+    .style('pointer-events', (point) => (isPointVisible(point, options) ? 'auto' : 'none'));
+
+  zoomGroup
+    .selectAll<SVGGElement, PillLabel>('.parallelism-label,.line-label')
+    .classed('selected-series', (label) => label.seriesId === selectedSeriesId)
+    .classed('dimmed-series', (label) => Boolean(selectedSeriesId && label.seriesId !== selectedSeriesId))
+    .style('opacity', (label) => getSeriesOpacity(label.seriesId, selectedSeriesId));
+
+  if (layerSeriesId) raiseSeriesToFront(zoomGroup, layerSeriesId);
+}
+
+function getSeriesOpacity(seriesId: string, selectedSeriesId: string | null): number {
+  return selectedSeriesId && seriesId !== selectedSeriesId ? DIMMED_SERIES_OPACITY : 1;
+}
+
+function raiseSeriesToFront(
+  zoomGroup: d3.Selection<SVGGElement, unknown, null, undefined>,
+  seriesId: string
+): void {
+  zoomGroup
+    .selectAll<SVGPathElement, { key: string }>('.roofline-path')
+    .filter((entry) => entry.key === seriesId)
+    .raise();
+  zoomGroup
+    .selectAll<SVGGElement, ChartPoint>('.dot-group')
+    .filter((point) => point.seriesId === seriesId)
+    .raise();
+  zoomGroup
+    .selectAll<SVGGElement, PillLabel>('.parallelism-label,.line-label')
+    .filter((label) => label.seriesId === seriesId)
+    .raise();
 }
 
 function renderGrid(
