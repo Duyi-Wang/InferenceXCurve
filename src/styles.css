@@ -345,6 +345,13 @@ p {
   stroke: var(--border);
 }
 
+.chart-watermark {
+  fill: var(--foreground);
+  font-weight: 800;
+  opacity: 0.055;
+  user-select: none;
+}
+
 .y-axis-label,
 .x-axis-label {
   fill: var(--foreground);

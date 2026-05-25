@@ -150,6 +150,7 @@ const HOVER_POINT_SIZE = 6;
 const HIT_AREA_RADIUS = 12;
 const DIMMED_SERIES_OPACITY = 0.16;
 const CHART_MARGIN = { top: 18, right: 24, bottom: 48, left: 82 };
+const WATERMARK_TEXT = 'MORI Internal';
 
 type Vendor = 'nvidia' | 'amd' | 'unknown';
 
@@ -530,6 +531,7 @@ export function renderInferenceCurveChart(
     .attr('class', 'chart-root')
     .attr('transform', `translate(${CHART_MARGIN.left},${CHART_MARGIN.top})`);
   const grid = plot.append('g').attr('class', 'grid');
+  drawChartWatermark(plot, innerWidth, innerHeight);
   const xAxisGroup = plot
     .append('g')
     .attr('class', 'x-axis')
@@ -660,6 +662,35 @@ export function renderInferenceCurveChart(
   resetZoom = () => {
     svg.transition().duration(180).call(zoom.transform, d3.zoomIdentity);
   };
+}
+
+function drawChartWatermark(
+  plot: d3.Selection<SVGGElement, unknown, null, undefined>,
+  innerWidth: number,
+  innerHeight: number
+): void {
+  const centerX = innerWidth / 2;
+  const centerY = innerHeight / 2;
+  const fontSize = Math.max(84, Math.min(innerWidth * 0.18, innerHeight * 0.34));
+  const textLength = innerWidth * 0.96;
+  const watermark = plot
+    .append('g')
+    .attr('class', 'chart-watermark-layer')
+    .attr('clip-path', 'url(#plot-clip)')
+    .attr('pointer-events', 'none');
+
+  watermark
+    .append('text')
+    .attr('class', 'chart-watermark')
+    .attr('x', centerX)
+    .attr('y', centerY)
+    .attr('font-size', fontSize)
+    .attr('textLength', textLength)
+    .attr('lengthAdjust', 'spacingAndGlyphs')
+    .attr('text-anchor', 'middle')
+    .attr('dominant-baseline', 'central')
+    .attr('transform', `rotate(-18 ${centerX} ${centerY})`)
+    .text(WATERMARK_TEXT);
 }
 
 function drawRooflines(
