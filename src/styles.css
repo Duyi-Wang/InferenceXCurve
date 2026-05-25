@@ -928,11 +928,14 @@ p {
 
 .series-editor {
   display: grid;
+  min-width: 0;
   gap: 14px;
 }
 
 .series-card {
   position: relative;
+  min-width: 0;
+  max-width: 100%;
   overflow: visible;
   border: 1px solid color-mix(in srgb, var(--border) 42%, transparent);
   border-radius: 8px;
@@ -1254,6 +1257,8 @@ p {
 }
 
 .table-wrap {
+  max-width: 100%;
+  min-width: 0;
   overflow: auto;
   max-height: 440px;
   border: 1px solid color-mix(in srgb, var(--border) 52%, transparent);
@@ -1262,6 +1267,8 @@ p {
 }
 
 .point-table-wrap {
+  width: calc(100% - 28px);
+  max-width: calc(100% - 28px);
   max-height: 300px;
   margin: 0 14px 14px;
   border-radius: 6px;
@@ -1484,7 +1491,10 @@ p {
 }
 
 .point-table th.point-cell-interactivity,
-.point-table td.point-cell-interactivity,
+.point-table td.point-cell-interactivity {
+  width: 112px;
+}
+
 .point-table th.point-cell-throughput,
 .point-table td.point-cell-throughput {
   width: 130px;
@@ -1510,7 +1520,7 @@ p {
 
 .point-table th.point-cell-shape,
 .point-table td.point-cell-shape {
-  width: 96px;
+  width: 120px;
 }
 
 .point-cell-shape select {
