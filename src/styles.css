@@ -778,6 +778,154 @@ p {
   white-space: nowrap;
 }
 
+.merge-preview {
+  margin-bottom: 14px;
+}
+
+.merge-preview:empty {
+  display: none;
+}
+
+.merge-preview {
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--border) 36%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.merge-preview-head,
+.merge-group-head,
+.merge-line-item,
+.merge-preview-actions {
+  display: flex;
+}
+
+.merge-preview-head {
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.merge-preview-head strong,
+.merge-preview-head span,
+.merge-group-head strong,
+.merge-group-head span {
+  display: block;
+}
+
+.merge-preview-head strong,
+.merge-group-head strong {
+  color: var(--foreground);
+  font-size: 13px;
+}
+
+.merge-preview-head span,
+.merge-group-head span {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.merge-preview-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.merge-preview-list {
+  display: grid;
+  gap: 10px;
+  max-height: 420px;
+  margin-top: 10px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.merge-preview-group {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 34%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--background) 72%, transparent);
+}
+
+.merge-group-head {
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.merge-line-list {
+  display: grid;
+  gap: 6px;
+}
+
+.merge-line-item {
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 28%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--background) 64%, transparent);
+}
+
+.merge-line-item.selected {
+  border-color: color-mix(in srgb, var(--primary) 42%, var(--border));
+  background: color-mix(in srgb, var(--primary) 10%, var(--background));
+}
+
+.merge-line-check,
+.merge-line-main {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.merge-line-check input,
+.merge-line-main input {
+  width: auto;
+  min-height: auto;
+}
+
+.merge-line-info {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 auto;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.merge-line-info strong,
+.merge-line-info code,
+.merge-line-info small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.merge-line-info strong {
+  color: var(--foreground);
+  font-size: 13px;
+}
+
+.merge-line-info code,
+.merge-line-info small,
+.merge-line-meta {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.merge-line-meta {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .series-editor {
   display: grid;
   gap: 14px;
@@ -1454,6 +1602,21 @@ p {
 
   .import-preview-points {
     text-align: left;
+  }
+
+  .merge-preview-head,
+  .merge-preview-actions,
+  .merge-line-item {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .merge-preview-actions {
+    justify-content: flex-start;
+  }
+
+  .merge-line-meta {
+    white-space: normal;
   }
 
   .series-card-head,

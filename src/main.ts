@@ -75,6 +75,19 @@ interface PendingImportDraft {
   draft: SeriesDraft;
 }
 
+interface PendingMergeLine {
+  selected: boolean;
+  main: boolean;
+  draftIndex: number;
+  draftId: string;
+}
+
+interface PendingMergeGroup {
+  key: string;
+  label: string;
+  lines: PendingMergeLine[];
+}
+
 interface PersistedAppState {
   theme?: Theme;
   activeSeriesIds?: string[];
@@ -562,6 +575,7 @@ const initialData = createInitialDataState();
 let currentSeries: InferenceCurveSeries[] = initialData.currentSeries;
 let seriesDrafts: SeriesDraft[] = initialData.seriesDrafts;
 let pendingImportDrafts: PendingImportDraft[] = [];
+let pendingMergeGroups: PendingMergeGroup[] = [];
 let state: AppState = initialData.state;
 let localSaveTimer: number | null = null;
 let localStorageWarningShown = false;
@@ -632,6 +646,10 @@ app.innerHTML = `
             ${renderIcon('plus')}
             <span>Add Line</span>
           </button>
+          <button id="merge-lines" class="action-button" type="button">
+            ${renderIcon('merge')}
+            <span>Merge Lines</span>
+          </button>
           <button id="reset-data" class="action-button" type="button">
             ${renderIcon('refresh')}
             <span>Reset Example</span>
@@ -672,6 +690,8 @@ app.innerHTML = `
         <div id="github-import-preview" class="import-preview"></div>
       </div>
 
+      <div id="merge-preview" class="merge-preview"></div>
+
       <div id="series-editor" class="series-editor"></div>
 
       <div class="data-actions">
@@ -699,6 +719,8 @@ const githubTokenEl = document.querySelector<HTMLInputElement>('#github-token')!
 const importActionDataEl = document.querySelector<HTMLButtonElement>('#import-action-data')!;
 const githubImportStatusEl = document.querySelector<HTMLParagraphElement>('#github-import-status')!;
 const githubImportPreviewEl = document.querySelector<HTMLElement>('#github-import-preview')!;
+const mergeLinesEl = document.querySelector<HTMLButtonElement>('#merge-lines')!;
+const mergePreviewEl = document.querySelector<HTMLElement>('#merge-preview')!;
 
 applyTheme();
 renderFilterControls();
@@ -719,6 +741,7 @@ document.querySelector('#render-data')?.addEventListener('click', () => {
     renderFilterControls();
     renderSeriesEditor();
     renderAll();
+    clearMergePreview();
     setStatus(`${currentSeries.length} lines rendered from ${countPointRows(seriesDrafts)} point rows`);
     scheduleLocalSave();
   } catch (error) {
@@ -741,6 +764,7 @@ document.querySelector('#reset-data')?.addEventListener('click', () => {
   setImportStatus('');
   pendingImportDrafts = [];
   renderImportPreview();
+  clearMergePreview();
   scheduleLocalSave();
 });
 
@@ -757,6 +781,7 @@ document.querySelector('#clear-data')?.addEventListener('click', () => {
   setImportStatus('');
   pendingImportDrafts = [];
   renderImportPreview();
+  clearMergePreview();
   scheduleLocalSave();
 });
 
@@ -783,15 +808,20 @@ document.querySelector('#add-series')?.addEventListener('click', () => {
   sortSeriesDraftsByLayer();
   normalizeDraftRenderOrderFromPanelOrder();
   renderSeriesEditor();
+  clearMergePreview();
   scheduleLocalSave();
 });
 
+mergeLinesEl.addEventListener('click', openMergePreview);
 importActionDataEl.addEventListener('click', () => {
   void importGitHubActionData();
 });
 githubImportPreviewEl.addEventListener('input', handleImportPreviewInput);
 githubImportPreviewEl.addEventListener('change', handleImportPreviewInput);
 githubImportPreviewEl.addEventListener('click', handleImportPreviewClick);
+mergePreviewEl.addEventListener('input', handleMergePreviewInput);
+mergePreviewEl.addEventListener('change', handleMergePreviewInput);
+mergePreviewEl.addEventListener('click', handleMergePreviewClick);
 
 document.querySelector('#download-png')?.addEventListener('click', downloadPng);
 document.querySelector('#download-csv')?.addEventListener('click', downloadCsv);
@@ -845,6 +875,7 @@ function renderFilterControls(): void {
     renderFilterControls();
     renderSeriesEditor();
     renderAll();
+    clearMergePreview();
     scheduleLocalSave();
   };
   islOslFilterEl.onchange = () => {
@@ -854,6 +885,7 @@ function renderFilterControls(): void {
     renderFilterControls();
     renderSeriesEditor();
     renderAll();
+    clearMergePreview();
     scheduleLocalSave();
   };
   precisionFilterEl.onchange = () => {
@@ -863,6 +895,7 @@ function renderFilterControls(): void {
       precision === ALL_VALUE ? new Set(availablePrecisions) : new Set([precision]);
     renderSeriesEditor();
     renderAll();
+    clearMergePreview();
     scheduleLocalSave();
   };
   mtpFilterEl.onchange = () => {
@@ -872,6 +905,7 @@ function renderFilterControls(): void {
     renderFilterControls();
     renderSeriesEditor();
     renderAll();
+    clearMergePreview();
     scheduleLocalSave();
   };
 }
@@ -1231,6 +1265,7 @@ function renderIcon(name: string): string {
     'table-plus': '<path d="M4 5h10"/><path d="M4 11h10"/><path d="M4 17h7"/><path d="M8 5v12"/><path d="M16 15h6"/><path d="M19 12v6"/>',
     eraser: '<path d="m7 21-4-4 10-10 6 6-8 8z"/><path d="m13 7 4-4 4 4-4 4"/><path d="M3 21h18"/>',
     trash: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m6 6 1 15h10l1-15"/><path d="M10 11v6"/><path d="M14 11v6"/>',
+    merge: '<path d="M8 7h3a5 5 0 0 1 5 5v5"/><path d="m13 14 3 3 3-3"/><path d="M8 17h3a5 5 0 0 0 5-5V7"/><path d="m13 10 3-3 3 3"/><path d="M4 7h4"/><path d="M4 17h4"/>',
     'download-cloud': '<path d="M12 13v8"/><path d="m8 17 4 4 4-4"/><path d="M20 16.6A5 5 0 0 0 18 7h-1.3A8 8 0 1 0 4 15.3"/>',
     check: '<path d="M20 6 9 17l-5-5"/>',
     x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
@@ -1419,6 +1454,7 @@ function attachSeriesEditorEvents(): void {
         seriesDrafts.splice(seriesIndex, 1);
       }
 
+      if (action !== 'toggle-data') clearMergePreview();
       sortSeriesDraftsByLayer();
       normalizeDraftRenderOrderFromPanelOrder();
       syncCurrentSeriesOrderFromDrafts();
@@ -1738,6 +1774,7 @@ function renderLegend(): void {
       renderFilterControls();
       renderSeriesEditor();
       renderAll();
+      clearMergePreview();
       scheduleLocalSave();
     });
   });
@@ -1748,6 +1785,7 @@ function renderLegend(): void {
     renderFilterControls();
     renderSeriesEditor();
     renderAll();
+    clearMergePreview();
     scheduleLocalSave();
   });
 }
@@ -2619,6 +2657,307 @@ function getDefaultDraftMtp(): string {
   return getAvailableMtpFilters(getModelSequenceFilteredSeries())[0] ?? NON_MTP_VALUE;
 }
 
+function openMergePreview(): void {
+  commitSeriesDom();
+  pendingMergeGroups = buildPendingMergeGroups();
+  renderMergePreview();
+  if (pendingMergeGroups.length === 0) {
+    setStatus('No merge candidates in the current filtered line list.', true);
+    return;
+  }
+  setStatus(`Found ${pendingMergeGroups.length} merge candidate groups. Select the exact lines to merge.`);
+}
+
+function buildPendingMergeGroups(): PendingMergeGroup[] {
+  const groups = new Map<string, PendingMergeGroup>();
+  getFilteredDraftEntries()
+    .filter(({ draft }) => countPointRows([draft]) > 0)
+    .forEach(({ draft, index }) => {
+      const key = getMergeGroupKey(draft);
+      const group =
+        groups.get(key) ??
+        ({
+          key,
+          label: getMergeGroupLabel(draft),
+          lines: []
+        } satisfies PendingMergeGroup);
+      group.lines.push({
+        selected: false,
+        main: false,
+        draftIndex: index,
+        draftId: getDraftSeriesId(draft, index)
+      });
+      groups.set(key, group);
+    });
+
+  return Array.from(groups.values()).filter((group) => group.lines.length > 1);
+}
+
+function renderMergePreview(): void {
+  if (pendingMergeGroups.length === 0) {
+    mergePreviewEl.innerHTML = '';
+    return;
+  }
+
+  const selectedLineCount = pendingMergeGroups.reduce(
+    (count, group) => count + group.lines.filter((line) => line.selected).length,
+    0
+  );
+  const readyGroupCount = pendingMergeGroups.filter((group) => getSelectedMergeLines(group).length >= 2).length;
+  const previewColors = resolveInferenceCurveColors(draftsToPreviewSeries(seriesDrafts), state.highContrast, state.theme);
+
+  mergePreviewEl.innerHTML = `
+    <div class="merge-preview-head">
+      <div>
+        <strong>Review Merge</strong>
+        <span>${readyGroupCount} ready groups / ${pendingMergeGroups.length} candidates, ${selectedLineCount} selected lines</span>
+      </div>
+      <div class="merge-preview-actions">
+        <button type="button" class="series-action-button" data-merge-action="select-none">
+          ${renderIcon('x')}
+          <span>Select None</span>
+        </button>
+        <button type="button" class="series-action-button danger" data-merge-action="cancel">
+          ${renderIcon('trash')}
+          <span>Cancel</span>
+        </button>
+        <button type="button" class="primary action-button" data-merge-action="merge-selected" ${readyGroupCount === 0 ? 'disabled' : ''}>
+          ${renderIcon('merge')}
+          <span>Merge Selected</span>
+        </button>
+      </div>
+    </div>
+    <div class="merge-preview-list">
+      ${pendingMergeGroups
+        .map((group, groupIndex) => renderMergePreviewGroup(group, groupIndex, previewColors))
+        .join('')}
+    </div>
+  `;
+}
+
+function renderMergePreviewGroup(
+  group: PendingMergeGroup,
+  groupIndex: number,
+  previewColors: Map<string, string>
+): string {
+  const selectedCount = group.lines.filter((line) => line.selected).length;
+  return `
+    <section class="merge-preview-group">
+      <div class="merge-group-head">
+        <div>
+          <strong>${escapeHtml(group.label)}</strong>
+          <span>${selectedCount} selected / ${group.lines.length} lines</span>
+        </div>
+      </div>
+      <div class="merge-line-list">
+        ${group.lines
+          .map((line, lineIndex) => renderMergePreviewLine(line, groupIndex, lineIndex, previewColors))
+          .join('')}
+      </div>
+    </section>
+  `;
+}
+
+function renderMergePreviewLine(
+  line: PendingMergeLine,
+  groupIndex: number,
+  lineIndex: number,
+  previewColors: Map<string, string>
+): string {
+  const draft = seriesDrafts[line.draftIndex];
+  if (!draft) return '';
+  const pointCount = countPointRows([draft]);
+  const color =
+    draft.color.trim() ||
+    previewColors.get(getDraftSeriesId(draft, line.draftIndex)) ||
+    colorInputFallbacks[line.draftIndex % colorInputFallbacks.length]!;
+
+  return `
+    <div class="merge-line-item${line.selected ? ' selected' : ''}">
+      <label class="merge-line-check">
+        <input type="checkbox" data-merge-group="${groupIndex}" data-merge-line="${lineIndex}" data-merge-field="selected" ${line.selected ? 'checked' : ''} />
+        <span>Merge</span>
+      </label>
+      <label class="merge-line-main">
+        <input type="radio" name="merge-main-${groupIndex}" data-merge-group="${groupIndex}" data-merge-line="${lineIndex}" data-merge-field="main" ${line.main ? 'checked' : ''} />
+        <span>Main</span>
+      </label>
+      <div class="merge-line-info">
+        <span class="series-swatch" style="background:${escapeAttribute(color)}"></span>
+        <div>
+          <strong>${escapeHtml(draft.name || `Line ${line.draftIndex + 1}`)}</strong>
+          <code>${escapeHtml(getDraftSeriesId(draft, line.draftIndex))}</code>
+          ${draft.title.trim() ? `<small>${escapeHtml(draft.title.trim())}</small>` : ''}
+        </div>
+      </div>
+      <span class="merge-line-meta">Layer ${getDraftLayerLabel(draft, line.draftIndex)} • ${pointCount} points</span>
+    </div>
+  `;
+}
+
+function handleMergePreviewInput(event: Event): void {
+  const input = event.target as HTMLInputElement;
+  const groupIndex = Number(input.dataset.mergeGroup);
+  const lineIndex = Number(input.dataset.mergeLine);
+  const field = input.dataset.mergeField;
+  const group = pendingMergeGroups[groupIndex];
+  const line = group?.lines[lineIndex];
+  if (!group || !line || !field) return;
+
+  if (field === 'selected') {
+    line.selected = input.checked;
+    if (!line.selected) line.main = false;
+  } else if (field === 'main') {
+    group.lines.forEach((entry) => {
+      entry.main = false;
+    });
+    line.main = true;
+    line.selected = true;
+  }
+
+  renderMergePreview();
+}
+
+function handleMergePreviewClick(event: MouseEvent): void {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-merge-action]');
+  if (!button) return;
+  const action = button.dataset.mergeAction;
+  if (action === 'select-none') {
+    pendingMergeGroups.forEach((group) => {
+      group.lines.forEach((line) => {
+        line.selected = false;
+        line.main = false;
+      });
+    });
+    renderMergePreview();
+  } else if (action === 'cancel') {
+    clearMergePreview();
+    setStatus('Merge review closed');
+  } else if (action === 'merge-selected') {
+    mergeSelectedLines();
+  }
+}
+
+function mergeSelectedLines(): void {
+  const groups = pendingMergeGroups.filter((group) => getSelectedMergeLines(group).length >= 2);
+  if (groups.length === 0) {
+    setStatus('Select at least two lines in a candidate group.', true);
+    return;
+  }
+
+  try {
+    commitSeriesDom();
+    const removeIndexes = new Set<number>();
+    let removedLineCount = 0;
+    let mergedPointCount = 0;
+
+    groups.forEach((group) => {
+      const selectedLines = getSelectedMergeLines(group);
+      if (!validateMergeGroup(group, selectedLines)) {
+        throw new Error('Merge review is stale. Reopen Merge Lines and try again.');
+      }
+
+      const mainLine = getMainMergeLine(selectedLines);
+      const mainDraft = seriesDrafts[mainLine.draftIndex]!;
+      const mergedPoints = selectedLines
+        .flatMap((line) => structuredClone(seriesDrafts[line.draftIndex]!.points).filter((row) => !isEmptyPointRow(row)))
+        .sort(comparePointRowsForMerge);
+
+      mainDraft.points = mergedPoints.length ? mergedPoints : [makeEmptyPointRow()];
+      mergedPointCount += mergedPoints.length;
+      selectedLines.forEach((line) => {
+        if (line.draftIndex !== mainLine.draftIndex) {
+          removeIndexes.add(line.draftIndex);
+          removedLineCount += 1;
+        }
+      });
+    });
+
+    seriesDrafts = seriesDrafts.filter((_, index) => !removeIndexes.has(index));
+    sortSeriesDraftsByLayer();
+    normalizeDraftRenderOrderFromPanelOrder();
+    currentSeries = draftsToSeriesAllowEmpty(seriesDrafts);
+    syncCurrentSeriesOrderFromDrafts();
+    reconcileFiltersForSeries(currentSeries);
+    reconcileActiveSeriesForChart();
+    renderFilterControls();
+    renderSeriesEditor();
+    renderAll();
+    clearMergePreview();
+    setStatus(`Merged ${removedLineCount} lines into ${groups.length} groups, keeping ${mergedPointCount} point rows.`);
+    scheduleLocalSave();
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : 'Could not merge selected lines.', true);
+  }
+}
+
+function getSelectedMergeLines(group: PendingMergeGroup): PendingMergeLine[] {
+  return group.lines.filter((line) => line.selected);
+}
+
+function getMainMergeLine(lines: PendingMergeLine[]): PendingMergeLine {
+  return (
+    lines.find((line) => line.main) ??
+    [...lines].sort(
+      (a, b) =>
+        getDraftRenderOrder(seriesDrafts[b.draftIndex]!, b.draftIndex) -
+          getDraftRenderOrder(seriesDrafts[a.draftIndex]!, a.draftIndex) ||
+        a.draftIndex - b.draftIndex
+    )[0]!
+  );
+}
+
+function validateMergeGroup(group: PendingMergeGroup, lines: PendingMergeLine[]): boolean {
+  return lines.every((line) => {
+    const draft = seriesDrafts[line.draftIndex];
+    return draft && getDraftSeriesId(draft, line.draftIndex) === line.draftId && getMergeGroupKey(draft) === group.key;
+  });
+}
+
+function comparePointRowsForMerge(a: PointRow, b: PointRow): number {
+  return compareNullableNumbers(parseNumber(a.interactivity), parseNumber(b.interactivity)) ||
+    compareNullableNumbers(parseNumber(a.throughput), parseNumber(b.throughput));
+}
+
+function compareNullableNumbers(a: number | null, b: number | null): number {
+  if (a === null && b === null) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  return a - b;
+}
+
+function clearMergePreview(): void {
+  pendingMergeGroups = [];
+  renderMergePreview();
+}
+
+function getMergeGroupKey(draft: SeriesDraft): string {
+  return [
+    normalizeMergeKeyPart(getDraftModel(draft)),
+    normalizeMergeIslOsl(getDraftIslOsl(draft)),
+    normalizeMergeKeyPart(getDraftPrecision(draft)),
+    getDraftMtpFilter(draft)
+  ].join('|');
+}
+
+function getMergeGroupLabel(draft: SeriesDraft): string {
+  return [
+    getDraftModel(draft),
+    formatPrecisionLabel(getDraftPrecision(draft)),
+    formatIslOslLabel(getDraftIslOsl(draft)),
+    formatMtpFilterLabel(getDraftMtpFilter(draft))
+  ].join(' • ');
+}
+
+function normalizeMergeKeyPart(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/gu, ' ');
+}
+
+function normalizeMergeIslOsl(value: string): string {
+  const lengths = parseIslOslLengths(value);
+  return lengths ? `${lengths.isl}/${lengths.osl}` : normalizeMergeKeyPart(value);
+}
+
 function renderImportPreview(): void {
   if (pendingImportDrafts.length === 0) {
     githubImportPreviewEl.innerHTML = '';
@@ -2792,6 +3131,7 @@ function addSelectedImportLines(): void {
     setImportStatus(formatImportSummary(selectedSeries, currentSeries, seriesDrafts));
     pendingImportDrafts = [];
     renderImportPreview();
+    clearMergePreview();
     scheduleLocalSave();
   } catch (error) {
     setImportStatus(error instanceof Error ? error.message : 'Could not add selected import lines.', true);
