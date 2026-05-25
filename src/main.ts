@@ -65,6 +65,7 @@ interface SeriesDraft {
   title: string;
   color: string;
   lineStyle: string;
+  renderOrder: number;
   collapsed: boolean;
   points: PointRow[];
 }
@@ -267,7 +268,8 @@ const seriesCsvColumns: TableColumn[] = [
   { key: 'marker', label: 'Line Marker' },
   { key: 'title', label: 'Title' },
   { key: 'color', label: 'Color' },
-  { key: 'lineStyle', label: 'Line Type' }
+  { key: 'lineStyle', label: 'Line Type' },
+  { key: 'renderOrder', label: 'Layer' }
 ];
 
 const colorPresets: ColorPreset[] = [
@@ -379,6 +381,7 @@ function makeRestoredEmptySeriesDraft(index: number): SeriesDraft {
     title: '',
     color: '',
     lineStyle: DEFAULT_LINE_STYLE,
+    renderOrder: index,
     collapsed: true,
     points: [makeEmptyPointRow()]
   };
@@ -397,6 +400,7 @@ function restorePersistedSeriesDrafts(value: unknown): SeriesDraft[] {
     title: readPersistedText(draft, 'title'),
     color: readPersistedText(draft, 'color'),
     lineStyle: readPersistedText(draft, 'lineStyle', DEFAULT_LINE_STYLE) || DEFAULT_LINE_STYLE,
+    renderOrder: readPersistedNumber(draft, 'renderOrder', index),
     collapsed: typeof draft.collapsed === 'boolean' ? draft.collapsed : true,
     points: restorePersistedPointRows(draft.points)
   }));
@@ -544,6 +548,16 @@ function readPersistedBoolean(value: unknown): boolean | undefined {
   return typeof value === 'boolean' ? value : undefined;
 }
 
+function readPersistedNumber(record: Record<string, unknown>, key: string, fallback: number): number {
+  const value = record[key];
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number(value.trim());
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+}
+
 const initialData = createInitialDataState();
 let currentSeries: InferenceCurveSeries[] = initialData.currentSeries;
 let seriesDrafts: SeriesDraft[] = initialData.seriesDrafts;
@@ -551,7 +565,11 @@ let pendingImportDrafts: PendingImportDraft[] = [];
 let state: AppState = initialData.state;
 let localSaveTimer: number | null = null;
 let localStorageWarningShown = false;
+let draggedSeriesIndex: number | null = null;
 
+sortSeriesDraftsByLayer();
+normalizeDraftRenderOrderFromPanelOrder();
+syncCurrentSeriesOrderFromDrafts();
 reconcileFiltersForSeries(currentSeries);
 reconcileActiveSeriesForChart();
 
@@ -693,9 +711,11 @@ if (initialData.loadedFromStorage) {
 document.querySelector('#render-data')?.addEventListener('click', () => {
   try {
     commitSeriesDom();
+    normalizeDraftRenderOrderFromPanelOrder();
     currentSeries = draftsToSeries(seriesDrafts);
+    syncCurrentSeriesOrderFromDrafts();
     reconcileFiltersForSeries(currentSeries);
-    resetSelectionsForSeries(getModelSequenceMtpFilteredSeries());
+    reconcileActiveSeriesForChart();
     renderFilterControls();
     renderSeriesEditor();
     renderAll();
@@ -709,6 +729,9 @@ document.querySelector('#render-data')?.addEventListener('click', () => {
 document.querySelector('#reset-data')?.addEventListener('click', () => {
   currentSeries = structuredClone(exampleSeries);
   seriesDrafts = seriesToDrafts(currentSeries);
+  sortSeriesDraftsByLayer();
+  normalizeDraftRenderOrderFromPanelOrder();
+  syncCurrentSeriesOrderFromDrafts();
   setDefaultFiltersForSeries(currentSeries);
   state.search = '';
   renderFilterControls();
@@ -724,6 +747,7 @@ document.querySelector('#reset-data')?.addEventListener('click', () => {
 document.querySelector('#clear-data')?.addEventListener('click', () => {
   currentSeries = [];
   seriesDrafts = [makeEmptySeriesDraft(0)];
+  normalizeDraftRenderOrderFromPanelOrder();
   setDefaultFiltersForSeries(currentSeries);
   state.search = '';
   renderFilterControls();
@@ -752,9 +776,12 @@ document.querySelector('#add-series')?.addEventListener('click', () => {
     title: '',
     color: '',
     lineStyle: DEFAULT_LINE_STYLE,
+    renderOrder: getNextDraftRenderOrder(),
     collapsed: true,
     points: [makeEmptyPointRow()]
   });
+  sortSeriesDraftsByLayer();
+  normalizeDraftRenderOrderFromPanelOrder();
   renderSeriesEditor();
   scheduleLocalSave();
 });
@@ -905,13 +932,24 @@ function renderSeriesCard(series: SeriesDraft, seriesIndex: number, autoColor: s
   const pointCount = countPointRows([series]);
   const collapsed = series.collapsed;
   return `
-    <section class="series-card${collapsed ? ' collapsed' : ''}" data-series-index="${seriesIndex}">
+    <section class="series-card${collapsed ? ' collapsed' : ''}" data-series-card data-series-index="${seriesIndex}">
       <div class="series-card-head">
         <div class="series-card-title">
+          <button
+            class="series-drag-handle"
+            type="button"
+            draggable="true"
+            data-series-drag-handle
+            data-series-index="${seriesIndex}"
+            title="Drag to reorder layer"
+            aria-label="Drag to reorder layer"
+          >
+            ${renderIcon('grip-vertical')}
+          </button>
           <span class="series-swatch" style="background:${escapeAttribute(color)}"></span>
           <div>
             <h3>${escapeHtml(series.name || `Line ${seriesIndex + 1}`)}</h3>
-            <p>${escapeHtml(formatLineMeta(series))}</p>
+            <p>${escapeHtml(formatLineMeta(series, seriesIndex))}</p>
           </div>
         </div>
         <div class="series-card-actions">
@@ -952,8 +990,9 @@ function renderSeriesCard(series: SeriesDraft, seriesIndex: number, autoColor: s
   `;
 }
 
-function formatLineMeta(series: SeriesDraft): string {
+function formatLineMeta(series: SeriesDraft, seriesIndex: number): string {
   return [
+    `Layer ${getDraftLayerLabel(series, seriesIndex)}`,
     series.model,
     series.precision.toUpperCase(),
     formatIslOslLabel(series.islOsl),
@@ -1195,6 +1234,7 @@ function renderIcon(name: string): string {
     'download-cloud': '<path d="M12 13v8"/><path d="m8 17 4 4 4-4"/><path d="M20 16.6A5 5 0 0 0 18 7h-1.3A8 8 0 1 0 4 15.3"/>',
     check: '<path d="M20 6 9 17l-5-5"/>',
     x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+    'grip-vertical': '<circle cx="9" cy="5" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="19" r="1"/>',
     'chevron-right': '<path d="m9 18 6-6-6-6"/>',
     'chevron-down': '<path d="m6 9 6 6 6-6"/>'
   };
@@ -1266,6 +1306,8 @@ function renderPointShapeOption(
 }
 
 function attachSeriesEditorEvents(): void {
+  attachSeriesDragEvents();
+
   seriesEditorEl
     .querySelectorAll<HTMLInputElement | HTMLSelectElement>('input[data-series-field], select[data-series-field]')
     .forEach((input) => {
@@ -1359,7 +1401,9 @@ function attachSeriesEditorEvents(): void {
       if (action === 'toggle-data') {
         draft.collapsed = !draft.collapsed;
       } else if (action === 'copy-series') {
-        seriesDrafts.splice(seriesIndex + 1, 0, copySeriesDraft(draft));
+        const copy = copySeriesDraft(draft);
+        copy.renderOrder = getNextDraftRenderOrder();
+        seriesDrafts.push(copy);
         setStatus(`Copied ${draft.name || `Line ${seriesIndex + 1}`}`);
       } else if (action === 'add-row') {
         draft.points.push(makeEmptyPointRow());
@@ -1375,6 +1419,9 @@ function attachSeriesEditorEvents(): void {
         seriesDrafts.splice(seriesIndex, 1);
       }
 
+      sortSeriesDraftsByLayer();
+      normalizeDraftRenderOrderFromPanelOrder();
+      syncCurrentSeriesOrderFromDrafts();
       renderSeriesEditor();
       scheduleLocalSave();
     });
@@ -1402,6 +1449,73 @@ function attachSeriesEditorEvents(): void {
     });
     cell.addEventListener('paste', handlePointTablePaste);
     cell.addEventListener('keydown', handlePointTableKeydown);
+  });
+}
+
+function attachSeriesDragEvents(): void {
+  seriesEditorEl.querySelectorAll<HTMLElement>('[data-series-drag-handle]').forEach((handle) => {
+    handle.addEventListener('dragstart', (event) => {
+      commitSeriesDom();
+      const seriesIndex = Number(handle.dataset.seriesIndex);
+      if (!Number.isInteger(seriesIndex)) return;
+      draggedSeriesIndex = seriesIndex;
+      event.dataTransfer?.setData('text/plain', String(seriesIndex));
+      if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+      handle.closest<HTMLElement>('[data-series-card]')?.classList.add('dragging');
+    });
+    handle.addEventListener('dragend', clearSeriesDragState);
+  });
+
+  seriesEditorEl.querySelectorAll<HTMLElement>('[data-series-card]').forEach((card) => {
+    card.addEventListener('dragover', (event) => {
+      if (draggedSeriesIndex === null) return;
+      const targetIndex = Number(card.dataset.seriesIndex);
+      if (!Number.isInteger(targetIndex) || targetIndex === draggedSeriesIndex) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+      setSeriesDropPosition(card, getSeriesDropPosition(event, card));
+    });
+
+    card.addEventListener('dragleave', (event) => {
+      const related = event.relatedTarget;
+      if (!(related instanceof Node) || !card.contains(related)) clearSeriesDropPosition(card);
+    });
+
+    card.addEventListener('drop', (event) => {
+      event.preventDefault();
+      const targetIndex = Number(card.dataset.seriesIndex);
+      const sourceIndex = draggedSeriesIndex ?? Number(event.dataTransfer?.getData('text/plain'));
+      const position = getSeriesDropPosition(event, card);
+      clearSeriesDragState();
+      if (!Number.isInteger(sourceIndex) || !Number.isInteger(targetIndex)) return;
+      if (!moveSeriesDraftInPanelOrder(sourceIndex, targetIndex, position)) return;
+      syncCurrentSeriesOrderFromDrafts();
+      renderSeriesEditor();
+      renderAll();
+      setStatus('Line layer order updated');
+      scheduleLocalSave();
+    });
+  });
+}
+
+function getSeriesDropPosition(event: DragEvent, card: HTMLElement): 'before' | 'after' {
+  const rect = card.getBoundingClientRect();
+  return event.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
+}
+
+function setSeriesDropPosition(card: HTMLElement, position: 'before' | 'after'): void {
+  clearSeriesDropPosition(card);
+  card.classList.add(position === 'before' ? 'drop-before' : 'drop-after');
+}
+
+function clearSeriesDropPosition(card: HTMLElement): void {
+  card.classList.remove('drop-before', 'drop-after');
+}
+
+function clearSeriesDragState(): void {
+  draggedSeriesIndex = null;
+  seriesEditorEl.querySelectorAll<HTMLElement>('[data-series-card]').forEach((card) => {
+    card.classList.remove('dragging', 'drop-before', 'drop-after');
   });
 }
 
@@ -1672,8 +1786,7 @@ function renderPrecisionKey(): string {
 }
 
 function getFilteredDraftEntries(): { draft: SeriesDraft; index: number }[] {
-  return seriesDrafts
-    .map((draft, index) => ({ draft, index }))
+  return getSortedDraftEntries()
     .filter(({ draft }) => {
       const modelMatches =
         state.modelFilter === ALL_VALUE || getDraftModel(draft) === state.modelFilter;
@@ -1685,6 +1798,87 @@ function getFilteredDraftEntries(): { draft: SeriesDraft; index: number }[] {
         state.mtpFilter === ALL_VALUE || getDraftMtpFilter(draft) === state.mtpFilter;
       return modelMatches && islOslMatches && precisionMatches && mtpMatches;
     });
+}
+
+function getSortedDraftEntries(): { draft: SeriesDraft; index: number }[] {
+  return seriesDrafts
+    .map((draft, index) => ({ draft, index }))
+    .sort(
+      (a, b) =>
+        getDraftRenderOrder(b.draft, b.index) - getDraftRenderOrder(a.draft, a.index) ||
+        a.index - b.index
+    );
+}
+
+function sortSeriesDraftsByLayer(): void {
+  seriesDrafts = getSortedDraftEntries().map(({ draft }) => draft);
+}
+
+function normalizeDraftRenderOrderFromPanelOrder(): void {
+  const topOrder = Math.max(0, seriesDrafts.length - 1);
+  seriesDrafts.forEach((draft, index) => {
+    draft.renderOrder = topOrder - index;
+  });
+}
+
+function moveSeriesDraftInPanelOrder(
+  sourceIndex: number,
+  targetIndex: number,
+  position: 'before' | 'after'
+): boolean {
+  if (sourceIndex === targetIndex) return false;
+  const entries = getSortedDraftEntries();
+  const sourcePosition = entries.findIndex((entry) => entry.index === sourceIndex);
+  const targetPosition = entries.findIndex((entry) => entry.index === targetIndex);
+  if (sourcePosition < 0 || targetPosition < 0) return false;
+
+  const [source] = entries.splice(sourcePosition, 1);
+  if (!source) return false;
+  let insertPosition = targetPosition;
+  if (sourcePosition < targetPosition) insertPosition -= 1;
+  if (position === 'after') insertPosition += 1;
+  entries.splice(Math.max(0, Math.min(entries.length, insertPosition)), 0, source);
+
+  seriesDrafts = entries.map((entry) => entry.draft);
+  normalizeDraftRenderOrderFromPanelOrder();
+  return true;
+}
+
+function getDraftRenderOrder(draft: SeriesDraft, fallback: number): number {
+  return typeof draft.renderOrder === 'number' && Number.isFinite(draft.renderOrder)
+    ? draft.renderOrder
+    : fallback;
+}
+
+function getDraftLayerLabel(draft: SeriesDraft, fallback: number): string {
+  return String(Math.max(1, Math.round(getDraftRenderOrder(draft, fallback) + 1)));
+}
+
+function getNextDraftRenderOrder(): number {
+  const orders = seriesDrafts.map((draft, index) => getDraftRenderOrder(draft, index));
+  return orders.length > 0 ? Math.max(...orders) + 1 : 0;
+}
+
+function placeDraftsOnTop(drafts: SeriesDraft[]): void {
+  const start = getNextDraftRenderOrder();
+  drafts.forEach((draft, index) => {
+    draft.renderOrder = start + drafts.length - index - 1;
+  });
+}
+
+function syncCurrentSeriesOrderFromDrafts(): void {
+  const seriesById = new Map(currentSeries.map((line) => [line.id, line]));
+  const used = new Set<string>();
+  const ordered: InferenceCurveSeries[] = [];
+  seriesDrafts.forEach((draft, index) => {
+    const id = draft.id.trim() || `line-${index + 1}`;
+    const line = seriesById.get(id);
+    if (!line) return;
+    used.add(id);
+    ordered.push({ ...line, renderOrder: getDraftRenderOrder(draft, index) });
+  });
+  const rest = currentSeries.filter((line) => !used.has(line.id));
+  currentSeries = [...ordered, ...rest];
 }
 
 function getLineStyleSelectValue(lineStyle: string): string {
@@ -1706,6 +1900,7 @@ function draftsToPreviewSeries(drafts: SeriesDraft[]): InferenceCurveSeries[] {
       precision: draft.precision.trim() || getDefaultDraftPrecision(),
       mtp: getDraftMtpFilter(draft),
       marker: normalizePointShapeValue(draft.marker),
+      renderOrder: getDraftRenderOrder(draft, index),
       points: []
     };
     if (draft.title.trim()) line.title = draft.title.trim();
@@ -1731,7 +1926,7 @@ function getEditorResolvedColor(seriesIndex: number): string {
 }
 
 function seriesToDrafts(series: InferenceCurveSeries[]): SeriesDraft[] {
-  const drafts = series.map((line) => ({
+  const drafts = series.map((line, index) => ({
     id: line.id,
     name: line.name,
     model: getSeriesModel(line),
@@ -1742,6 +1937,7 @@ function seriesToDrafts(series: InferenceCurveSeries[]): SeriesDraft[] {
     title: line.title ?? '',
     color: line.color ?? '',
     lineStyle: line.lineStyle ?? DEFAULT_LINE_STYLE,
+    renderOrder: getSeriesRenderOrder(line, index),
     collapsed: true,
     points: line.points.map((point) => {
       const labelMetadata = parsePointMetadataLabel(point.label);
@@ -1861,6 +2057,7 @@ function draftsToSeriesInternal(drafts: SeriesDraft[]): InferenceCurveSeries[] {
       precision,
       mtp: getDraftMtpFilter(draft),
       marker: normalizePointShapeValue(draft.marker),
+      renderOrder: getDraftRenderOrder(draft, seriesIndex),
       points
     };
     if (draft.color.trim()) line.color = draft.color.trim();
@@ -1978,6 +2175,7 @@ function makeEmptySeriesDraft(index: number): SeriesDraft {
     title: '',
     color: '',
     lineStyle: DEFAULT_LINE_STYLE,
+    renderOrder: index,
     collapsed: true,
     points: [makeEmptyPointRow()]
   };
@@ -1987,6 +2185,7 @@ function copySeriesDraft(source: SeriesDraft): SeriesDraft {
   const copy = structuredClone(source);
   copy.id = makeUniqueLineId(`${source.id.trim() || 'line'}-copy`);
   copy.name = `${source.name.trim() || 'Line'} Copy`;
+  copy.renderOrder = getNextDraftRenderOrder();
   copy.collapsed = true;
   return copy;
 }
@@ -2296,6 +2495,12 @@ function getSeriesPrecision(series: InferenceCurveSeries): string {
   return String(series.precision ?? firstPointPrecision ?? DEFAULT_PRECISION);
 }
 
+function getSeriesRenderOrder(series: InferenceCurveSeries, fallback: number): number {
+  return typeof series.renderOrder === 'number' && Number.isFinite(series.renderOrder)
+    ? series.renderOrder
+    : fallback;
+}
+
 function getSeriesMtpFilter(series: InferenceCurveSeries): string {
   return getExplicitMtpValue(series.mtp) ?? inferMtpFilterFromTokens(`${series.id} ${series.name} ${series.title ?? ''}`);
 }
@@ -2561,7 +2766,9 @@ function handleImportPreviewClick(event: MouseEvent): void {
 }
 
 function addSelectedImportLines(): void {
-  const selectedDrafts = pendingImportDrafts.filter((entry) => entry.selected).map((entry) => entry.draft);
+  const selectedDrafts = pendingImportDrafts
+    .filter((entry) => entry.selected)
+    .map((entry) => structuredClone(entry.draft));
   if (selectedDrafts.length === 0) {
     setImportStatus('Select at least one line to add.', true);
     return;
@@ -2569,10 +2776,14 @@ function addSelectedImportLines(): void {
 
   try {
     commitSeriesDom();
+    placeDraftsOnTop(selectedDrafts);
     const existingSeries = draftsToSeriesAllowEmpty(seriesDrafts);
     const selectedSeries = draftsToSeries(selectedDrafts);
     currentSeries = mergeImportedSeries([...existingSeries, ...selectedSeries]);
     seriesDrafts = seriesToDrafts(currentSeries);
+    sortSeriesDraftsByLayer();
+    normalizeDraftRenderOrderFromPanelOrder();
+    syncCurrentSeriesOrderFromDrafts();
     reconcileFiltersForSeries(currentSeries);
     state.search = '';
     renderFilterControls();
@@ -2796,6 +3007,7 @@ function readNativeSeries(value: unknown): InferenceCurveSeries[] {
     marker: normalizePointShapeValue(asOptionalString(line.marker) ?? asOptionalString(line.shape) ?? ''),
     color: asOptionalString(line.color),
     lineStyle: asOptionalString(line.lineStyle),
+    renderOrder: asOptionalNumber(line.renderOrder),
     title: asOptionalString(line.title),
     points: (line.points as unknown[])
       .filter(isRecord)
@@ -2857,6 +3069,7 @@ function seriesFromEditorRecords(records: Record<string, unknown>[]): InferenceC
         title,
         color: readMetricString(record, ['color']),
         lineStyle: readMetricString(record, ['lineStyle', 'line type', 'linestyle']) || DEFAULT_LINE_STYLE,
+        renderOrder: readMetricNumber(record, ['renderOrder', 'render order', 'layer', 'z-index', 'z index']) ?? rowIndex,
         collapsed: true,
         points: []
       } satisfies SeriesDraft);
@@ -2902,6 +3115,7 @@ function seriesFromBenchmarkRecords(
         precision: imported.precision,
         mtp: imported.mtp,
         title: imported.title,
+        renderOrder: grouped.size,
         points: []
       } satisfies InferenceCurveSeries);
     line.points.push(imported.point);
@@ -3342,6 +3556,15 @@ function asOptionalString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value : undefined;
 }
 
+function asOptionalNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number(value.trim());
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
 async function formatFetchError(response: Response): Promise<string> {
   const text = await response.text().catch(() => '');
   const parsedMessage = parseGitHubErrorMessage(text);
@@ -3395,6 +3618,7 @@ function downloadCsv(): void {
         series.title,
         series.color,
         series.lineStyle,
+        String(series.renderOrder),
         ...pointColumns.map((column) => row[column.key] ?? '')
       ])
     )

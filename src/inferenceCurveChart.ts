@@ -37,6 +37,7 @@ export interface InferenceCurveSeries {
   marker?: string;
   color?: string;
   lineStyle?: string;
+  renderOrder?: number;
   title?: string;
   points: InferenceCurvePoint[];
 }
@@ -76,6 +77,7 @@ interface PreparedSeries {
   title?: string;
   color: string;
   lineDasharray: string | null;
+  renderOrder: number;
   points: ChartPoint[];
   roofline: ChartPoint[];
 }
@@ -260,7 +262,16 @@ export function prepareInferenceCurveSeries(
       point.roof = roofKeys.has(`${point.x}|${point.y}|${point.precision}`);
     });
 
-    return { id: line.id, name: line.name, title: line.title, color, lineDasharray, points, roofline };
+    return {
+      id: line.id,
+      name: line.name,
+      title: line.title,
+      color,
+      lineDasharray,
+      renderOrder: getSeriesRenderOrder(line, seriesIndex),
+      points,
+      roofline
+    };
   });
 }
 
@@ -398,6 +409,19 @@ function resolveLineDasharray(lineStyle: string | undefined): string | null {
   return value;
 }
 
+function getSeriesRenderOrder(series: InferenceCurveSeries, fallback: number): number {
+  return typeof series.renderOrder === 'number' && Number.isFinite(series.renderOrder)
+    ? series.renderOrder
+    : fallback;
+}
+
+function sortPreparedSeriesForRender(series: PreparedSeries[]): PreparedSeries[] {
+  return series
+    .map((line, index) => ({ line, index }))
+    .sort((a, b) => a.line.renderOrder - b.line.renderOrder || a.index - b.index)
+    .map(({ line }) => line);
+}
+
 export function renderInferenceCurveChart(
   container: HTMLElement,
   rawSeries: InferenceCurveSeries[],
@@ -412,15 +436,17 @@ export function renderInferenceCurveChart(
     userOptions.activeSeriesIds ?? new Set(rawSeries.map((series) => series.id));
 
   const prepared = prepareInferenceCurveSeries(rawSeries, options.highContrast, options.theme);
-  const visibleSeries = prepared.map((series) => ({
-    ...series,
-    points: series.points.filter(
-      (point) => activeSeriesIds.has(point.seriesId) && selectedPrecisions.includes(point.precision)
-    ),
-    roofline: series.roofline.filter(
-      (point) => activeSeriesIds.has(point.seriesId) && selectedPrecisions.includes(point.precision)
-    )
-  }));
+  const visibleSeries = sortPreparedSeriesForRender(
+    prepared.map((series) => ({
+      ...series,
+      points: series.points.filter(
+        (point) => activeSeriesIds.has(point.seriesId) && selectedPrecisions.includes(point.precision)
+      ),
+      roofline: series.roofline.filter(
+        (point) => activeSeriesIds.has(point.seriesId) && selectedPrecisions.includes(point.precision)
+      )
+    }))
+  );
 
   const allVisiblePoints = visibleSeries.flatMap((series) => series.points);
   const scalePoints = options.showNonOptimalPoints

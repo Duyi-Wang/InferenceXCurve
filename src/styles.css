@@ -791,6 +791,31 @@ p {
   background: color-mix(in srgb, var(--background) 68%, transparent);
 }
 
+.series-card.dragging {
+  opacity: 0.48;
+}
+
+.series-card.drop-before::before,
+.series-card.drop-after::after {
+  position: absolute;
+  right: 10px;
+  left: 10px;
+  z-index: 2;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent);
+  content: "";
+}
+
+.series-card.drop-before::before {
+  top: -2px;
+}
+
+.series-card.drop-after::after {
+  bottom: -2px;
+}
+
 .series-empty {
   padding: 18px 16px;
   border: 1px dashed color-mix(in srgb, var(--border) 48%, transparent);
@@ -815,6 +840,29 @@ p {
   min-width: 0;
   align-items: center;
   gap: 10px;
+}
+
+.series-drag-handle {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--border) 58%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--background) 72%, transparent);
+  color: var(--muted-foreground);
+  cursor: grab;
+}
+
+.series-drag-handle:active {
+  cursor: grabbing;
+}
+
+.series-drag-handle:hover,
+.series-drag-handle:focus-visible {
+  border-color: color-mix(in srgb, var(--primary) 52%, var(--border));
+  color: var(--foreground);
 }
 
 .series-card-title h3 {
