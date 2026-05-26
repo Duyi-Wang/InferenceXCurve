@@ -1224,8 +1224,9 @@ p {
 
 .color-controls {
   display: grid;
-  grid-template-columns: 30px 30px minmax(0, 1fr);
-  gap: 5px;
+  grid-template-columns: 48px 30px minmax(0, 1fr);
+  align-items: center;
+  gap: 4px;
 }
 
 .color-controls input[type="color"] {
@@ -1238,12 +1239,34 @@ p {
   cursor: pointer;
 }
 
+.color-controls.auto input[type="color"] {
+  opacity: 0.58;
+}
+
 .color-auto-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
   min-height: 30px;
   padding: 0 3px;
   border-color: color-mix(in srgb, var(--border) 54%, transparent);
   color: var(--muted-foreground);
   font-size: 10px;
+}
+
+.color-auto-swatch {
+  width: 8px;
+  height: 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 58%, transparent);
+  border-radius: 50%;
+  background: var(--muted-foreground);
+}
+
+.color-auto-button.active {
+  border-color: color-mix(in srgb, var(--primary) 56%, var(--border));
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  color: var(--foreground);
 }
 
 .color-presets {

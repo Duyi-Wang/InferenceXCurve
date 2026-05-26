@@ -1163,24 +1163,37 @@ function renderLineStyleSample(option: LineStyleOption): string {
 
 function renderColorField(seriesIndex: number, color: string, autoColor: string): string {
   const colorValue = color.trim();
-  const pickerColor = toColorInputValue(colorValue || autoColor, seriesIndex);
+  const isAuto = colorValue.length === 0;
+  const resolvedColor = autoColor || colorInputFallbacks[seriesIndex % colorInputFallbacks.length]!;
+  const pickerColor = toColorInputValue(colorValue || resolvedColor, seriesIndex);
   return `
     <label class="series-field color-field">
       <span>Color</span>
-      <div class="color-controls">
+      <div class="color-controls ${isAuto ? 'auto' : 'custom'}" data-color-controls="true">
+        <button
+          type="button"
+          class="color-auto-button${isAuto ? ' active' : ''}"
+          data-series-index="${seriesIndex}"
+          data-color-auto="true"
+          aria-pressed="${isAuto ? 'true' : 'false'}"
+          title="Resolved color: ${escapeAttribute(resolvedColor)}"
+        >
+          <span
+            class="color-auto-swatch"
+            data-color-auto-swatch="true"
+            style="background:${escapeAttribute(resolvedColor)}"
+            aria-hidden="true"
+          ></span>
+          <span>Auto</span>
+        </button>
         <input
           type="color"
           data-color-picker="true"
           data-series-index="${seriesIndex}"
           value="${escapeAttribute(pickerColor)}"
           aria-label="Pick custom color"
+          title="Pick custom color"
         />
-        <button
-          type="button"
-          class="color-auto-button"
-          data-series-index="${seriesIndex}"
-          data-color-auto="true"
-        >Auto</button>
         <div class="color-presets" aria-label="Reference chart colors">
           ${colorPresets
             .map((preset) => {
@@ -1420,6 +1433,7 @@ function attachSeriesEditorEvents(): void {
       draft.color = input.value;
       syncSeriesSwatch(seriesIndex, input.value);
       syncPresetSelection(seriesIndex, input.value);
+      syncColorMode(seriesIndex, 'custom', input.value);
       scheduleLocalSave();
     });
   });
@@ -1446,6 +1460,7 @@ function attachSeriesEditorEvents(): void {
       if (picker) picker.value = toColorInputValue(color, seriesIndex);
       syncSeriesSwatch(seriesIndex, color);
       syncPresetSelection(seriesIndex, color);
+      syncColorMode(seriesIndex, 'custom', color);
       scheduleLocalSave();
     });
   });
@@ -4070,6 +4085,7 @@ function syncColorPicker(seriesIndex: number, color: string, selectedColor = col
   if (picker) picker.value = toColorInputValue(color, seriesIndex);
   syncSeriesSwatch(seriesIndex, color);
   syncPresetSelection(seriesIndex, selectedColor);
+  syncColorMode(seriesIndex, selectedColor.trim() ? 'custom' : 'auto', color);
 }
 
 function syncSeriesSwatch(seriesIndex: number, color: string): void {
@@ -4088,6 +4104,24 @@ function syncPresetSelection(seriesIndex: number, color: string): void {
         (button.dataset.colorPreset ?? '').toLowerCase() === color.trim().toLowerCase()
       );
     });
+}
+
+function syncColorMode(seriesIndex: number, mode: 'auto' | 'custom', resolvedColor: string): void {
+  const card = seriesEditorEl.querySelector<HTMLElement>(`.series-card[data-series-index="${seriesIndex}"]`);
+  if (!card) return;
+  const controls = card.querySelector<HTMLElement>('[data-color-controls]');
+  controls?.classList.toggle('auto', mode === 'auto');
+  controls?.classList.toggle('custom', mode === 'custom');
+
+  const autoButton = card.querySelector<HTMLButtonElement>('button[data-color-auto]');
+  if (autoButton) {
+    autoButton.classList.toggle('active', mode === 'auto');
+    autoButton.setAttribute('aria-pressed', mode === 'auto' ? 'true' : 'false');
+    autoButton.title = `Resolved color: ${resolvedColor}`;
+  }
+
+  const swatch = card.querySelector<HTMLElement>('[data-color-auto-swatch]');
+  if (swatch && resolvedColor.trim()) swatch.style.background = resolvedColor;
 }
 
 function toColorInputValue(color: string, index: number): string {
