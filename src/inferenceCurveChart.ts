@@ -64,6 +64,7 @@ interface ChartPoint extends InferenceCurvePoint {
   seriesId: string;
   seriesName: string;
   seriesTitle?: string;
+  pointIndex: number;
   color: string;
   precision: string;
   x: number;
@@ -90,6 +91,7 @@ interface StrategyLabel {
 
 interface ChartInteractionState {
   hoveredSeriesId: string | null;
+  hoveredPointKey: string | null;
   selectedSeriesId: string | null;
 }
 
@@ -259,11 +261,12 @@ export function prepareInferenceCurveSeries(
     const lineDasharray = resolveLineDasharray(line.lineStyle);
     const points = line.points
       .filter((point) => Number.isFinite(point.interactivity) && Number.isFinite(point.throughput))
-      .map((point) => ({
+      .map((point, pointIndex) => ({
         ...point,
         seriesId: line.id,
         seriesName: line.name,
         seriesTitle: line.title,
+        pointIndex,
         color,
         precision: String(point.precision ?? 'default'),
         shape: point.shape || line.marker,
@@ -572,18 +575,107 @@ export function renderInferenceCurveChart(
   const current = { xScale: xScale as ContinuousScale, yScale };
   const interaction: ChartInteractionState = {
     hoveredSeriesId: null,
+    hoveredPointKey: null,
     selectedSeriesId: null
   };
 
-  const applyInteraction = () => applySeriesInteraction(zoomGroup, interaction, options);
+  const applyInteraction = () => applySeriesInteraction(zoomGroup, interaction, options, selectedPrecisions);
   const setHoveredSeries = (seriesId: string | null) => {
     interaction.hoveredSeriesId = seriesId;
+    interaction.hoveredPointKey = null;
     applyInteraction();
   };
-  const toggleSelectedSeries = (event: MouseEvent, seriesId: string) => {
-    event.stopPropagation();
+  const setHoveredPoint = (point: ChartPoint | null) => {
+    interaction.hoveredSeriesId = point?.seriesId ?? null;
+    interaction.hoveredPointKey = point ? getChartPointKey(point) : null;
+    applyInteraction();
+  };
+  const toggleSelectedSeries = (event: Event, seriesId: string) => {
+    stopChartInteractionEvent(event);
     interaction.selectedSeriesId = interaction.selectedSeriesId === seriesId ? null : seriesId;
     applyInteraction();
+  };
+  let suppressNextSvgClick = false;
+  const clearHoverState = () => {
+    if (!interaction.hoveredSeriesId && !interaction.hoveredPointKey) return;
+    interaction.hoveredSeriesId = null;
+    interaction.hoveredPointKey = null;
+    hideTooltip(tooltip, rulerGroup);
+    applyInteraction();
+  };
+  const findNearestPointFromPointer = (event: PointerEvent): ChartPoint | null => {
+    const plotNode = plot.node();
+    if (!plotNode) return null;
+    const [pointerX, pointerY] = d3.pointer(event, plotNode);
+    if (pointerX < 0 || pointerY < 0 || pointerX > innerWidth || pointerY > innerHeight) {
+      return null;
+    }
+
+    let nearestPoint: ChartPoint | null = null;
+    let nearestDistance = Infinity;
+    allVisiblePoints.forEach((point) => {
+      if (!isPointVisible(point, options)) return;
+      const dx = current.xScale(point.x) - pointerX;
+      const dy = current.yScale(point.y) - pointerY;
+      const distance = Math.hypot(dx, dy);
+      if (distance > HIT_AREA_RADIUS) return;
+      if (distance < nearestDistance) {
+        nearestPoint = point;
+        nearestDistance = distance;
+      }
+    });
+    return nearestPoint;
+  };
+  const syncHoverFromPointer = (event: PointerEvent) => {
+    const svgNode = svg.node();
+    const target = event.target instanceof Element ? event.target : null;
+    if (!svgNode || !target || !svgNode.contains(target)) {
+      clearHoverState();
+      return;
+    }
+
+    const point = findNearestPointFromPointer(event);
+    if (point) {
+      setHoveredPoint(point);
+      rulerGroup.style('display', 'block');
+      verticalRuler.attr('x1', current.xScale(point.x)).attr('x2', current.xScale(point.x));
+      horizontalRuler.attr('y1', current.yScale(point.y)).attr('y2', current.yScale(point.y));
+      tooltip.style('opacity', 1).style('display', 'block').html(formatTooltip(point));
+      moveTooltip(event, tooltip, container);
+      return;
+    }
+
+    hideTooltip(tooltip, rulerGroup);
+    const path = target.closest<SVGPathElement>('.roofline-path');
+    if (path && svgNode.contains(path)) {
+      const entry = d3.select<SVGPathElement, { key: string }>(path).datum();
+      if (entry?.key) {
+        setHoveredSeries(entry.key);
+        return;
+      }
+    }
+
+    clearHoverState();
+  };
+  const selectSeriesFromPointer = (event: PointerEvent) => {
+    if (!isPrimaryPointerSelection(event)) return;
+    const point = findNearestPointFromPointer(event);
+    if (point) {
+      setHoveredPoint(point);
+      toggleSelectedSeries(event, point.seriesId);
+      suppressNextSvgClick = true;
+      return;
+    }
+
+    const svgNode = svg.node();
+    const target = event.target instanceof Element ? event.target : null;
+    if (!svgNode || !target || !svgNode.contains(target)) return;
+    const path = target.closest<SVGPathElement>('.roofline-path');
+    if (!path || !svgNode.contains(path)) return;
+    const entry = d3.select<SVGPathElement, { key: string }>(path).datum();
+    if (!entry?.key) return;
+    toggleSelectedSeries(event, entry.key);
+    suppressNextSvgClick = true;
   };
 
   const renderGridAxes = (xs: ContinuousScale, ys: ContinuousScale) => {
@@ -603,8 +695,7 @@ export function renderInferenceCurveChart(
       ys,
       strategyColor,
       options,
-      setHoveredSeries,
-      toggleSelectedSeries
+      setHoveredSeries
     );
     drawScatterPoints(
       zoomGroup,
@@ -620,7 +711,7 @@ export function renderInferenceCurveChart(
       container,
       options,
       setHoveredSeries,
-      toggleSelectedSeries
+      setHoveredPoint
     );
     drawStrategyLabels(zoomGroup, visibleSeries, xs, ys, strategyColor, options);
     drawLineLabels(zoomGroup, visibleSeries, xs, ys, options);
@@ -646,14 +737,27 @@ export function renderInferenceCurveChart(
       const nextY = event.transform.rescaleY(yScale);
       renderGridAxes(nextX, nextY);
       drawData(nextX, nextY);
-      tooltip.style('opacity', 0).style('display', 'none');
-      rulerGroup.style('display', 'none');
+      hideTooltip(tooltip, rulerGroup);
     });
 
   svg.call(zoom).on('dblclick.zoom', null);
+  svg.on('pointermove.chart-hover', (event) => {
+    syncHoverFromPointer(event);
+  });
+  svg.on('pointerup.chart-select', (event) => {
+    selectSeriesFromPointer(event);
+  });
+  svg.on('pointerleave.chart-hover', () => {
+    clearHoverState();
+  });
   svg.on('click', () => {
+    if (suppressNextSvgClick) {
+      suppressNextSvgClick = false;
+      return;
+    }
     if (!interaction.selectedSeriesId) return;
     interaction.selectedSeriesId = null;
+    interaction.hoveredPointKey = null;
     applyInteraction();
   });
   svg.on('dblclick', () => {
@@ -701,8 +805,7 @@ function drawRooflines(
   yScale: ContinuousScale,
   strategyColor: Map<string, string>,
   options: Required<Omit<InferenceCurveChartOptions, 'activeSeriesIds' | 'selectedPrecisions'>>,
-  setHoveredSeries: (seriesId: string | null) => void,
-  toggleSelectedSeries: (event: MouseEvent, seriesId: string) => void
+  setHoveredSeries: (seriesId: string | null) => void
 ): void {
   const lineGenerator = d3
     .line<ChartPoint>()
@@ -767,15 +870,15 @@ function drawRooflines(
     .attr('stroke', (entry) => entry.stroke)
     .attr('stroke-dasharray', (entry) => entry.lineDasharray)
     .attr('d', (entry) => lineGenerator(entry.points))
-    .on('mouseenter', (_event, entry) => {
+    .on('pointerenter', (_event, entry) => {
       setHoveredSeries(entry.key);
     })
-    .on('mouseleave', () => {
+    .on('pointerleave', () => {
       setHoveredSeries(null);
     })
-    .on('click', (event, entry) => {
-      toggleSelectedSeries(event, entry.key);
-    });
+    .on('pointerdown', stopChartInteractionEvent)
+    .on('mousedown', stopChartInteractionEvent)
+    .on('click', stopChartInteractionEvent);
 }
 
 function drawScatterPoints(
@@ -792,11 +895,9 @@ function drawScatterPoints(
   container: HTMLElement,
   options: Required<Omit<InferenceCurveChartOptions, 'activeSeriesIds' | 'selectedPrecisions'>>,
   setHoveredSeries: (seriesId: string | null) => void,
-  toggleSelectedSeries: (event: MouseEvent, seriesId: string) => void
+  setHoveredPoint: (point: ChartPoint | null) => void
 ): void {
-  const key = (point: ChartPoint) =>
-    `${point.seriesId}-${point.precision}-${point.x}-${point.y}-${point.concurrency ?? ''}-${point.shape ?? ''}-${point.label ?? ''}`;
-  const selection = zoomGroup.selectAll<SVGGElement, ChartPoint>('.dot-group').data(points, key);
+  const selection = zoomGroup.selectAll<SVGGElement, ChartPoint>('.dot-group').data(points, getChartPointKey);
   const entered = selection.enter().append('g').attr('class', 'dot-group');
   entered.append('circle').attr('class', 'hit-area').attr('r', HIT_AREA_RADIUS).attr('fill', 'transparent');
   selection.exit().remove();
@@ -845,30 +946,25 @@ function drawScatterPoints(
   });
 
   merged
-    .on('mouseenter', function (_event, point) {
-      setHoveredSeries(point.seriesId);
-      const shapeKey = getPointShapeKey(point, selectedPrecisions);
-      applyShapeState(d3.select(this).select<SVGElement>('.visible-shape'), shapeKey, true);
+    .on('pointerenter', function (event, point) {
+      setHoveredPoint(point);
       rulerGroup.style('display', 'block');
       verticalRuler.attr('x1', xScale(point.x)).attr('x2', xScale(point.x));
       horizontalRuler.attr('y1', yScale(point.y)).attr('y2', yScale(point.y));
       tooltip.style('opacity', 1).style('display', 'block').html(formatTooltip(point));
+      moveTooltip(event, tooltip, container);
     })
-    .on('mousemove', (event) => {
-      const [mx, my] = d3.pointer(event, container);
-      const pos = computeTooltipPosition(mx, my, tooltip, container);
-      tooltip.style('left', `${pos.left}px`).style('top', `${pos.top}px`);
+    .on('pointermove', (event) => {
+      moveTooltip(event, tooltip, container);
     })
-    .on('mouseleave', function (_event, point) {
-      const shapeKey = getPointShapeKey(point, selectedPrecisions);
-      applyShapeState(d3.select(this).select<SVGElement>('.visible-shape'), shapeKey, false);
+    .on('pointerleave', function () {
+      setHoveredPoint(null);
       setHoveredSeries(null);
-      tooltip.style('opacity', 0).style('display', 'none');
-      rulerGroup.style('display', 'none');
+      hideTooltip(tooltip, rulerGroup);
     })
-    .on('click', (event, point) => {
-      toggleSelectedSeries(event, point.seriesId);
-    });
+    .on('pointerdown', stopChartInteractionEvent)
+    .on('mousedown', stopChartInteractionEvent)
+    .on('click', stopChartInteractionEvent);
 }
 
 function drawStrategyLabels(
@@ -996,7 +1092,8 @@ function drawPillJoin(
 function applySeriesInteraction(
   zoomGroup: d3.Selection<SVGGElement, unknown, null, undefined>,
   interaction: ChartInteractionState,
-  options: Required<Omit<InferenceCurveChartOptions, 'activeSeriesIds' | 'selectedPrecisions'>>
+  options: Required<Omit<InferenceCurveChartOptions, 'activeSeriesIds' | 'selectedPrecisions'>>,
+  selectedPrecisions: string[]
 ): void {
   const selectedSeriesId = interaction.selectedSeriesId;
   const layerSeriesId = interaction.hoveredSeriesId ?? selectedSeriesId;
@@ -1005,21 +1102,34 @@ function applySeriesInteraction(
     .selectAll<SVGPathElement, { key: string }>('.roofline-path')
     .classed('selected-series', (entry) => entry.key === selectedSeriesId)
     .classed('dimmed-series', (entry) => Boolean(selectedSeriesId && entry.key !== selectedSeriesId))
+    .attr('opacity', (entry) => getSeriesOpacity(entry.key, selectedSeriesId))
     .style('opacity', (entry) => getSeriesOpacity(entry.key, selectedSeriesId));
 
   zoomGroup
     .selectAll<SVGGElement, ChartPoint>('.dot-group')
     .classed('selected-series', (point) => point.seriesId === selectedSeriesId)
     .classed('dimmed-series', (point) => Boolean(selectedSeriesId && point.seriesId !== selectedSeriesId))
+    .attr('opacity', (point) =>
+      isPointVisible(point, options) ? getSeriesOpacity(point.seriesId, selectedSeriesId) : 0
+    )
     .style('opacity', (point) =>
       isPointVisible(point, options) ? getSeriesOpacity(point.seriesId, selectedSeriesId) : 0
     )
-    .style('pointer-events', (point) => (isPointVisible(point, options) ? 'auto' : 'none'));
+    .style('pointer-events', (point) => (isPointVisible(point, options) ? 'auto' : 'none'))
+    .each(function (point) {
+      const shapeKey = getPointShapeKey(point, selectedPrecisions);
+      applyShapeState(
+        d3.select(this).select<SVGElement>('.visible-shape'),
+        shapeKey,
+        interaction.hoveredPointKey === getChartPointKey(point)
+      );
+    });
 
   zoomGroup
     .selectAll<SVGGElement, PillLabel>('.parallelism-label,.line-label')
     .classed('selected-series', (label) => label.seriesId === selectedSeriesId)
     .classed('dimmed-series', (label) => Boolean(selectedSeriesId && label.seriesId !== selectedSeriesId))
+    .attr('opacity', (label) => getSeriesOpacity(label.seriesId, selectedSeriesId))
     .style('opacity', (label) => getSeriesOpacity(label.seriesId, selectedSeriesId));
 
   if (layerSeriesId) raiseSeriesToFront(zoomGroup, layerSeriesId);
@@ -1118,6 +1228,10 @@ function isPointVisible(
   options: Required<Omit<InferenceCurveChartOptions, 'activeSeriesIds' | 'selectedPrecisions'>>
 ): boolean {
   return options.showNonOptimalPoints || point.roof;
+}
+
+function getChartPointKey(point: ChartPoint): string {
+  return `${point.seriesId}-${point.pointIndex}-${point.precision}-${point.x}-${point.y}-${point.concurrency ?? ''}-${point.shape ?? ''}-${point.label ?? ''}`;
 }
 
 function getPointLabelText(
@@ -1476,7 +1590,37 @@ function computeTooltipPosition(
   const height = node.offsetHeight || 90;
   const left = mx + 10 + width > container.clientWidth ? mx - width - 10 : mx + 10;
   const top = my + 10 + height > container.clientHeight ? my - height - 10 : my + 10;
-  return { left, top };
+  return {
+    left: Math.max(0, left),
+    top: Math.max(0, top)
+  };
+}
+
+function moveTooltip(
+  event: PointerEvent,
+  tooltip: d3.Selection<HTMLDivElement, unknown, null, undefined>,
+  container: HTMLElement
+): void {
+  const [mx, my] = d3.pointer(event, container);
+  const pos = computeTooltipPosition(mx, my, tooltip, container);
+  tooltip.style('left', `${pos.left}px`).style('top', `${pos.top}px`);
+}
+
+function hideTooltip(
+  tooltip: d3.Selection<HTMLDivElement, unknown, null, undefined>,
+  rulerGroup: d3.Selection<SVGGElement, unknown, null, undefined>
+): void {
+  tooltip.style('opacity', 0).style('display', 'none');
+  rulerGroup.style('display', 'none');
+}
+
+function isPrimaryPointerSelection(event: Event): boolean {
+  return !('button' in event) || event.button === 0;
+}
+
+function stopChartInteractionEvent(event: Event): void {
+  event.stopPropagation();
+  event.stopImmediatePropagation();
 }
 
 export function formatPrecision(value: string): string {
