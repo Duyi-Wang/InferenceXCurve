@@ -786,6 +786,60 @@ p {
   font-size: 13px;
 }
 
+.import-batch-controls {
+  display: grid;
+  grid-template-columns:
+    minmax(120px, 1fr)
+    minmax(120px, 1fr)
+    minmax(120px, 1fr)
+    minmax(112px, 0.8fr)
+    minmax(112px, 0.8fr)
+    minmax(150px, 1fr);
+  align-items: end;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 30%, transparent);
+}
+
+.import-batch-controls label {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.import-batch-controls span {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.import-batch-controls input,
+.import-batch-controls select {
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  padding: 5px 8px;
+  background: color-mix(in srgb, var(--background) 86%, transparent);
+  font-size: 12px;
+}
+
+.import-line-style-menu summary {
+  height: 32px;
+  min-height: 32px;
+}
+
+.import-color-controls {
+  display: grid;
+  grid-template-columns: minmax(82px, 1fr) 32px;
+  gap: 5px;
+}
+
+.import-color-controls input[type="color"] {
+  min-height: 32px;
+  padding: 2px;
+}
+
 .import-preview-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1795,6 +1849,10 @@ p {
 
   .import-preview-head {
     flex-direction: column;
+  }
+
+  .import-batch-controls {
+    grid-template-columns: 1fr;
   }
 
   .import-preview-actions {

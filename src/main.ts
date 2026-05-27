@@ -72,7 +72,18 @@ interface SeriesDraft {
 
 interface PendingImportDraft {
   selected: boolean;
+  sourceDraft: SeriesDraft;
   draft: SeriesDraft;
+}
+
+interface ImportBatchSettings {
+  idSuffix: string;
+  nameSuffix: string;
+  titleSuffix: string;
+  lineStyle: string;
+  marker: string;
+  colorMode: 'auto' | 'custom';
+  color: string;
 }
 
 interface PendingMergeLine {
@@ -575,6 +586,7 @@ const initialData = createInitialDataState();
 let currentSeries: InferenceCurveSeries[] = initialData.currentSeries;
 let seriesDrafts: SeriesDraft[] = initialData.seriesDrafts;
 let pendingImportDrafts: PendingImportDraft[] = [];
+let pendingImportSettings: ImportBatchSettings = createImportBatchSettings();
 let pendingMergeGroups: PendingMergeGroup[] = [];
 let state: AppState = initialData.state;
 let localSaveTimer: number | null = null;
@@ -758,6 +770,7 @@ document.querySelector('#reset-data')?.addEventListener('click', () => {
   setStatus('Example data restored');
   setImportStatus('');
   pendingImportDrafts = [];
+  pendingImportSettings = createImportBatchSettings();
   renderImportPreview();
   clearMergePreview();
   scheduleLocalSave();
@@ -775,6 +788,7 @@ document.querySelector('#clear-data')?.addEventListener('click', () => {
   setStatus('Data cleared');
   setImportStatus('');
   pendingImportDrafts = [];
+  pendingImportSettings = createImportBatchSettings();
   renderImportPreview();
   clearMergePreview();
   scheduleLocalSave();
@@ -3064,6 +3078,18 @@ function normalizeMergeIslOsl(value: string): string {
   return lengths ? `${lengths.isl}/${lengths.osl}` : normalizeMergeKeyPart(value);
 }
 
+function createImportBatchSettings(runId = ''): ImportBatchSettings {
+  return {
+    idSuffix: runId ? `ci-${runId}` : 'ci',
+    nameSuffix: '',
+    titleSuffix: '',
+    lineStyle: DEFAULT_LINE_STYLE,
+    marker: '',
+    colorMode: 'auto',
+    color: colorInputFallbacks[0]!
+  };
+}
+
 function renderImportPreview(): void {
   if (pendingImportDrafts.length === 0) {
     githubImportPreviewEl.innerHTML = '';
@@ -3100,9 +3126,74 @@ function renderImportPreview(): void {
         </button>
       </div>
     </div>
+    ${renderImportBatchControls()}
     <div class="import-preview-list">
       ${pendingImportDrafts.map((entry, index) => renderImportPreviewItem(entry, index)).join('')}
     </div>
+  `;
+}
+
+function renderImportBatchControls(): string {
+  return `
+    <div class="import-batch-controls">
+      <label>
+        <span>Line ID Suffix</span>
+        <input type="text" data-import-batch-field="idSuffix" value="${escapeAttribute(pendingImportSettings.idSuffix)}" placeholder="ci-123456789" />
+      </label>
+      <label>
+        <span>Name Suffix</span>
+        <input type="text" data-import-batch-field="nameSuffix" value="${escapeAttribute(pendingImportSettings.nameSuffix)}" placeholder="optional" />
+      </label>
+      <label>
+        <span>Title Suffix</span>
+        <input type="text" data-import-batch-field="titleSuffix" value="${escapeAttribute(pendingImportSettings.titleSuffix)}" placeholder="optional" />
+      </label>
+      <label>
+        <span>Line Type</span>
+        ${renderImportLineStyleMenu()}
+      </label>
+      <label>
+        <span>Marker</span>
+        <select data-import-batch-field="marker">
+          ${renderPointShapeOptions(pendingImportSettings.marker, 'Precision')}
+        </select>
+      </label>
+      <label>
+        <span>Color</span>
+        <div class="import-color-controls">
+          <select data-import-batch-field="colorMode">
+            <option value="auto" ${pendingImportSettings.colorMode === 'auto' ? 'selected' : ''}>Auto</option>
+            <option value="custom" ${pendingImportSettings.colorMode === 'custom' ? 'selected' : ''}>Custom</option>
+          </select>
+          <input type="color" data-import-batch-field="color" value="${escapeAttribute(toColorInputValue(pendingImportSettings.color, 0))}" title="Custom color for all imported lines" />
+        </div>
+      </label>
+    </div>
+  `;
+}
+
+function renderImportLineStyleMenu(): string {
+  const selectedValue = getLineStyleSelectValue(pendingImportSettings.lineStyle || DEFAULT_LINE_STYLE);
+  const selectedOption =
+    lineStyleOptions.find((option) => option.value === selectedValue) ?? lineStyleOptions[0]!;
+  return `
+    <details class="line-style-menu import-line-style-menu" data-import-line-style-menu>
+      <summary>
+        ${renderLineStyleSample(selectedOption)}
+        <span>${escapeHtml(selectedOption.label)}</span>
+      </summary>
+      <div class="line-style-menu-list">
+        ${lineStyleOptions
+          .map(
+            (option) =>
+              `<button type="button" class="${selectedValue === option.value ? 'selected' : ''}" data-import-line-style-option="${escapeAttribute(option.value)}">
+                ${renderLineStyleSample(option)}
+                <span>${escapeHtml(option.label)}</span>
+              </button>`
+          )
+          .join('')}
+      </div>
+    </details>
   `;
 }
 
@@ -3173,6 +3264,20 @@ function renderImportPreviewMarkerField(index: number, value: string): string {
 
 function handleImportPreviewInput(event: Event): void {
   const input = event.target as HTMLInputElement | HTMLSelectElement;
+  const batchField = input.dataset.importBatchField as keyof ImportBatchSettings | undefined;
+  if (batchField) {
+    updateImportBatchSetting(batchField, normalizeCellText(input.value));
+    applyImportBatchSettings();
+    if (batchField === 'color') {
+      const colorModeSelect = githubImportPreviewEl.querySelector<HTMLSelectElement>(
+        'select[data-import-batch-field="colorMode"]'
+      );
+      if (colorModeSelect) colorModeSelect.value = 'custom';
+    }
+    if (event.type === 'change' || input instanceof HTMLSelectElement) renderImportPreview();
+    return;
+  }
+
   const index = Number(input.dataset.importIndex);
   const field = input.dataset.importField;
   const entry = pendingImportDrafts[index];
@@ -3183,11 +3288,94 @@ function handleImportPreviewInput(event: Event): void {
     return;
   }
   if (field in entry.draft) {
-    entry.draft[field as keyof SeriesDraft] = normalizeCellText(input.value) as never;
+    updateImportDraftField(entry, field as keyof SeriesDraft, normalizeCellText(input.value));
   }
 }
 
+function updateImportBatchSetting(field: keyof ImportBatchSettings, value: string): void {
+  if (field === 'colorMode') {
+    pendingImportSettings.colorMode = value === 'custom' ? 'custom' : 'auto';
+  } else if (field === 'marker') {
+    pendingImportSettings.marker = normalizePointShapeValue(value);
+  } else if (field === 'lineStyle') {
+    pendingImportSettings.lineStyle = normalizeLineStyleValue(value) || DEFAULT_LINE_STYLE;
+  } else if (field === 'color') {
+    pendingImportSettings.color = value || colorInputFallbacks[0]!;
+    pendingImportSettings.colorMode = 'custom';
+  } else {
+    pendingImportSettings[field] = normalizeImportSuffix(value) as never;
+  }
+}
+
+function updateImportDraftField(entry: PendingImportDraft, field: keyof SeriesDraft, value: string): void {
+  if (field === 'id') {
+    entry.sourceDraft.id = removeImportSuffix(value, pendingImportSettings.idSuffix);
+  } else if (field === 'name') {
+    entry.sourceDraft.name = removeImportSuffix(value, pendingImportSettings.nameSuffix);
+  } else if (field === 'title') {
+    entry.sourceDraft.title = removeImportSuffix(value, pendingImportSettings.titleSuffix);
+  } else if (field === 'marker') {
+    entry.sourceDraft.marker = normalizePointShapeValue(value);
+  } else if (field === 'lineStyle') {
+    entry.sourceDraft.lineStyle = value || DEFAULT_LINE_STYLE;
+  } else if (field === 'color') {
+    entry.sourceDraft.color = value;
+  } else {
+    entry.sourceDraft[field] = value as never;
+  }
+  entry.draft = applyImportBatchSettingsToDraft(entry.sourceDraft);
+}
+
+function applyImportBatchSettings(): void {
+  pendingImportDrafts.forEach((entry) => {
+    entry.draft = applyImportBatchSettingsToDraft(entry.sourceDraft);
+  });
+}
+
+function applyImportBatchSettingsToDraft(sourceDraft: SeriesDraft): SeriesDraft {
+  const draft = structuredClone(sourceDraft);
+  draft.id = appendImportSuffix(sourceDraft.id, pendingImportSettings.idSuffix);
+  draft.name = appendImportSuffix(sourceDraft.name, pendingImportSettings.nameSuffix);
+  draft.title = appendImportSuffix(sourceDraft.title, pendingImportSettings.titleSuffix);
+  draft.lineStyle = pendingImportSettings.lineStyle || DEFAULT_LINE_STYLE;
+  draft.marker = normalizePointShapeValue(pendingImportSettings.marker);
+  if (pendingImportSettings.colorMode === 'auto') {
+    draft.color = '';
+  } else if (pendingImportSettings.colorMode === 'custom') {
+    draft.color = pendingImportSettings.color;
+  }
+  return draft;
+}
+
+function appendImportSuffix(value: string, suffix: string): string {
+  const trimmedValue = value.trim();
+  const trimmedSuffix = normalizeImportSuffix(suffix);
+  if (!trimmedSuffix) return trimmedValue;
+  if (!trimmedValue) return trimmedSuffix;
+  return trimmedValue.endsWith(`-${trimmedSuffix}`) ? trimmedValue : `${trimmedValue}-${trimmedSuffix}`;
+}
+
+function removeImportSuffix(value: string, suffix: string): string {
+  const trimmedValue = value.trim();
+  const trimmedSuffix = normalizeImportSuffix(suffix);
+  if (!trimmedSuffix) return trimmedValue;
+  const fullSuffix = `-${trimmedSuffix}`;
+  return trimmedValue.endsWith(fullSuffix) ? trimmedValue.slice(0, -fullSuffix.length) : trimmedValue;
+}
+
+function normalizeImportSuffix(value: string): string {
+  return value.trim().replace(/^-+/u, '');
+}
+
 function handleImportPreviewClick(event: MouseEvent): void {
+  const styleButton = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-import-line-style-option]');
+  if (styleButton) {
+    pendingImportSettings.lineStyle = styleButton.dataset.importLineStyleOption || DEFAULT_LINE_STYLE;
+    applyImportBatchSettings();
+    renderImportPreview();
+    return;
+  }
+
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-import-action]');
   if (!button) return;
   const action = button.dataset.importAction;
@@ -3203,6 +3391,7 @@ function handleImportPreviewClick(event: MouseEvent): void {
     renderImportPreview();
   } else if (action === 'clear-preview') {
     pendingImportDrafts = [];
+    pendingImportSettings = createImportBatchSettings();
     renderImportPreview();
     setImportStatus('Pending import discarded.');
   } else if (action === 'add-selected') {
@@ -3236,6 +3425,7 @@ function addSelectedImportLines(): void {
     renderAll();
     setImportStatus(formatImportSummary(selectedSeries, currentSeries, seriesDrafts));
     pendingImportDrafts = [];
+    pendingImportSettings = createImportBatchSettings();
     renderImportPreview();
     clearMergePreview();
     scheduleLocalSave();
@@ -3256,14 +3446,17 @@ async function importGitHubActionData(): Promise<void> {
   importActionDataEl.disabled = true;
   try {
     setImportStatus('Fetching GitHub Actions artifacts...');
-    const importedSeries = await loadGitHubActionSeries(runUrl, token);
+    const run = parseGitHubRunUrl(runUrl);
+    const importedSeries = await loadGitHubActionSeries(run, token);
+    pendingImportSettings = createImportBatchSettings(run.runId);
     pendingImportDrafts = seriesToDrafts(importedSeries).map((draft) => ({
       selected: true,
-      draft: { ...draft, collapsed: true }
+      sourceDraft: structuredClone({ ...draft, collapsed: true }),
+      draft: applyImportBatchSettingsToDraft({ ...draft, collapsed: true })
     }));
     renderImportPreview();
     setImportStatus(
-      `Fetched ${importedSeries.length} lines. Line IDs include the CI run id suffix. Review, edit, then click Add Selected. Current data was not changed.`
+      `Fetched ${importedSeries.length} lines. Line ID suffix defaults to ${pendingImportSettings.idSuffix}. Review, edit, then click Add Selected. Current data was not changed.`
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Could not import GitHub Actions data.';
@@ -3274,8 +3467,7 @@ async function importGitHubActionData(): Promise<void> {
   }
 }
 
-async function loadGitHubActionSeries(runUrl: string, token: string): Promise<InferenceCurveSeries[]> {
-  const run = parseGitHubRunUrl(runUrl);
+async function loadGitHubActionSeries(run: GitHubRunRef, token: string): Promise<InferenceCurveSeries[]> {
   const headers = makeGitHubHeaders(token);
   const downloadHeaders = makeGitHubDownloadHeaders(token);
   const artifacts = await fetchGitHubArtifacts(run, headers);
@@ -3299,20 +3491,12 @@ async function loadGitHubActionSeries(runUrl: string, token: string): Promise<In
     }
   }
 
-  const merged = appendGitHubRunIdToSeriesIds(mergeImportedSeries(imported), run.runId);
+  const merged = mergeImportedSeries(imported);
   if (merged.length === 0) {
     const suffix = failures.length ? ` Last error: ${failures.at(-1)}` : '';
     throw new Error(`No benchmark CSV/JSON data found in the action artifacts.${suffix}`);
   }
   return merged;
-}
-
-function appendGitHubRunIdToSeriesIds(series: InferenceCurveSeries[], runId: string): InferenceCurveSeries[] {
-  const suffix = `-ci-${runId}`;
-  return series.map((line) => ({
-    ...line,
-    id: line.id.endsWith(suffix) ? line.id : `${line.id}${suffix}`
-  }));
 }
 
 function parseGitHubRunUrl(value: string): GitHubRunRef {
