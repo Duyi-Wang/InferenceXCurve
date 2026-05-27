@@ -115,6 +115,46 @@ button.primary {
   flex: 0 0 auto;
 }
 
+.quick-toolbar {
+  position: fixed;
+  z-index: 120;
+  top: 50%;
+  right: 18px;
+  display: grid;
+  gap: 8px;
+  padding: 6px;
+  border: 1px solid color-mix(in srgb, var(--border) 46%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--popover) 92%, transparent);
+  box-shadow: 0 16px 38px rgb(0 0 0 / 22%);
+  transform: translateY(-50%);
+  backdrop-filter: blur(10px);
+}
+
+.quick-tool-button {
+  display: inline-grid;
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  place-items: center;
+  padding: 0;
+  border-color: color-mix(in srgb, var(--border) 56%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--background) 72%, transparent);
+  color: var(--foreground);
+}
+
+.quick-tool-button:hover,
+.quick-tool-button:focus-visible {
+  border-color: color-mix(in srgb, var(--primary) 56%, var(--border));
+  background: color-mix(in srgb, var(--accent) 78%, transparent);
+}
+
+.quick-tool-button .button-icon {
+  width: 17px;
+  height: 17px;
+}
+
 .series-action-button {
   min-height: 30px;
   padding: 0 10px;
@@ -1703,6 +1743,14 @@ p {
 }
 
 @media (max-width: 700px) {
+  .quick-toolbar {
+    top: auto;
+    right: 12px;
+    bottom: 12px;
+    grid-auto-flow: column;
+    transform: none;
+  }
+
   .container {
     width: min(100% - 20px, 1440px);
   }

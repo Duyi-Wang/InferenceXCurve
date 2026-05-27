@@ -703,6 +703,14 @@ app.innerHTML = `
       <div id="series-editor" class="series-editor"></div>
     </section>
   </main>
+  <aside class="quick-toolbar no-export" aria-label="Quick actions">
+    <button id="quick-render" class="quick-tool-button" type="button" title="Render chart (Ctrl/Cmd+Enter)" aria-label="Render chart">
+      ${renderIcon('redraw')}
+    </button>
+    <button id="quick-top" class="quick-tool-button" type="button" title="Back to top" aria-label="Back to top">
+      ${renderIcon('arrow-up')}
+    </button>
+  </aside>
 `;
 
 const chartEl = document.querySelector<HTMLElement>('#chart')!;
@@ -731,6 +739,10 @@ if (initialData.loadedFromStorage) {
 }
 
 document.querySelector('#render-data')?.addEventListener('click', renderDraftData);
+document.querySelector('#quick-render')?.addEventListener('click', renderDraftData);
+document.querySelector('#quick-top')?.addEventListener('click', () => {
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+});
 
 document.querySelector('#reset-data')?.addEventListener('click', () => {
   currentSeries = structuredClone(exampleSeries);
@@ -1291,6 +1303,8 @@ function renderIcon(name: string): string {
     trash: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m6 6 1 15h10l1-15"/><path d="M10 11v6"/><path d="M14 11v6"/>',
     merge: '<path d="M8 7h3a5 5 0 0 1 5 5v5"/><path d="m13 14 3 3 3-3"/><path d="M8 17h3a5 5 0 0 0 5-5V7"/><path d="m13 10 3-3 3 3"/><path d="M4 7h4"/><path d="M4 17h4"/>',
     'download-cloud': '<path d="M12 13v8"/><path d="m8 17 4 4 4-4"/><path d="M20 16.6A5 5 0 0 0 18 7h-1.3A8 8 0 1 0 4 15.3"/>',
+    redraw: '<path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/>',
+    'arrow-up': '<path d="M12 19V5"/><path d="m5 12 7-7 7 7"/>',
     check: '<path d="M20 6 9 17l-5-5"/>',
     x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
     'grip-vertical': '<circle cx="9" cy="5" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="19" r="1"/>',
