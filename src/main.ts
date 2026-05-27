@@ -580,6 +580,7 @@ let state: AppState = initialData.state;
 let localSaveTimer: number | null = null;
 let localStorageWarningShown = false;
 let draggedSeriesIndex: number | null = null;
+let chartIsDirty = false;
 
 sortSeriesDraftsByLayer();
 normalizeDraftRenderOrderFromPanelOrder();
@@ -641,23 +642,30 @@ app.innerHTML = `
           <h2>Line Projects</h2>
           <p>Edit shared line fields once, then paste point rows from Excel. Changes are auto-saved in this browser.</p>
         </div>
-        <div class="data-header-actions">
-          <button id="add-series" class="action-button" type="button">
-            ${renderIcon('plus')}
-            <span>Add Line</span>
-          </button>
-          <button id="merge-lines" class="action-button" type="button">
-            ${renderIcon('merge')}
-            <span>Merge Lines</span>
-          </button>
-          <button id="reset-data" class="action-button" type="button">
-            ${renderIcon('refresh')}
-            <span>Reset Example</span>
-          </button>
-          <button id="clear-data" class="action-button danger" type="button">
-            ${renderIcon('trash')}
-            <span>Clear Data</span>
-          </button>
+        <div class="data-header-controls">
+          <div class="data-header-actions">
+            <button id="render-data" type="button" class="primary action-button" title="Render chart (Ctrl/Cmd+Enter)">
+              ${renderIcon('play')}
+              <span>Render Chart</span>
+            </button>
+            <button id="add-series" class="action-button" type="button">
+              ${renderIcon('plus')}
+              <span>Add Line</span>
+            </button>
+            <button id="merge-lines" class="action-button" type="button">
+              ${renderIcon('merge')}
+              <span>Merge Lines</span>
+            </button>
+            <button id="reset-data" class="action-button" type="button">
+              ${renderIcon('refresh')}
+              <span>Reset Example</span>
+            </button>
+            <button id="clear-data" class="action-button danger" type="button">
+              ${renderIcon('trash')}
+              <span>Clear Data</span>
+            </button>
+          </div>
+          <p id="status" class="status data-header-status" role="status"></p>
         </div>
       </div>
 
@@ -693,14 +701,6 @@ app.innerHTML = `
       <div id="merge-preview" class="merge-preview"></div>
 
       <div id="series-editor" class="series-editor"></div>
-
-      <div class="data-actions">
-        <button id="render-data" type="button" class="primary action-button">
-          ${renderIcon('play')}
-          <span>Render Chart</span>
-        </button>
-        <p id="status" class="status" role="status"></p>
-      </div>
     </section>
   </main>
 `;
@@ -730,24 +730,7 @@ if (initialData.loadedFromStorage) {
   setStatus('Loaded saved browser data');
 }
 
-document.querySelector('#render-data')?.addEventListener('click', () => {
-  try {
-    commitSeriesDom();
-    normalizeDraftRenderOrderFromPanelOrder();
-    currentSeries = draftsToSeries(seriesDrafts);
-    syncCurrentSeriesOrderFromDrafts();
-    reconcileFiltersForSeries(currentSeries);
-    reconcileActiveSeriesForChart();
-    renderFilterControls();
-    renderSeriesEditor();
-    renderAll();
-    clearMergePreview();
-    setStatus(`${currentSeries.length} lines rendered from ${countPointRows(seriesDrafts)} point rows`);
-    scheduleLocalSave();
-  } catch (error) {
-    setStatus(error instanceof Error ? error.message : 'Invalid line data', true);
-  }
-});
+document.querySelector('#render-data')?.addEventListener('click', renderDraftData);
 
 document.querySelector('#reset-data')?.addEventListener('click', () => {
   currentSeries = structuredClone(exampleSeries);
@@ -810,6 +793,7 @@ document.querySelector('#add-series')?.addEventListener('click', () => {
   renderSeriesEditor();
   clearMergePreview();
   scheduleLocalSave();
+  markChartDirty();
 });
 
 mergeLinesEl.addEventListener('click', openMergePreview);
@@ -827,10 +811,36 @@ document.querySelector('#download-png')?.addEventListener('click', downloadPng);
 document.querySelector('#download-csv')?.addEventListener('click', downloadCsv);
 document.querySelector('#reset-zoom')?.addEventListener('click', resetInferenceCurveZoom);
 window.addEventListener('resize', renderAll);
+window.addEventListener('keydown', handleGlobalKeydown);
 window.addEventListener('beforeunload', () => {
   commitSeriesDom();
   saveLocalDataNow();
 });
+
+function renderDraftData(): void {
+  try {
+    commitSeriesDom();
+    normalizeDraftRenderOrderFromPanelOrder();
+    currentSeries = draftsToSeries(seriesDrafts);
+    syncCurrentSeriesOrderFromDrafts();
+    reconcileFiltersForSeries(currentSeries);
+    reconcileActiveSeriesForChart();
+    renderFilterControls();
+    renderSeriesEditor();
+    renderAll();
+    clearMergePreview();
+    setStatus(`${currentSeries.length} lines rendered from ${countPointRows(seriesDrafts)} point rows`);
+    scheduleLocalSave();
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : 'Invalid line data', true);
+  }
+}
+
+function handleGlobalKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'Enter' || (!event.ctrlKey && !event.metaKey)) return;
+  event.preventDefault();
+  renderDraftData();
+}
 
 function getChartOptions(): InferenceCurveChartOptions {
   return {
@@ -1394,6 +1404,7 @@ function attachSeriesEditorEvents(): void {
         syncColorPicker(seriesIndex, draft.color || getEditorResolvedColor(seriesIndex), draft.color);
       }
       scheduleLocalSave();
+      markChartDirty();
     });
   });
 
@@ -1412,6 +1423,7 @@ function attachSeriesEditorEvents(): void {
           : option;
       renderSeriesEditor();
       scheduleLocalSave();
+      markChartDirty();
     });
   });
 
@@ -1422,6 +1434,7 @@ function attachSeriesEditorEvents(): void {
       if (!draft) return;
       draft.lineStyle = normalizeCellText(input.value) || '8 4';
       scheduleLocalSave();
+      markChartDirty();
     });
   });
 
@@ -1435,6 +1448,7 @@ function attachSeriesEditorEvents(): void {
       syncPresetSelection(seriesIndex, input.value);
       syncColorMode(seriesIndex, 'custom', input.value);
       scheduleLocalSave();
+      markChartDirty();
     });
   });
 
@@ -1446,6 +1460,7 @@ function attachSeriesEditorEvents(): void {
       draft.color = '';
       renderSeriesEditor();
       scheduleLocalSave();
+      markChartDirty();
     });
   });
 
@@ -1462,6 +1477,7 @@ function attachSeriesEditorEvents(): void {
       syncPresetSelection(seriesIndex, color);
       syncColorMode(seriesIndex, 'custom', color);
       scheduleLocalSave();
+      markChartDirty();
     });
   });
 
@@ -1500,6 +1516,7 @@ function attachSeriesEditorEvents(): void {
       syncCurrentSeriesOrderFromDrafts();
       renderSeriesEditor();
       scheduleLocalSave();
+      if (action !== 'toggle-data') markChartDirty();
     });
   });
 
@@ -1511,6 +1528,7 @@ function attachSeriesEditorEvents(): void {
       ensurePointRow(seriesIndex, rowIndex);
       seriesDrafts[seriesIndex]!.points[rowIndex]![key] = normalizeCellText(select.value);
       scheduleLocalSave();
+      markChartDirty();
     });
   });
 
@@ -1541,6 +1559,7 @@ function attachSeriesEditorEvents(): void {
       }
 
       scheduleLocalSave();
+      markChartDirty();
     });
   });
 
@@ -1552,6 +1571,7 @@ function attachSeriesEditorEvents(): void {
       ensurePointRow(seriesIndex, rowIndex);
       seriesDrafts[seriesIndex]!.points[rowIndex]![key] = normalizeCellText(cell.textContent ?? '');
       scheduleLocalSave();
+      markChartDirty();
     });
     cell.addEventListener('paste', handlePointTablePaste);
     cell.addEventListener('keydown', handlePointTableKeydown);
@@ -1666,10 +1686,12 @@ function handlePointTablePaste(event: ClipboardEvent): void {
   renderSeriesEditor();
   focusPointCell(seriesIndex, startRow, startCol);
   scheduleLocalSave();
+  markChartDirty();
 }
 
 function handlePointTableKeydown(event: KeyboardEvent): void {
   const cell = event.currentTarget as HTMLTableCellElement;
+  if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) return;
   if (event.key !== 'Tab' && event.key !== 'Enter') return;
 
   event.preventDefault();
@@ -4152,8 +4174,18 @@ function downloadBlob(filename: string, content: string, type: string): void {
 }
 
 function setStatus(message: string, error = false): void {
+  chartIsDirty = false;
   statusEl.textContent = message;
   statusEl.classList.toggle('error', error);
+  statusEl.classList.remove('dirty');
+}
+
+function markChartDirty(): void {
+  if (chartIsDirty && statusEl.classList.contains('dirty')) return;
+  chartIsDirty = true;
+  statusEl.textContent = 'Chart has unrendered changes. Press Ctrl/Cmd+Enter to render.';
+  statusEl.classList.remove('error');
+  statusEl.classList.add('dirty');
 }
 
 function setImportStatus(message: string, error = false): void {

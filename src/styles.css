@@ -644,11 +644,24 @@ p {
   font-size: 13px;
 }
 
+.data-header-controls {
+  display: flex;
+  min-width: min(620px, 100%);
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 7px;
+}
+
 .data-header-actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.data-header-status {
+  max-width: 100%;
+  text-align: right;
 }
 
 .action-import-panel {
@@ -1623,11 +1636,16 @@ p {
 
 .status {
   min-height: 18px;
+  margin: 0;
   font-size: 12px;
 }
 
 .status.error {
   color: #ef4444;
+}
+
+.status.dirty {
+  color: var(--foreground);
 }
 
 .custom-scrollbar::-webkit-scrollbar,
@@ -1709,6 +1727,7 @@ p {
   }
 
   .data-card-header,
+  .data-header-controls,
   .data-actions {
     flex-direction: column;
     align-items: stretch;
@@ -1716,6 +1735,10 @@ p {
 
   .data-header-actions {
     justify-content: flex-start;
+  }
+
+  .data-header-status {
+    text-align: left;
   }
 
   .action-import-panel {
