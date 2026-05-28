@@ -66,3 +66,18 @@ Pull requests should include a short summary, verification steps, screenshots fo
 ## Security & Configuration Tips
 
 GitHub tokens entered in the import panel are used only for browser requests and are not stored by the app. Do not hard-code tokens, benchmark credentials, or private artifact URLs in source files. Keep large benchmark snapshots in `src/exampleData.ts` only when they are useful as default demo data.
+
+## Agent Notes: Refreshing InferenceX Example Data
+
+When updating `src/exampleData.ts`, query the public InferenceX API rather than scraping the rendered page:
+
+```bash
+curl -L 'https://inferencex.semianalysis.com/api/v1/availability'
+curl -L 'https://inferencex.semianalysis.com/api/v1/benchmarks?model=DeepSeek-R1-0528'
+curl -L 'https://inferencex.semianalysis.com/api/v1/benchmarks?model=DeepSeek-R1-0528&date=2026-05-27&exact=true'
+curl -L 'https://inferencex.semianalysis.com/api/v1/workflow-info?date=2026-05-27'
+```
+
+Use the display model name in the benchmark URL (`DeepSeek-R1-0528`), then filter returned rows by `model === "dsr1"`. The current example set keeps `1024/1024` and `8192/1024`, `fp4` and `fp8`, `disagg === true`, and these hardware/framework/spec combinations: `mi355x/mori-sglang`, `b200/dynamo-trt`, and `b200/dynamo-sglang`, with both `none` and `mtp`.
+
+Map InferenceX rows to this app as follows: `metrics.median_intvty` -> `interactivity`, `metrics.tput_per_gpu` -> `throughput`, `conc` -> `concurrency`, `spec_method === "mtp"` -> line `MTP`, otherwise `Non-MTP`, `hardware_framework[_mtp]` -> `hwKey`, and `date` plus `run_url` -> point `Note`.
