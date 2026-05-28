@@ -1561,8 +1561,8 @@ function computeGradientStops(
 function formatTooltip(point: ChartPoint): string {
   const fields = [
     `<strong>${escapeHtml(point.seriesName)}</strong>`,
-    `${formatNumber(point.x)} tok/s/user`,
-    `${formatLargeNumber(point.y)} tok/s/gpu`,
+    `Interactivity: ${formatTooltipMetric(point.x)} tok/s/user`,
+    `Throughput: ${formatTooltipMetric(point.y)} tok/s/gpu`,
     `Precision: ${escapeHtml(formatPrecision(point.precision))}`
   ];
   if (point.strategy) fields.push(`Parallelism: ${escapeHtml(point.strategy)}`);
@@ -1643,6 +1643,15 @@ export function formatLargeNumber(value: number): string {
     return `${(value / 1_000).toFixed(value % 1_000 === 0 ? 0 : 1)}k`;
   }
   return formatNumber(value);
+}
+
+function formatTooltipMetric(value: number): string {
+  return Number.isFinite(value)
+    ? new Intl.NumberFormat('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }).format(value)
+    : '';
 }
 
 function logTickFormat(scale: d3.ScaleLogarithmic<number, number>) {
