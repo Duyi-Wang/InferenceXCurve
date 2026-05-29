@@ -199,6 +199,10 @@ const DEFAULT_PRECISION = 'default';
 const DEFAULT_LINE_STYLE = 'solid';
 const LOCAL_STORAGE_KEY = 'inferencex-curve:user-data:v1';
 const LOCAL_SAVE_DEBOUNCE_MS = 350;
+const EXPORT_PADDING = 32;
+const EXPORT_TITLE_HEIGHT = 62;
+const EXPORT_LAYOUT_GAP = 16;
+const EXPORT_IMAGE_SCALE = 2;
 
 const DB_MODEL_TO_DISPLAY: Record<string, string> = {
   dsr1: 'DeepSeek-R1-0528',
@@ -280,20 +284,6 @@ const pointShapeOptions = [
   { value: 'star', label: 'Star', symbol: '★' },
   { value: 'plus', label: 'Plus', symbol: '✚' },
   { value: 'cross', label: 'Cross', symbol: '✕' }
-];
-
-const seriesCsvColumns: TableColumn[] = [
-  { key: 'series_id', label: 'Line ID' },
-  { key: 'series_name', label: 'Line Name' },
-  { key: 'model', label: 'Model' },
-  { key: 'islOsl', label: 'ISL/OSL' },
-  { key: 'precision', label: 'Precision' },
-  { key: 'mtp', label: 'MTP' },
-  { key: 'marker', label: 'Line Marker' },
-  { key: 'title', label: 'Title' },
-  { key: 'color', label: 'Color' },
-  { key: 'lineStyle', label: 'Line Type' },
-  { key: 'renderOrder', label: 'Layer' }
 ];
 
 const colorPresets: ColorPreset[] = [
@@ -4234,45 +4224,50 @@ function formatRateLimitReset(value: string | null): string {
 function downloadCsv(): void {
   commitSeriesDom();
   scheduleLocalSave();
-  const rows = [
-    [...seriesCsvColumns.map((column) => column.label), ...pointColumns.map((column) => column.label)],
-    ...seriesDrafts.flatMap((series) =>
-      series.points.map((row) => [
-        series.id,
-        series.name,
-        series.model,
-        series.islOsl,
-        series.precision,
-        getDraftMtpFilter(series),
-        normalizePointShapeValue(series.marker),
-        series.title,
-        series.color,
-        series.lineStyle,
-        String(series.renderOrder),
-        ...pointColumns.map((column) => row[column.key] ?? '')
-      ])
-    )
-  ];
+  const rows = buildChartCsvRows();
   const csv = rows.map((row) => row.map(csvCell).join(',')).join('\n');
-  downloadBlob('token-throughput-vs-interactivity.csv', csv, 'text/csv;charset=utf-8');
+  downloadBlob(makeExportFilename('csv'), `\uFEFF${csv}`, 'text/csv;charset=utf-8');
 }
 
 function downloadPng(): void {
   const svg = chartEl.querySelector('svg');
   if (!svg) return;
+  const palette = getExportPalette();
+  const chartSize = getSvgSize(svg);
   const clone = svg.cloneNode(true) as SVGSVGElement;
-  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-  const styles = getComputedStyle(document.documentElement);
-  const bg = styles.getPropertyValue('--background').trim() || '#131416';
-  clone.insertAdjacentHTML('afterbegin', `<rect width="100%" height="100%" fill="${bg}"/>`);
-  const svgText = new XMLSerializer().serializeToString(clone);
+  const legendItems = getExportLegendItems();
+  const legendWidth = legendItems.length > 0 ? getExportLegendWidth(legendItems) : 0;
+  const legendLayout = buildExportLegendLayout(legendItems, legendWidth);
+  const chartX = EXPORT_PADDING;
+  const chartY = EXPORT_PADDING + EXPORT_TITLE_HEIGHT;
+  const legendX = chartX + chartSize.width + (legendWidth > 0 ? EXPORT_LAYOUT_GAP : 0);
+  const outerWidth = chartSize.width + legendWidth + (legendWidth > 0 ? EXPORT_LAYOUT_GAP : 0) + EXPORT_PADDING * 2;
+  const outerHeight = Math.max(
+    chartY + chartSize.height + EXPORT_PADDING,
+    chartY + legendLayout.height + EXPORT_PADDING
+  );
+
+  prepareChartSvgForExport(clone, chartX, chartY, chartSize.width, chartSize.height, palette);
+  const chartSvgText = new XMLSerializer().serializeToString(clone);
+  const svgText = [
+    `<svg xmlns="http://www.w3.org/2000/svg" class="export-root" width="${outerWidth}" height="${outerHeight}" viewBox="0 0 ${outerWidth} ${outerHeight}" style="${escapeAttribute(buildSvgVariableStyle(palette))}">`,
+    buildExportStyle(palette),
+    `<rect width="100%" height="100%" fill="${escapeAttribute(palette.background)}"/>`,
+    buildExportTitleSvg(EXPORT_PADDING, EXPORT_PADDING, outerWidth - EXPORT_PADDING * 2, palette),
+    chartSvgText,
+    legendWidth > 0 ? buildExportLegendSvg(legendLayout, legendX, chartY, legendWidth) : '',
+    '</svg>'
+  ].join('');
   const url = URL.createObjectURL(new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' }));
   const image = new Image();
   image.onload = () => {
     const canvas = document.createElement('canvas');
-    canvas.width = image.width;
-    canvas.height = image.height;
+    canvas.width = image.width * EXPORT_IMAGE_SCALE;
+    canvas.height = image.height * EXPORT_IMAGE_SCALE;
     const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = palette.background;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.scale(EXPORT_IMAGE_SCALE, EXPORT_IMAGE_SCALE);
     ctx.drawImage(image, 0, 0);
     URL.revokeObjectURL(url);
     canvas.toBlob((blob) => {
@@ -4280,12 +4275,388 @@ function downloadPng(): void {
       const pngUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = pngUrl;
-      link.download = 'token-throughput-vs-interactivity.png';
+      link.download = makeExportFilename('png');
       link.click();
       URL.revokeObjectURL(pngUrl);
     });
   };
+  image.onerror = () => {
+    URL.revokeObjectURL(url);
+    setStatus('Could not export PNG.', true);
+  };
   image.src = url;
+}
+
+function buildChartCsvRows(): string[][] {
+  const sourceSeries = getSeriesForPersistence();
+  const lineById = new Map(sourceSeries.map((line) => [line.id, line]));
+  const chartSeries = filterSeriesByMtp(
+    filterSeriesByModelAndSequence(sourceSeries, state.modelFilter, state.islOslFilter),
+    state.mtpFilter
+  ).filter((series) => state.selectedPrecisions.has(getSeriesPrecision(series)));
+  const chartSeriesIds = new Set(chartSeries.map((series) => series.id));
+  const prepared = prepareInferenceCurveSeries(sourceSeries, state.highContrast, state.theme);
+  const rows: string[][] = [
+    [
+      'Line ID',
+      'Line Name',
+      'Title',
+      'Model',
+      'ISL/OSL',
+      'Precision',
+      'MTP',
+      'HW Key',
+      'Color Mode',
+      'Resolved Color',
+      'Line Type',
+      'Line Marker',
+      'Layer',
+      'Included in Chart',
+      'Active Line',
+      'Point Index',
+      'Roofline Point',
+      'Point Marker',
+      'Interactivity (tok/s/user)',
+      'Throughput/GPU (tok/s/gpu)',
+      'Prefill GPUs',
+      'Decode GPUs',
+      'Total GPUs',
+      'Prefill TP',
+      'Prefill EP',
+      'Prefill DPA',
+      'Prefill Workers',
+      'Decode TP',
+      'Decode EP',
+      'Decode DPA',
+      'Decode Workers',
+      'DPA',
+      'Disagg',
+      'Multi-node',
+      'Concurrency',
+      'Strategy',
+      'Note'
+    ]
+  ];
+
+  prepared.forEach((series) => {
+    const line = lineById.get(series.id);
+    if (!line) return;
+    const activeLine = state.activeSeriesIds.has(series.id);
+    const filteredLine = chartSeriesIds.has(series.id);
+
+    series.points.forEach((point) => {
+      const prefillGpus = readExportNumber(point.num_prefill_gpu);
+      const decodeGpus = readExportNumber(point.num_decode_gpu);
+      const totalGpus =
+        prefillGpus !== undefined && decodeGpus !== undefined ? prefillGpus + decodeGpus : point.tp;
+      const includedInChart =
+        filteredLine &&
+        activeLine &&
+        state.selectedPrecisions.has(point.precision) &&
+        (state.showNonOptimalPoints || point.roof);
+
+      rows.push([
+        line.id,
+        line.name,
+        line.title ?? '',
+        getSeriesModel(line),
+        getSeriesIslOsl(line),
+        getSeriesPrecision(line),
+        getSeriesMtpFilter(line),
+        String(line.hwKey ?? ''),
+        line.color?.trim() ? 'Custom' : 'Auto',
+        series.color,
+        line.lineStyle ?? DEFAULT_LINE_STYLE,
+        normalizePointShapeValue(String(line.marker ?? '')) || 'precision',
+        String(line.renderOrder ?? series.renderOrder),
+        formatExportValue(includedInChart),
+        formatExportValue(activeLine),
+        String(point.pointIndex + 1),
+        formatExportValue(point.roof),
+        normalizePointShapeValue(String(point.shape ?? '')) || '',
+        formatExportValue(point.x),
+        formatExportValue(point.y),
+        formatExportValue(point.num_prefill_gpu),
+        formatExportValue(point.num_decode_gpu),
+        formatExportValue(totalGpus),
+        formatExportValue(point.prefill_tp),
+        formatExportValue(point.prefill_ep),
+        formatExportValue(point.prefill_dp_attention),
+        formatExportValue(point.prefill_num_workers),
+        formatExportValue(point.decode_tp),
+        formatExportValue(point.decode_ep),
+        formatExportValue(point.decode_dp_attention),
+        formatExportValue(point.decode_num_workers),
+        formatExportValue(point.dp_attention),
+        formatExportValue(point.disagg),
+        formatExportValue(point.is_multinode),
+        formatExportValue(point.concurrency),
+        String(point.strategy ?? ''),
+        String(point.label ?? '')
+      ]);
+    });
+  });
+
+  return rows;
+}
+
+function readExportNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function formatExportValue(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : '';
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  return String(value);
+}
+
+interface ExportPalette {
+  background: string;
+  foreground: string;
+  mutedForeground: string;
+  accent: string;
+  border: string;
+  borderAlt: string;
+  fontFamily: string;
+}
+
+interface ExportLegendItem {
+  name: string;
+  title: string;
+  color: string;
+  lineDasharray: string | null;
+  active: boolean;
+}
+
+interface ExportLegendLayoutItem extends ExportLegendItem {
+  lines: string[];
+  y: number;
+  height: number;
+}
+
+interface ExportLegendLayout {
+  items: ExportLegendLayoutItem[];
+  height: number;
+  activeCount: number;
+}
+
+function getExportPalette(): ExportPalette {
+  const styles = getComputedStyle(document.documentElement);
+  const read = (name: string, fallback: string) => styles.getPropertyValue(name).trim() || fallback;
+  return {
+    background: read('--background', '#131416'),
+    foreground: read('--foreground', '#eaebec'),
+    mutedForeground: read('--muted-foreground', '#b4b9bc'),
+    accent: read('--accent', '#1d1f21'),
+    border: read('--border', '#656b72'),
+    borderAlt: read('--border-alt', '#222426'),
+    fontFamily:
+      styles.getPropertyValue('font-family').trim() ||
+      '"DM Sans", Inter, ui-sans-serif, system-ui, sans-serif'
+  };
+}
+
+function getSvgSize(svg: SVGSVGElement): { width: number; height: number } {
+  const read = (attribute: 'width' | 'height', fallback: number) => {
+    const value = Number(svg.getAttribute(attribute));
+    return Number.isFinite(value) && value > 0 ? value : fallback;
+  };
+  const rect = svg.getBoundingClientRect();
+  return {
+    width: Math.round(read('width', rect.width || 960)),
+    height: Math.round(read('height', rect.height || 575))
+  };
+}
+
+function prepareChartSvgForExport(
+  clone: SVGSVGElement,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  palette: ExportPalette
+): void {
+  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  clone.setAttribute('x', String(x));
+  clone.setAttribute('y', String(y));
+  clone.setAttribute('width', String(width));
+  clone.setAttribute('height', String(height));
+  clone.setAttribute('style', buildSvgVariableStyle(palette));
+  clone.querySelector('.ruler-group')?.remove();
+}
+
+function buildSvgVariableStyle(palette: ExportPalette): string {
+  return [
+    `--background:${palette.background}`,
+    `--foreground:${palette.foreground}`,
+    `--muted-foreground:${palette.mutedForeground}`,
+    `--accent:${palette.accent}`,
+    `--border:${palette.border}`,
+    `--border-alt:${palette.borderAlt}`,
+    `font-family:${palette.fontFamily}`
+  ].join(';');
+}
+
+function buildExportStyle(palette: ExportPalette): string {
+  return `
+    <style>
+      .export-root, .export-root text { font-family: ${palette.fontFamily}; }
+      .export-title { fill: ${palette.foreground}; font-size: 18px; font-weight: 700; }
+      .export-subtitle, .export-legend-meta { fill: ${palette.mutedForeground}; font-size: 12px; }
+      .export-legend-title { fill: ${palette.foreground}; font-size: 12px; font-weight: 700; }
+      .export-legend-text { fill: ${palette.foreground}; font-size: 11.5px; }
+      .export-legend-box { fill: ${palette.accent}; stroke: ${palette.border}; stroke-opacity: 0.58; }
+      .chart-root .x-axis .domain, .chart-root .y-axis .domain { stroke: ${palette.border}; stroke-width: 1; }
+      .chart-root .tick line { stroke: ${palette.border}; }
+      .chart-root .tick text { fill: ${palette.foreground}; font-size: 10px; }
+      .chart-root .grid line { stroke: ${palette.borderAlt}; }
+      .chart-root .grid .plot-border { stroke: ${palette.border}; }
+      .chart-watermark { fill: ${palette.foreground}; font-weight: 800; opacity: 0.055; user-select: none; }
+      .y-axis-label, .x-axis-label { fill: ${palette.foreground}; font-size: 12px; }
+      .point-label { paint-order: stroke; stroke: ${palette.background}; stroke-width: 3px; fill: ${palette.foreground}; }
+      .parallelism-label text, .line-label text, .pill-text { fill: #fff; font-size: 9px; font-weight: 700; }
+      .line-label text { font-size: 11px; }
+      .pill-bg { opacity: 0.9; }
+    </style>
+  `;
+}
+
+function buildExportTitleSvg(x: number, y: number, width: number, palette: ExportPalette): string {
+  const title = document.querySelector('.chart-caption h2')?.textContent?.trim() || 'Token Throughput per GPU vs. Interactivity';
+  const subtitle = chartSubtitleEl.textContent.trim() || getChartSubtitle();
+  return `
+    <g transform="translate(${x},${y})">
+      <text class="export-title" x="0" y="19">${escapeHtml(title)}</text>
+      <text class="export-subtitle" x="0" y="43">${escapeHtml(subtitle)}</text>
+      <line x1="0" y1="56" x2="${width}" y2="56" stroke="${escapeAttribute(palette.border)}" stroke-opacity="0.32"/>
+    </g>
+  `;
+}
+
+function getExportLegendItems(): ExportLegendItem[] {
+  const filteredSeries = getFilteredSeriesForChart();
+  const prepared = prepareInferenceCurveSeries(filteredSeries, state.highContrast, state.theme);
+  const query = state.search.trim().toLowerCase();
+
+  return prepared
+    .filter(
+      (series) =>
+        state.activeSeriesIds.has(series.id) &&
+        (!query ||
+          series.name.toLowerCase().includes(query) ||
+          Boolean(series.title?.toLowerCase().includes(query)))
+    )
+    .map((series) => ({
+      name: series.name,
+      title: series.title ?? series.name,
+      color: series.color,
+      lineDasharray: series.lineDasharray,
+      active: true
+    }));
+}
+
+function getExportLegendWidth(items: ExportLegendItem[]): number {
+  const longestName = Math.max(...items.map((item) => item.name.length), 0);
+  return Math.max(196, Math.min(310, Math.ceil(longestName * 6.4 + 72)));
+}
+
+function buildExportLegendLayout(items: ExportLegendItem[], width: number): ExportLegendLayout {
+  if (items.length === 0 || width <= 0) return { items: [], height: 0, activeCount: 0 };
+
+  const maxChars = Math.max(18, Math.floor((width - 58) / 6.2));
+  let y = 36;
+  const layoutItems = items.map((item) => {
+    const lines = wrapSvgText(item.name, maxChars);
+    const height = Math.max(23, lines.length * 14 + 6);
+    const layoutItem = { ...item, lines, y, height };
+    y += height;
+    return layoutItem;
+  });
+
+  return {
+    items: layoutItems,
+    height: y + 10,
+    activeCount: items.length
+  };
+}
+
+function buildExportLegendSvg(
+  layout: ExportLegendLayout,
+  x: number,
+  y: number,
+  width: number
+): string {
+  if (layout.items.length === 0) return '';
+  const entries = layout.items
+    .map((item) => {
+      const text = item.lines
+        .map(
+          (line, index) =>
+            `<tspan x="44" dy="${index === 0 ? 0 : 14}">${escapeHtml(line)}</tspan>`
+        )
+        .join('');
+      const dash = item.lineDasharray ? ` stroke-dasharray="${escapeAttribute(item.lineDasharray)}"` : '';
+      return `
+        <g transform="translate(12,${item.y})">
+          <title>${escapeHtml(item.title)}</title>
+          <line x1="0" y1="8" x2="30" y2="8" stroke="${escapeAttribute(item.color)}" stroke-width="3" stroke-linecap="round"${dash}/>
+          <circle cx="15" cy="8" r="3.4" fill="${escapeAttribute(item.color)}"/>
+          <text class="export-legend-text" x="44" y="12">${text}</text>
+        </g>
+      `;
+    })
+    .join('');
+
+  return `
+    <g transform="translate(${x},${y})">
+      <rect class="export-legend-box" width="${width}" height="${layout.height}" rx="6"/>
+      <text class="export-legend-title" x="12" y="19">Active Lines</text>
+      <text class="export-legend-meta" x="${width - 12}" y="19" text-anchor="end">${layout.activeCount}</text>
+      ${entries}
+    </g>
+  `;
+}
+
+function wrapSvgText(value: string, maxChars: number): string[] {
+  const words = value.trim().split(/\s+/u).filter(Boolean);
+  if (words.length === 0) return [''];
+  const lines: string[] = [];
+  let current = '';
+
+  words.forEach((word) => {
+    if (word.length > maxChars) {
+      if (current) {
+        lines.push(current);
+        current = '';
+      }
+      for (let index = 0; index < word.length; index += maxChars) {
+        lines.push(word.slice(index, index + maxChars));
+      }
+      return;
+    }
+
+    const next = current ? `${current} ${word}` : word;
+    if (next.length <= maxChars) {
+      current = next;
+    } else {
+      if (current) lines.push(current);
+      current = word;
+    }
+  });
+
+  if (current) lines.push(current);
+  return lines;
+}
+
+function makeExportFilename(extension: 'csv' | 'png'): string {
+  const label = getChartSubtitle()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, '-')
+    .replace(/^-+|-+$/gu, '')
+    .slice(0, 96);
+  const date = new Date().toISOString().slice(0, 10);
+  return `${label || 'inferencex-curve'}-${date}.${extension}`;
 }
 
 function getColorPicker(seriesIndex: number): HTMLInputElement | null {
