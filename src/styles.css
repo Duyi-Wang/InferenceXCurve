@@ -706,7 +706,7 @@ p {
 
 .action-import-panel {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) minmax(160px, 220px) auto;
+  grid-template-columns: minmax(260px, 1fr) minmax(210px, 260px) auto;
   align-items: end;
   gap: 10px;
   margin-bottom: 14px;
@@ -737,11 +737,11 @@ p {
   font-size: 13px;
 }
 
-.action-import-panel label.action-import-remember {
-  grid-column: 1 / -1;
+.action-import-token label.action-import-remember {
   flex-direction: row;
   align-items: center;
-  gap: 8px;
+  gap: 5px;
+  margin: 0 0 0 auto;
 }
 
 .action-import-remember input {
@@ -761,9 +761,14 @@ p {
 }
 
 .action-import-field-label {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 6px;
+  min-height: 18px;
+}
+
+.action-import-field-label > label {
+  flex: 0 0 auto;
 }
 
 .help-tip {

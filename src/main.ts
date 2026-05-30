@@ -711,9 +711,9 @@ app.innerHTML = `
             placeholder="https://github.com/owner/repo/actions/runs/123456789"
           />
         </label>
-        <label class="action-import-token">
-          <span class="action-import-field-label">
-            Token
+        <div class="action-import-token">
+          <div class="action-import-field-label">
+            <label for="github-token">Token</label>
             <span
               class="help-tip"
               tabindex="0"
@@ -727,29 +727,29 @@ app.innerHTML = `
                 permission, granted to that repository. A fine-grained token can only reach repos
                 owned by a single account, so for a private repo owned by <em>someone else</em>
                 (even if you are an admin), use a
-                <strong>classic PAT with the <code>repo</code> scope</strong> instead. Tip: set a
-                long expiry and keep it in a password manager so you can paste it anywhere.
-                <strong>Remember token</strong> stores it only in this browser&rsquo;s local
-                storage&mdash;it does not sync to other machines and is never included in exported
-                data.
+                <strong>classic PAT with the <code>repo</code> scope</strong> instead. Prefer a
+                minimal-scope, short-lived token; keep long-lived keys in a password manager rather
+                than ticking Remember. <strong>Remember</strong> saves the token <em>in plain
+                text</em> in this browser&rsquo;s local storage&mdash;it does not sync to other
+                machines and is never included in exported data.
               </span>
             </span>
-          </span>
+            <label class="action-import-remember">
+              <input id="github-token-remember" type="checkbox" />
+              <span>Remember</span>
+            </label>
+          </div>
           <input
             id="github-token"
             type="password"
             autocomplete="off"
             placeholder="Optional"
           />
-        </label>
+        </div>
         <button id="import-action-data" class="action-button" type="button">
           ${renderIcon('download-cloud')}
           <span>Import Action Data</span>
         </button>
-        <label class="action-import-remember">
-          <input id="github-token-remember" type="checkbox" />
-          <span>Remember token in this browser</span>
-        </label>
         <p id="github-import-status" class="action-import-status" role="status"></p>
         <div id="github-import-preview" class="import-preview"></div>
       </div>
