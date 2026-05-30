@@ -722,16 +722,10 @@ app.innerHTML = `
             >
               ${renderIcon('help')}
               <span class="help-tip-bubble">
-                Downloading run artifacts requires a token. For repos you own (or an org you can
-                configure), use a fine-grained PAT with only <strong>Actions: Read-only</strong>
-                permission, granted to that repository. A fine-grained token can only reach repos
-                owned by a single account, so for a private repo owned by <em>someone else</em>
-                (even if you are an admin), use a
-                <strong>classic PAT with the <code>repo</code> scope</strong> instead. Prefer a
-                minimal-scope, short-lived token; keep long-lived keys in a password manager rather
-                than ticking Remember. <strong>Remember</strong> saves the token <em>in plain
-                text</em> in this browser&rsquo;s local storage&mdash;it does not sync to other
-                machines and is never included in exported data.
+                Artifact downloads need a token. Use a fine-grained PAT
+                (<strong>Actions: Read-only</strong>); for a private repo owned by someone else, use
+                a <strong>classic PAT with <code>repo</code> scope</strong>. <strong>Remember</strong>
+                saves it in plain text, in this browser only.
               </span>
             </span>
             <label class="action-import-remember">
@@ -750,6 +744,9 @@ app.innerHTML = `
           ${renderIcon('download-cloud')}
           <span>Import Action Data</span>
         </button>
+        <div id="github-import-progress" class="import-progress" role="progressbar" hidden>
+          <div id="github-import-progress-fill" class="import-progress-fill"></div>
+        </div>
         <p id="github-import-status" class="action-import-status" role="status"></p>
         <div id="github-import-preview" class="import-preview"></div>
       </div>
@@ -783,6 +780,8 @@ const githubTokenEl = document.querySelector<HTMLInputElement>('#github-token')!
 const githubTokenRememberEl = document.querySelector<HTMLInputElement>('#github-token-remember')!;
 const importActionDataEl = document.querySelector<HTMLButtonElement>('#import-action-data')!;
 const githubImportStatusEl = document.querySelector<HTMLParagraphElement>('#github-import-status')!;
+const githubImportProgressEl = document.querySelector<HTMLElement>('#github-import-progress')!;
+const githubImportProgressFillEl = document.querySelector<HTMLElement>('#github-import-progress-fill')!;
 const githubImportPreviewEl = document.querySelector<HTMLElement>('#github-import-preview')!;
 const mergeLinesEl = document.querySelector<HTMLButtonElement>('#merge-lines')!;
 const mergePreviewEl = document.querySelector<HTMLElement>('#merge-preview')!;
@@ -3495,8 +3494,11 @@ async function importGitHubActionData(): Promise<void> {
   importActionDataEl.disabled = true;
   try {
     setImportStatus('Fetching GitHub Actions artifacts...');
+    setImportProgress(-1);
     const run = parseGitHubRunUrl(runUrl);
-    const importedSeries = await loadGitHubActionSeries(run, token);
+    const importedSeries = await loadGitHubActionSeries(run, token, (fraction) =>
+      setImportProgress(fraction)
+    );
     persistGitHubToken();
     pendingImportSettings = createImportBatchSettings(run.runId);
     pendingImportDrafts = seriesToDrafts(importedSeries).map((draft) => ({
@@ -3514,10 +3516,15 @@ async function importGitHubActionData(): Promise<void> {
     if (message.toLowerCase().includes('rate limit')) githubTokenEl.focus();
   } finally {
     importActionDataEl.disabled = false;
+    setImportProgress(null);
   }
 }
 
-async function loadGitHubActionSeries(run: GitHubRunRef, token: string): Promise<InferenceCurveSeries[]> {
+async function loadGitHubActionSeries(
+  run: GitHubRunRef,
+  token: string,
+  onProgress?: (fraction: number) => void
+): Promise<InferenceCurveSeries[]> {
   const headers = makeGitHubHeaders(token);
   const downloadHeaders = makeGitHubDownloadHeaders(token);
   const artifacts = await fetchGitHubArtifacts(run, headers);
@@ -3532,13 +3539,23 @@ async function loadGitHubActionSeries(run: GitHubRunRef, token: string): Promise
 
   const imported: InferenceCurveSeries[] = [];
   const failures: string[] = [];
-  for (const artifact of candidates) {
+  onProgress?.(0);
+  for (const [index, artifact] of candidates.entries()) {
     try {
-      setImportStatus(`Downloading artifact: ${artifact.name}`);
-      imported.push(...(await loadGitHubArtifactSeries(artifact, downloadHeaders)));
+      setImportStatus(
+        candidates.length > 1
+          ? `Downloading artifact ${index + 1}/${candidates.length}: ${artifact.name}`
+          : `Downloading artifact: ${artifact.name}`
+      );
+      imported.push(
+        ...(await loadGitHubArtifactSeries(artifact, downloadHeaders, (fraction) =>
+          onProgress?.((index + fraction) / candidates.length)
+        ))
+      );
     } catch (error) {
       failures.push(`${artifact.name}: ${error instanceof Error ? error.message : 'failed'}`);
     }
+    onProgress?.((index + 1) / candidates.length);
   }
 
   const merged = mergeImportedSeries(imported);
@@ -3595,13 +3612,47 @@ async function fetchGitHubJson<T>(url: string, headers: Headers): Promise<T> {
   return (await response.json()) as T;
 }
 
+async function fetchArtifactArchive(
+  url: string,
+  headers: Headers,
+  onProgress?: (fraction: number) => void
+): Promise<Uint8Array> {
+  const response = await fetch(url, { headers });
+  if (!response.ok) throw new Error(await formatFetchError(response));
+  const total = Number(response.headers.get('Content-Length'));
+  // Fall back to a buffered read when the stream or length is unavailable;
+  // the outer loop still advances the bar once this artifact resolves.
+  if (!response.body || !Number.isFinite(total) || total <= 0) {
+    return new Uint8Array(await response.arrayBuffer());
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      chunks.push(value);
+      received += value.length;
+      onProgress?.(Math.min(1, received / total));
+    }
+  }
+  const out = new Uint8Array(received);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return out;
+}
+
 async function loadGitHubArtifactSeries(
   artifact: GitHubArtifact,
-  headers: Headers
+  headers: Headers,
+  onProgress?: (fraction: number) => void
 ): Promise<InferenceCurveSeries[]> {
-  const response = await fetch(artifact.archive_download_url, { headers });
-  if (!response.ok) throw new Error(await formatFetchError(response));
-  const archive = unzipSync(new Uint8Array(await response.arrayBuffer()));
+  const bytes = await fetchArtifactArchive(artifact.archive_download_url, headers, onProgress);
+  const archive = unzipSync(bytes);
   const imported: InferenceCurveSeries[] = [];
 
   Object.entries(archive).forEach(([filename, bytes]) => {
@@ -4820,6 +4871,25 @@ function markChartDirty(): void {
 function setImportStatus(message: string, error = false): void {
   githubImportStatusEl.textContent = message;
   githubImportStatusEl.classList.toggle('error', error);
+}
+
+// fraction: null hides the bar, a negative value shows an indeterminate animation,
+// and 0..1 fills the bar to that proportion.
+function setImportProgress(fraction: number | null): void {
+  if (fraction === null) {
+    githubImportProgressEl.hidden = true;
+    githubImportProgressEl.classList.remove('indeterminate');
+    githubImportProgressFillEl.style.width = '0%';
+    return;
+  }
+  githubImportProgressEl.hidden = false;
+  if (fraction < 0) {
+    githubImportProgressEl.classList.add('indeterminate');
+    githubImportProgressFillEl.style.width = '';
+  } else {
+    githubImportProgressEl.classList.remove('indeterminate');
+    githubImportProgressFillEl.style.width = `${Math.min(100, Math.max(0, fraction) * 100)}%`;
+  }
 }
 
 function applyTheme(): void {
