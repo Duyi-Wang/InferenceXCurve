@@ -288,19 +288,18 @@ const pointShapeOptions = [
 ];
 
 const colorPresets: ColorPreset[] = [
-  { name: 'NVIDIA 1', value: 'oklch(0.780 0.15 126.3)' },
-  { name: 'NVIDIA 2', value: 'oklch(0.687 0.15 138.8)' },
-  { name: 'NVIDIA 3', value: 'oklch(0.593 0.15 151.3)' },
-  { name: 'NVIDIA 4', value: 'oklch(0.500 0.15 163.8)' },
-  { name: 'AMD 1', value: 'oklch(0.780 0.22 19.5)' },
-  { name: 'AMD 2', value: 'oklch(0.500 0.22 34.5)' },
-  { name: 'Tableau Blue', value: '#4e79a7' },
-  { name: 'Tableau Orange', value: '#f28e2c' },
-  { name: 'Tableau Teal', value: '#76b7b2' },
-  { name: 'Tableau Yellow', value: '#edc949' },
-  { name: 'Tableau Purple', value: '#af7aa1' },
-  { name: 'Tableau Brown', value: '#9c755f' },
-  { name: 'Tableau Gray', value: '#bab0ab' }
+  { name: 'Green', value: '#22c55e' },
+  { name: 'Emerald', value: '#10b981' },
+  { name: 'Lime', value: '#84cc16' },
+  { name: 'Red', value: '#ef4444' },
+  { name: 'Rose', value: '#f43f5e' },
+  { name: 'Orange', value: '#f97316' },
+  { name: 'Amber', value: '#f59e0b' },
+  { name: 'Cyan', value: '#06b6d4' },
+  { name: 'Blue', value: '#2563eb' },
+  { name: 'Indigo', value: '#6366f1' },
+  { name: 'Violet', value: '#8b5cf6' },
+  { name: 'Pink', value: '#ec4899' }
 ];
 
 const colorInputFallbacks = [
