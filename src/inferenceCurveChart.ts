@@ -152,6 +152,10 @@ const HOVER_POINT_SIZE = 6;
 const HIT_AREA_RADIUS = 12;
 const DIMMED_SERIES_OPACITY = 0.16;
 const CHART_MARGIN = { top: 18, right: 24, bottom: 48, left: 82 };
+
+// Exposed so the PNG export can align overlays (e.g. the legend) to the plot
+// area rather than the full chart SVG bounds.
+export const INFERENCE_CURVE_MARGIN = CHART_MARGIN;
 const WATERMARK_TEXT = 'MORI Internal';
 
 type Vendor = 'nvidia' | 'amd' | 'unknown';

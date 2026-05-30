@@ -5,6 +5,7 @@ import { strFromU8, unzipSync } from 'fflate';
 import { exampleSeries } from './exampleData';
 import {
   getAvailablePrecisions,
+  INFERENCE_CURVE_MARGIN,
   prepareInferenceCurveSeries,
   renderInferenceCurveChart,
   resetInferenceCurveZoom,
@@ -4379,14 +4380,19 @@ function downloadPng(): void {
   const legendItems = getExportLegendItems();
   const chartX = EXPORT_PADDING;
   const chartY = EXPORT_PADDING + EXPORT_TITLE_HEIGHT;
-  // Place the legend as a horizontal, centered, wrapping row below the chart so
-  // a handful of active lines no longer leaves a tall empty column on the side.
+  // Align the legend to the plot area (inside the axes) rather than the full
+  // chart SVG, and lay it out as a left-aligned grid below the chart.
+  const plotLeft = chartX + INFERENCE_CURVE_MARGIN.left;
+  const plotWidth = Math.max(
+    0,
+    chartSize.width - INFERENCE_CURVE_MARGIN.left - INFERENCE_CURVE_MARGIN.right
+  );
   const legendLayout =
     legendItems.length > 0
-      ? buildExportLegendLayout(legendItems, chartSize.width)
+      ? buildExportLegendLayout(legendItems, plotWidth)
       : { items: [], width: 0, height: 0 };
   const hasLegend = legendLayout.items.length > 0;
-  const legendX = chartX;
+  const legendX = plotLeft;
   const legendY = chartY + chartSize.height + EXPORT_LAYOUT_GAP;
   const outerWidth = chartSize.width + EXPORT_PADDING * 2;
   const outerHeight =
@@ -4711,36 +4717,28 @@ function buildExportLegendLayout(items: ExportLegendItem[], availableWidth: numb
     return { ...item, label, width: entryBaseWidth + label.length * EXPORT_LEGEND_CHAR_W };
   });
 
-  // Greedy pack into centered rows that fit within the chart width.
-  const rows: { items: typeof measured; width: number }[] = [];
-  let row: typeof measured = [];
-  let rowWidth = 0;
-  measured.forEach((item) => {
-    const advance = (row.length ? EXPORT_LEGEND_ITEM_GAP : 0) + item.width;
-    if (row.length && rowWidth + advance > innerWidth) {
-      rows.push({ items: row, width: rowWidth });
-      row = [];
-      rowWidth = 0;
-    }
-    rowWidth += (row.length ? EXPORT_LEGEND_ITEM_GAP : 0) + item.width;
-    row.push(item);
-  });
-  if (row.length) rows.push({ items: row, width: rowWidth });
+  // Left-aligned grid: uniform columns sized to the widest entry so labels line
+  // up, filled row by row.
+  const columnWidth = Math.min(innerWidth, Math.max(...measured.map((item) => item.width)));
+  const columns = Math.max(
+    1,
+    Math.min(
+      measured.length,
+      Math.floor((innerWidth + EXPORT_LEGEND_ITEM_GAP) / (columnWidth + EXPORT_LEGEND_ITEM_GAP))
+    )
+  );
+  const rowCount = Math.ceil(measured.length / columns);
 
-  const layoutItems: ExportLegendLayoutItem[] = [];
-  rows.forEach((currentRow, rowIndex) => {
-    let x = EXPORT_LEGEND_PAD_X + Math.max(0, (innerWidth - currentRow.width) / 2);
-    const y = EXPORT_LEGEND_PAD_Y + rowIndex * EXPORT_LEGEND_ROW_H;
-    currentRow.items.forEach((item) => {
-      layoutItems.push({ ...item, x, y });
-      x += item.width + EXPORT_LEGEND_ITEM_GAP;
-    });
-  });
+  const layoutItems: ExportLegendLayoutItem[] = measured.map((item, index) => ({
+    ...item,
+    x: EXPORT_LEGEND_PAD_X + (index % columns) * (columnWidth + EXPORT_LEGEND_ITEM_GAP),
+    y: EXPORT_LEGEND_PAD_Y + Math.floor(index / columns) * EXPORT_LEGEND_ROW_H
+  }));
 
   return {
     items: layoutItems,
     width: availableWidth,
-    height: EXPORT_LEGEND_PAD_Y * 2 + rows.length * EXPORT_LEGEND_ROW_H
+    height: EXPORT_LEGEND_PAD_Y * 2 + rowCount * EXPORT_LEGEND_ROW_H
   };
 }
 
