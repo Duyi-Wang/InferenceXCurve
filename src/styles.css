@@ -753,12 +753,79 @@ p {
   font-weight: 600;
 }
 
-.action-import-help {
-  grid-column: 1 / -1;
-  margin: -2px 0 0;
+.action-import-panel .action-button {
+  justify-self: start;
+  min-height: 34px;
+  padding: 0 14px;
+  white-space: nowrap;
+}
+
+.action-import-field-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.help-tip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--muted-foreground);
+  cursor: help;
+}
+
+.help-tip:hover,
+.help-tip:focus-visible {
+  color: var(--foreground);
+}
+
+.help-tip .button-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.help-tip-bubble {
+  position: absolute;
+  z-index: 60;
+  bottom: calc(100% + 8px);
+  left: -6px;
+  width: 320px;
+  max-width: min(320px, 78vw);
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+  border-radius: 8px;
+  background: var(--popover);
   color: var(--muted-foreground);
   font-size: 12px;
-  line-height: 1.4;
+  font-weight: 400;
+  line-height: 1.45;
+  text-transform: none;
+  letter-spacing: normal;
+  white-space: normal;
+  box-shadow: 0 14px 34px rgb(0 0 0 / 24%);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(4px);
+  transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s;
+  pointer-events: none;
+}
+
+.help-tip-bubble code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 50%, transparent);
+  font-size: 11px;
+}
+
+.help-tip:hover .help-tip-bubble,
+.help-tip:focus-visible .help-tip-bubble,
+.help-tip:focus-within .help-tip-bubble {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
 }
 
 .action-import-status {

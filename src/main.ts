@@ -712,7 +712,29 @@ app.innerHTML = `
           />
         </label>
         <label class="action-import-token">
-          <span>Token</span>
+          <span class="action-import-field-label">
+            Token
+            <span
+              class="help-tip"
+              tabindex="0"
+              role="note"
+              aria-label="GitHub token permissions help"
+            >
+              ${renderIcon('help')}
+              <span class="help-tip-bubble">
+                Downloading run artifacts requires a token. For repos you own (or an org you can
+                configure), use a fine-grained PAT with only <strong>Actions: Read-only</strong>
+                permission, granted to that repository. A fine-grained token can only reach repos
+                owned by a single account, so for a private repo owned by <em>someone else</em>
+                (even if you are an admin), use a
+                <strong>classic PAT with the <code>repo</code> scope</strong> instead. Tip: set a
+                long expiry and keep it in a password manager so you can paste it anywhere.
+                <strong>Remember token</strong> stores it only in this browser&rsquo;s local
+                storage&mdash;it does not sync to other machines and is never included in exported
+                data.
+              </span>
+            </span>
+          </span>
           <input
             id="github-token"
             type="password"
@@ -720,23 +742,14 @@ app.innerHTML = `
             placeholder="Optional"
           />
         </label>
-        <label class="action-import-remember">
-          <input id="github-token-remember" type="checkbox" />
-          <span>Remember token in this browser</span>
-        </label>
         <button id="import-action-data" class="action-button" type="button">
           ${renderIcon('download-cloud')}
           <span>Import Action Data</span>
         </button>
-        <p class="action-import-help">
-          Downloading run artifacts requires a token. Create a fine-grained personal access
-          token with only <strong>Actions: Read-only</strong> repository permission (Settings &rarr;
-          Developer settings &rarr; Personal access tokens &rarr; Fine-grained tokens). For private
-          repos also grant the token access to that repository. Tip: set a long expiry and keep it in
-          a password manager so you can paste it anywhere. <strong>Remember token</strong> stores it
-          only in this browser&rsquo;s local storage&mdash;it does not sync to other machines and is
-          never included in exported data.
-        </p>
+        <label class="action-import-remember">
+          <input id="github-token-remember" type="checkbox" />
+          <span>Remember token in this browser</span>
+        </label>
         <p id="github-import-status" class="action-import-status" role="status"></p>
         <div id="github-import-preview" class="import-preview"></div>
       </div>
@@ -1358,7 +1371,8 @@ function renderIcon(name: string): string {
     x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
     'grip-vertical': '<circle cx="9" cy="5" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="19" r="1"/>',
     'chevron-right': '<path d="m9 18 6-6-6-6"/>',
-    'chevron-down': '<path d="m6 9 6 6 6-6"/>'
+    'chevron-down': '<path d="m6 9 6 6 6-6"/>',
+    help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 4.5 1.5c0 1.7-2.5 2-2.5 3.5"/><path d="M12 17h.01"/>'
   };
   return `
     <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true">

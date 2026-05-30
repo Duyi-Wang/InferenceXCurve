@@ -69,7 +69,13 @@ GitHub tokens entered in the import panel are used only for browser requests. By
 
 ### Importing GitHub Actions artifacts: token scope
 
-Downloading run artifacts (the `archive_download_url` / `.../artifacts/{id}/zip` endpoint) always requires a token, even for public repos. Recommend the user create a **fine-grained personal access token** with only the **Actions: Read-only** repository permission (Settings → Developer settings → Personal access tokens → Fine-grained tokens). For private repos, the token must also be granted access to that specific repository. Suggest a long expiry stored in a password manager so the token is available when viewing from a different machine, since the "Remember token" option only covers the same browser.
+Downloading run artifacts (the `archive_download_url` / `.../artifacts/{id}/zip` endpoint) always requires a token, even for public repos. Choose the token type by who owns the repo:
+
+- **Repo you own, or an org you can configure:** a **fine-grained PAT** with only the **Actions: Read-only** repository permission (Settings → Developer settings → Personal access tokens → Fine-grained tokens), granted to that specific repository.
+- **Private repo owned by another personal account (you are only a collaborator/admin):** a fine-grained PAT cannot reach it — fine-grained tokens are scoped to a single resource owner. Use a **classic PAT with the `repo` scope** (classic tokens have no standalone actions-read scope; `repo` covers artifact download).
+- **Org-owned private repo:** the org must enable fine-grained token access; otherwise fall back to a classic PAT with `repo` scope.
+
+Suggest a long expiry stored in a password manager so the token is available when viewing from a different machine, since the "Remember token" option only covers the same browser.
 
 ## Agent Notes: Refreshing InferenceX Example Data
 
