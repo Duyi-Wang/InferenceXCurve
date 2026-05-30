@@ -65,7 +65,11 @@ Pull requests should include a short summary, verification steps, screenshots fo
 
 ## Security & Configuration Tips
 
-GitHub tokens entered in the import panel are used only for browser requests and are not stored by the app. Do not hard-code tokens, benchmark credentials, or private artifact URLs in source files. Keep large benchmark snapshots in `src/exampleData.ts` only when they are useful as default demo data.
+GitHub tokens entered in the import panel are used only for browser requests. By default they are not stored; if the user ticks "Remember token in this browser", the token is saved to `localStorage` under the `inferencex-curve:github-token:v1` key (separate from the app data key, so it is never included in exported data and does not sync across machines). Do not hard-code tokens, benchmark credentials, or private artifact URLs in source files. Keep large benchmark snapshots in `src/exampleData.ts` only when they are useful as default demo data.
+
+### Importing GitHub Actions artifacts: token scope
+
+Downloading run artifacts (the `archive_download_url` / `.../artifacts/{id}/zip` endpoint) always requires a token, even for public repos. Recommend the user create a **fine-grained personal access token** with only the **Actions: Read-only** repository permission (Settings → Developer settings → Personal access tokens → Fine-grained tokens). For private repos, the token must also be granted access to that specific repository. Suggest a long expiry stored in a password manager so the token is available when viewing from a different machine, since the "Remember token" option only covers the same browser.
 
 ## Agent Notes: Refreshing InferenceX Example Data
 

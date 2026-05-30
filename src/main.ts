@@ -198,6 +198,7 @@ const DEFAULT_ISL_OSL = 'Default ISL/OSL';
 const DEFAULT_PRECISION = 'default';
 const DEFAULT_LINE_STYLE = 'solid';
 const LOCAL_STORAGE_KEY = 'inferencex-curve:user-data:v1';
+const TOKEN_STORAGE_KEY = 'inferencex-curve:github-token:v1';
 const LOCAL_SAVE_DEBOUNCE_MS = 350;
 const EXPORT_PADDING = 32;
 const EXPORT_TITLE_HEIGHT = 62;
@@ -546,6 +547,36 @@ function saveLocalDataNow(): void {
   }
 }
 
+function loadStoredGitHubToken(): string {
+  try {
+    return window.localStorage.getItem(TOKEN_STORAGE_KEY) ?? '';
+  } catch (error) {
+    console.warn('Could not read saved GitHub token.', error);
+    return '';
+  }
+}
+
+function persistGitHubToken(): void {
+  try {
+    const token = githubTokenEl.value.trim();
+    if (githubTokenRememberEl.checked && token) {
+      window.localStorage.setItem(TOKEN_STORAGE_KEY, token);
+    } else {
+      window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+    }
+  } catch (error) {
+    console.warn('Could not save GitHub token.', error);
+  }
+}
+
+function restoreStoredGitHubToken(): void {
+  const token = loadStoredGitHubToken();
+  if (token) {
+    githubTokenEl.value = token;
+    githubTokenRememberEl.checked = true;
+  }
+}
+
 function readPersistedText(record: Record<string, unknown>, key: string, fallback = ''): string {
   const value = record[key];
   if (value === null || value === undefined) return fallback;
@@ -689,12 +720,22 @@ app.innerHTML = `
             placeholder="Optional"
           />
         </label>
+        <label class="action-import-remember">
+          <input id="github-token-remember" type="checkbox" />
+          <span>Remember token in this browser</span>
+        </label>
         <button id="import-action-data" class="action-button" type="button">
           ${renderIcon('download-cloud')}
           <span>Import Action Data</span>
         </button>
         <p class="action-import-help">
-          Unauthenticated GitHub API requests can be rate limited. Paste a GitHub token here for a higher limit; private repositories need Actions read access.
+          Downloading run artifacts requires a token. Create a fine-grained personal access
+          token with only <strong>Actions: Read-only</strong> repository permission (Settings &rarr;
+          Developer settings &rarr; Personal access tokens &rarr; Fine-grained tokens). For private
+          repos also grant the token access to that repository. Tip: set a long expiry and keep it in
+          a password manager so you can paste it anywhere. <strong>Remember token</strong> stores it
+          only in this browser&rsquo;s local storage&mdash;it does not sync to other machines and is
+          never included in exported data.
         </p>
         <p id="github-import-status" class="action-import-status" role="status"></p>
         <div id="github-import-preview" class="import-preview"></div>
@@ -726,6 +767,7 @@ const seriesEditorEl = document.querySelector<HTMLElement>('#series-editor')!;
 const statusEl = document.querySelector<HTMLParagraphElement>('#status')!;
 const githubActionUrlEl = document.querySelector<HTMLInputElement>('#github-action-url')!;
 const githubTokenEl = document.querySelector<HTMLInputElement>('#github-token')!;
+const githubTokenRememberEl = document.querySelector<HTMLInputElement>('#github-token-remember')!;
 const importActionDataEl = document.querySelector<HTMLButtonElement>('#import-action-data')!;
 const githubImportStatusEl = document.querySelector<HTMLParagraphElement>('#github-import-status')!;
 const githubImportPreviewEl = document.querySelector<HTMLElement>('#github-import-preview')!;
@@ -813,6 +855,9 @@ document.querySelector('#add-series')?.addEventListener('click', () => {
 });
 
 mergeLinesEl.addEventListener('click', openMergePreview);
+restoreStoredGitHubToken();
+githubTokenRememberEl.addEventListener('change', persistGitHubToken);
+githubTokenEl.addEventListener('input', persistGitHubToken);
 importActionDataEl.addEventListener('click', () => {
   void importGitHubActionData();
 });
@@ -3438,6 +3483,7 @@ async function importGitHubActionData(): Promise<void> {
     setImportStatus('Fetching GitHub Actions artifacts...');
     const run = parseGitHubRunUrl(runUrl);
     const importedSeries = await loadGitHubActionSeries(run, token);
+    persistGitHubToken();
     pendingImportSettings = createImportBatchSettings(run.runId);
     pendingImportDrafts = seriesToDrafts(importedSeries).map((draft) => ({
       selected: true,

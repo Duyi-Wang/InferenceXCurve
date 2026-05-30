@@ -737,6 +737,22 @@ p {
   font-size: 13px;
 }
 
+.action-import-panel label.action-import-remember {
+  grid-column: 1 / -1;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.action-import-remember input {
+  width: auto;
+  min-height: 0;
+}
+
+.action-import-remember span {
+  font-weight: 600;
+}
+
 .action-import-help {
   grid-column: 1 / -1;
   margin: -2px 0 0;
