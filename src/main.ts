@@ -693,6 +693,17 @@ app.innerHTML = `
               ${renderIcon('plus')}
               <span>Add Line</span>
             </button>
+            <button id="import-data-file" class="action-button" type="button" title="Import a CSV/JSON file (e.g. one exported with Download CSV)">
+              ${renderIcon('upload')}
+              <span>Import File</span>
+            </button>
+            <input
+              id="import-data-file-input"
+              type="file"
+              accept=".csv,.tsv,.json,.jsonl,.ndjson"
+              multiple
+              hidden
+            />
             <button id="merge-lines" class="action-button" type="button">
               ${renderIcon('merge')}
               <span>Merge Lines</span>
@@ -756,23 +767,10 @@ app.innerHTML = `
             placeholder="Optional"
           />
         </div>
-        <div class="action-import-buttons">
-          <button id="import-action-data" class="action-button" type="button">
-            ${renderIcon('download-cloud')}
-            <span>Import Action Data</span>
-          </button>
-          <button id="import-data-file" class="action-button" type="button" title="Import a CSV/JSON file (e.g. one exported with Download CSV)">
-            ${renderIcon('upload')}
-            <span>Import File</span>
-          </button>
-          <input
-            id="import-data-file-input"
-            type="file"
-            accept=".csv,.tsv,.json,.jsonl,.ndjson"
-            multiple
-            hidden
-          />
-        </div>
+        <button id="import-action-data" class="action-button" type="button">
+          ${renderIcon('download-cloud')}
+          <span>Import Action Data</span>
+        </button>
         <div id="github-import-progress" class="import-progress" role="progressbar" hidden>
           <div id="github-import-progress-fill" class="import-progress-fill"></div>
         </div>
