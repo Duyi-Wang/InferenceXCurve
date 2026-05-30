@@ -204,6 +204,14 @@ const EXPORT_PADDING = 32;
 const EXPORT_TITLE_HEIGHT = 62;
 const EXPORT_LAYOUT_GAP = 16;
 const EXPORT_IMAGE_SCALE = 2;
+// Horizontal legend (rendered below the chart) layout metrics.
+const EXPORT_LEGEND_PAD_X = 16;
+const EXPORT_LEGEND_PAD_Y = 10;
+const EXPORT_LEGEND_SWATCH = 30;
+const EXPORT_LEGEND_SWATCH_GAP = 8;
+const EXPORT_LEGEND_ITEM_GAP = 26;
+const EXPORT_LEGEND_ROW_H = 20;
+const EXPORT_LEGEND_CHAR_W = 6.4;
 
 const DB_MODEL_TO_DISPLAY: Record<string, string> = {
   dsr1: 'DeepSeek-R1-0528',
@@ -4369,19 +4377,20 @@ function downloadPng(): void {
   const chartSize = getSvgSize(svg);
   const clone = svg.cloneNode(true) as SVGSVGElement;
   const legendItems = getExportLegendItems();
-  const legendWidth = legendItems.length > 0 ? getExportLegendWidth(legendItems) : 0;
-  const legendLayout = buildExportLegendLayout(legendItems, legendWidth);
   const chartX = EXPORT_PADDING;
   const chartY = EXPORT_PADDING + EXPORT_TITLE_HEIGHT;
-  const legendX = chartX + chartSize.width + (legendWidth > 0 ? EXPORT_LAYOUT_GAP : 0);
-  // Vertically center the legend against the chart area so a short legend no
-  // longer floats at the top with empty space below it.
-  const legendY = chartY + Math.max(0, (chartSize.height - legendLayout.height) / 2);
-  const outerWidth = chartSize.width + legendWidth + (legendWidth > 0 ? EXPORT_LAYOUT_GAP : 0) + EXPORT_PADDING * 2;
-  const outerHeight = Math.max(
-    chartY + chartSize.height + EXPORT_PADDING,
-    legendY + legendLayout.height + EXPORT_PADDING
-  );
+  // Place the legend as a horizontal, centered, wrapping row below the chart so
+  // a handful of active lines no longer leaves a tall empty column on the side.
+  const legendLayout =
+    legendItems.length > 0
+      ? buildExportLegendLayout(legendItems, chartSize.width)
+      : { items: [], width: 0, height: 0 };
+  const hasLegend = legendLayout.items.length > 0;
+  const legendX = chartX;
+  const legendY = chartY + chartSize.height + EXPORT_LAYOUT_GAP;
+  const outerWidth = chartSize.width + EXPORT_PADDING * 2;
+  const outerHeight =
+    chartY + chartSize.height + (hasLegend ? EXPORT_LAYOUT_GAP + legendLayout.height : 0) + EXPORT_PADDING;
 
   prepareChartSvgForExport(clone, chartX, chartY, chartSize.width, chartSize.height, palette);
   const chartSvgText = new XMLSerializer().serializeToString(clone);
@@ -4391,7 +4400,7 @@ function downloadPng(): void {
     `<rect width="100%" height="100%" fill="${escapeAttribute(palette.background)}"/>`,
     buildExportTitleSvg(EXPORT_PADDING, EXPORT_PADDING, outerWidth - EXPORT_PADDING * 2, palette),
     chartSvgText,
-    legendWidth > 0 ? buildExportLegendSvg(legendLayout, legendX, legendY, legendWidth) : '',
+    hasLegend ? buildExportLegendSvg(legendLayout, legendX, legendY) : '',
     '</svg>'
   ].join('');
   const url = URL.createObjectURL(new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' }));
@@ -4566,15 +4575,16 @@ interface ExportLegendItem {
 }
 
 interface ExportLegendLayoutItem extends ExportLegendItem {
-  lines: string[];
+  label: string;
+  x: number;
   y: number;
-  height: number;
+  width: number;
 }
 
 interface ExportLegendLayout {
   items: ExportLegendLayoutItem[];
+  width: number;
   height: number;
-  activeCount: number;
 }
 
 function getExportPalette(): ExportPalette {
@@ -4691,53 +4701,62 @@ function getExportLegendItems(): ExportLegendItem[] {
     }));
 }
 
-function getExportLegendWidth(items: ExportLegendItem[]): number {
-  const longestName = Math.max(...items.map((item) => item.name.length), 0);
-  return Math.max(196, Math.min(310, Math.ceil(longestName * 6.4 + 72)));
-}
+function buildExportLegendLayout(items: ExportLegendItem[], availableWidth: number): ExportLegendLayout {
+  if (items.length === 0 || availableWidth <= 0) return { items: [], width: 0, height: 0 };
 
-function buildExportLegendLayout(items: ExportLegendItem[], width: number): ExportLegendLayout {
-  if (items.length === 0 || width <= 0) return { items: [], height: 0, activeCount: 0 };
+  const innerWidth = Math.max(0, availableWidth - EXPORT_LEGEND_PAD_X * 2);
+  const entryBaseWidth = EXPORT_LEGEND_SWATCH + EXPORT_LEGEND_SWATCH_GAP;
+  const measured = items.map((item) => {
+    const label = item.name;
+    return { ...item, label, width: entryBaseWidth + label.length * EXPORT_LEGEND_CHAR_W };
+  });
 
-  const maxChars = Math.max(18, Math.floor((width - 58) / 6.2));
-  let y = 14;
-  const layoutItems = items.map((item) => {
-    const lines = wrapSvgText(item.name, maxChars);
-    const height = Math.max(23, lines.length * 14 + 6);
-    const layoutItem = { ...item, lines, y, height };
-    y += height;
-    return layoutItem;
+  // Greedy pack into centered rows that fit within the chart width.
+  const rows: { items: typeof measured; width: number }[] = [];
+  let row: typeof measured = [];
+  let rowWidth = 0;
+  measured.forEach((item) => {
+    const advance = (row.length ? EXPORT_LEGEND_ITEM_GAP : 0) + item.width;
+    if (row.length && rowWidth + advance > innerWidth) {
+      rows.push({ items: row, width: rowWidth });
+      row = [];
+      rowWidth = 0;
+    }
+    rowWidth += (row.length ? EXPORT_LEGEND_ITEM_GAP : 0) + item.width;
+    row.push(item);
+  });
+  if (row.length) rows.push({ items: row, width: rowWidth });
+
+  const layoutItems: ExportLegendLayoutItem[] = [];
+  rows.forEach((currentRow, rowIndex) => {
+    let x = EXPORT_LEGEND_PAD_X + Math.max(0, (innerWidth - currentRow.width) / 2);
+    const y = EXPORT_LEGEND_PAD_Y + rowIndex * EXPORT_LEGEND_ROW_H;
+    currentRow.items.forEach((item) => {
+      layoutItems.push({ ...item, x, y });
+      x += item.width + EXPORT_LEGEND_ITEM_GAP;
+    });
   });
 
   return {
     items: layoutItems,
-    height: y + 10,
-    activeCount: items.length
+    width: availableWidth,
+    height: EXPORT_LEGEND_PAD_Y * 2 + rows.length * EXPORT_LEGEND_ROW_H
   };
 }
 
-function buildExportLegendSvg(
-  layout: ExportLegendLayout,
-  x: number,
-  y: number,
-  width: number
-): string {
+function buildExportLegendSvg(layout: ExportLegendLayout, x: number, y: number): string {
   if (layout.items.length === 0) return '';
+  const textX = EXPORT_LEGEND_SWATCH + EXPORT_LEGEND_SWATCH_GAP;
+  const mid = EXPORT_LEGEND_ROW_H / 2;
   const entries = layout.items
     .map((item) => {
-      const text = item.lines
-        .map(
-          (line, index) =>
-            `<tspan x="44" dy="${index === 0 ? 0 : 14}">${escapeHtml(line)}</tspan>`
-        )
-        .join('');
       const dash = item.lineDasharray ? ` stroke-dasharray="${escapeAttribute(item.lineDasharray)}"` : '';
       return `
-        <g transform="translate(12,${item.y})">
+        <g transform="translate(${item.x},${item.y})">
           <title>${escapeHtml(item.title)}</title>
-          <line x1="0" y1="8" x2="30" y2="8" stroke="${escapeAttribute(item.color)}" stroke-width="3" stroke-linecap="round"${dash}/>
-          <circle cx="15" cy="8" r="3.4" fill="${escapeAttribute(item.color)}"/>
-          <text class="export-legend-text" x="44" y="12">${text}</text>
+          <line x1="0" y1="${mid}" x2="${EXPORT_LEGEND_SWATCH}" y2="${mid}" stroke="${escapeAttribute(item.color)}" stroke-width="3" stroke-linecap="round"${dash}/>
+          <circle cx="${EXPORT_LEGEND_SWATCH / 2}" cy="${mid}" r="3.4" fill="${escapeAttribute(item.color)}"/>
+          <text class="export-legend-text" x="${textX}" y="${mid + 4}">${escapeHtml(item.label)}</text>
         </g>
       `;
     })
@@ -4745,41 +4764,10 @@ function buildExportLegendSvg(
 
   return `
     <g transform="translate(${x},${y})">
-      <rect class="export-legend-box" width="${width}" height="${layout.height}" rx="6"/>
+      <rect class="export-legend-box" width="${layout.width}" height="${layout.height}" rx="6"/>
       ${entries}
     </g>
   `;
-}
-
-function wrapSvgText(value: string, maxChars: number): string[] {
-  const words = value.trim().split(/\s+/u).filter(Boolean);
-  if (words.length === 0) return [''];
-  const lines: string[] = [];
-  let current = '';
-
-  words.forEach((word) => {
-    if (word.length > maxChars) {
-      if (current) {
-        lines.push(current);
-        current = '';
-      }
-      for (let index = 0; index < word.length; index += maxChars) {
-        lines.push(word.slice(index, index + maxChars));
-      }
-      return;
-    }
-
-    const next = current ? `${current} ${word}` : word;
-    if (next.length <= maxChars) {
-      current = next;
-    } else {
-      if (current) lines.push(current);
-      current = word;
-    }
-  });
-
-  if (current) lines.push(current);
-  return lines;
 }
 
 function makeExportFilename(extension: 'csv' | 'png'): string {
