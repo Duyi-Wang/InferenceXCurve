@@ -4374,10 +4374,13 @@ function downloadPng(): void {
   const chartX = EXPORT_PADDING;
   const chartY = EXPORT_PADDING + EXPORT_TITLE_HEIGHT;
   const legendX = chartX + chartSize.width + (legendWidth > 0 ? EXPORT_LAYOUT_GAP : 0);
+  // Vertically center the legend against the chart area so a short legend no
+  // longer floats at the top with empty space below it.
+  const legendY = chartY + Math.max(0, (chartSize.height - legendLayout.height) / 2);
   const outerWidth = chartSize.width + legendWidth + (legendWidth > 0 ? EXPORT_LAYOUT_GAP : 0) + EXPORT_PADDING * 2;
   const outerHeight = Math.max(
     chartY + chartSize.height + EXPORT_PADDING,
-    chartY + legendLayout.height + EXPORT_PADDING
+    legendY + legendLayout.height + EXPORT_PADDING
   );
 
   prepareChartSvgForExport(clone, chartX, chartY, chartSize.width, chartSize.height, palette);
@@ -4388,7 +4391,7 @@ function downloadPng(): void {
     `<rect width="100%" height="100%" fill="${escapeAttribute(palette.background)}"/>`,
     buildExportTitleSvg(EXPORT_PADDING, EXPORT_PADDING, outerWidth - EXPORT_PADDING * 2, palette),
     chartSvgText,
-    legendWidth > 0 ? buildExportLegendSvg(legendLayout, legendX, chartY, legendWidth) : '',
+    legendWidth > 0 ? buildExportLegendSvg(legendLayout, legendX, legendY, legendWidth) : '',
     '</svg>'
   ].join('');
   const url = URL.createObjectURL(new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' }));
@@ -4636,8 +4639,7 @@ function buildExportStyle(palette: ExportPalette): string {
     <style>
       .export-root, .export-root text { font-family: ${palette.fontFamily}; }
       .export-title { fill: ${palette.foreground}; font-size: 18px; font-weight: 700; }
-      .export-subtitle, .export-legend-meta { fill: ${palette.mutedForeground}; font-size: 12px; }
-      .export-legend-title { fill: ${palette.foreground}; font-size: 12px; font-weight: 700; }
+      .export-subtitle { fill: ${palette.mutedForeground}; font-size: 12px; }
       .export-legend-text { fill: ${palette.foreground}; font-size: 11.5px; }
       .export-legend-box { fill: ${palette.accent}; stroke: ${palette.border}; stroke-opacity: 0.58; }
       .chart-root .x-axis .domain, .chart-root .y-axis .domain { stroke: ${palette.border}; stroke-width: 1; }
@@ -4698,7 +4700,7 @@ function buildExportLegendLayout(items: ExportLegendItem[], width: number): Expo
   if (items.length === 0 || width <= 0) return { items: [], height: 0, activeCount: 0 };
 
   const maxChars = Math.max(18, Math.floor((width - 58) / 6.2));
-  let y = 36;
+  let y = 14;
   const layoutItems = items.map((item) => {
     const lines = wrapSvgText(item.name, maxChars);
     const height = Math.max(23, lines.length * 14 + 6);
@@ -4744,8 +4746,6 @@ function buildExportLegendSvg(
   return `
     <g transform="translate(${x},${y})">
       <rect class="export-legend-box" width="${width}" height="${layout.height}" rx="6"/>
-      <text class="export-legend-title" x="12" y="19">Active Lines</text>
-      <text class="export-legend-meta" x="${width - 12}" y="19" text-anchor="end">${layout.activeCount}</text>
       ${entries}
     </g>
   `;
