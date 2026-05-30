@@ -4729,10 +4729,11 @@ function buildExportLegendLayout(items: ExportLegendItem[], availableWidth: numb
   );
   const rowCount = Math.ceil(measured.length / columns);
 
+  // Column-major fill: items run top-to-bottom down each column, then move right.
   const layoutItems: ExportLegendLayoutItem[] = measured.map((item, index) => ({
     ...item,
-    x: EXPORT_LEGEND_PAD_X + (index % columns) * (columnWidth + EXPORT_LEGEND_ITEM_GAP),
-    y: EXPORT_LEGEND_PAD_Y + Math.floor(index / columns) * EXPORT_LEGEND_ROW_H
+    x: EXPORT_LEGEND_PAD_X + Math.floor(index / rowCount) * (columnWidth + EXPORT_LEGEND_ITEM_GAP),
+    y: EXPORT_LEGEND_PAD_Y + (index % rowCount) * EXPORT_LEGEND_ROW_H
   }));
 
   return {
