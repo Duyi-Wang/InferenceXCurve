@@ -797,9 +797,12 @@ p {
   z-index: 60;
   bottom: calc(100% + 8px);
   left: -6px;
-  width: 320px;
-  max-width: min(320px, 78vw);
-  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 300px;
+  max-width: min(300px, 78vw);
+  padding: 11px 13px;
   border: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
   border-radius: 8px;
   background: var(--popover);
@@ -807,6 +810,7 @@ p {
   font-size: 12px;
   font-weight: 400;
   line-height: 1.45;
+  text-align: left;
   text-transform: none;
   letter-spacing: normal;
   white-space: normal;
@@ -816,6 +820,34 @@ p {
   transform: translateY(4px);
   transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s;
   pointer-events: none;
+}
+
+.help-tip-title {
+  color: var(--foreground);
+  font-weight: 700;
+}
+
+.help-tip-row {
+  position: relative;
+  padding-left: 12px;
+}
+
+.help-tip-row::before {
+  content: '';
+  position: absolute;
+  top: 7px;
+  left: 2px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--muted-foreground) 70%, transparent);
+}
+
+.help-tip-note {
+  margin-top: 1px;
+  padding-top: 6px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+  color: color-mix(in srgb, var(--muted-foreground) 85%, transparent);
 }
 
 .help-tip-bubble code {

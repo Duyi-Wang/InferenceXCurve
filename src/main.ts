@@ -721,10 +721,18 @@ app.innerHTML = `
             >
               ${renderIcon('help')}
               <span class="help-tip-bubble">
-                Artifact downloads need a token. Use a fine-grained PAT
-                (<strong>Actions: Read-only</strong>); for a private repo owned by someone else, use
-                a <strong>classic PAT with <code>repo</code> scope</strong>. <strong>Remember</strong>
-                saves it in plain text, in this browser only.
+                <strong class="help-tip-title">Artifact downloads need a token.</strong>
+                <span class="help-tip-row">
+                  Your own / org repo &mdash; fine-grained PAT
+                  (<strong>Actions: Read-only</strong>).
+                </span>
+                <span class="help-tip-row">
+                  Someone else&rsquo;s private repo &mdash; classic PAT with
+                  <code>repo</code> scope.
+                </span>
+                <span class="help-tip-note">
+                  &ldquo;Remember&rdquo; saves it in plain text, in this browser only.
+                </span>
               </span>
             </span>
             <label class="action-import-remember">
