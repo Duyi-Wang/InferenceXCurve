@@ -1284,7 +1284,7 @@ function renderColorField(seriesIndex: number, color: string, autoColor: string)
           aria-label="Pick custom color"
           title="Pick custom color"
         />
-        <div class="color-presets" aria-label="Reference chart colors">
+        <div class="color-presets" aria-label="Standard colors">
           ${colorPresets
             .map((preset) => {
               const selected = colorValue.toLowerCase() === preset.value.toLowerCase();

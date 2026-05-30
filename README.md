@@ -34,7 +34,8 @@ points in that curve:
 - `Marker`: default point marker for the line. `Precision` follows the
   precision-based default shape.
 - `Line Type`: solid, dashed, dotted, dash-dot, long dash, or custom dasharray.
-- `Color`: automatic vendor color, color picker, or preset reference colors.
+- `Color`: automatic vendor color, color picker, or a vibrant standard-color
+  preset swatch.
 
 Point rows are edited in each line's table and support Excel/Google Sheets
 paste. Required point columns:
@@ -87,11 +88,23 @@ run URL such as:
 https://github.com/owner/repo/actions/runs/123456789
 ```
 
-An optional GitHub token can be supplied to avoid unauthenticated API rate
-limits or access private repositories with Actions read permission. Imported
-artifacts are staged in a review panel before they are added. You can edit line
-fields, change `MTP` or `Marker`, select/deselect lines, discard the preview, or
-append selected lines to the current data.
+Downloading run artifacts always requires a GitHub token, even for public repos.
+Pick the token type by who owns the repo:
+
+- Repo you own, or an org you can configure: a fine-grained PAT with only the
+  `Actions: Read-only` permission, granted to that repository.
+- Private repo owned by another account (you are a collaborator/admin): a classic
+  PAT with the `repo` scope. Fine-grained tokens are scoped to a single resource
+  owner and cannot reach it.
+
+Tick `Remember token in this browser` to save the token to `localStorage` under
+the `inferencex-curve:github-token:v1` key (this browser only, stored in plain
+text, and never included in exported data). A progress bar shows artifact
+download status while importing.
+
+Imported artifacts are staged in a review panel before they are added. You can
+edit line fields, change `MTP` or `Marker`, select/deselect lines, discard the
+preview, or append selected lines to the current data.
 
 The importer normalizes common InferenceX artifact fields:
 
