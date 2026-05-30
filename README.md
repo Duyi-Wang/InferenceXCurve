@@ -113,6 +113,17 @@ The importer normalizes common InferenceX artifact fields:
 - `spec_method` / `spec_decoding` map to `MTP` or `Non-MTP`
 - `hw` values such as `mi355x-amds` normalize to the chart hardware key
 
+## Import Data File
+
+`Import File` (next to `Import Action Data`) loads a local `.csv`, `.tsv`,
+`.json`, `.jsonl`, or `.ndjson` file through the same review panel. This round-
+trips a file produced by `Download CSV`: line fields, point `Interactivity` /
+`Throughput/GPU`, markers, custom colors (from the `Color Mode` / `Resolved
+Color` columns), concurrency, parallelism, and notes are restored. Derived
+columns (`Total GPUs`, `Included in Chart`, `Active Line`, `Point Index`,
+`Roofline Point`) are ignored on import. The same parser also accepts raw
+benchmark JSON/CSV exports.
+
 ## Chart Logic
 
 Reusable chart logic lives in `src/inferenceCurveChart.ts`.

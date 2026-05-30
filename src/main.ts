@@ -756,10 +756,23 @@ app.innerHTML = `
             placeholder="Optional"
           />
         </div>
-        <button id="import-action-data" class="action-button" type="button">
-          ${renderIcon('download-cloud')}
-          <span>Import Action Data</span>
-        </button>
+        <div class="action-import-buttons">
+          <button id="import-action-data" class="action-button" type="button">
+            ${renderIcon('download-cloud')}
+            <span>Import Action Data</span>
+          </button>
+          <button id="import-data-file" class="action-button" type="button" title="Import a CSV/JSON file (e.g. one exported with Download CSV)">
+            ${renderIcon('upload')}
+            <span>Import File</span>
+          </button>
+          <input
+            id="import-data-file-input"
+            type="file"
+            accept=".csv,.tsv,.json,.jsonl,.ndjson"
+            multiple
+            hidden
+          />
+        </div>
         <div id="github-import-progress" class="import-progress" role="progressbar" hidden>
           <div id="github-import-progress-fill" class="import-progress-fill"></div>
         </div>
@@ -795,6 +808,8 @@ const githubActionUrlEl = document.querySelector<HTMLInputElement>('#github-acti
 const githubTokenEl = document.querySelector<HTMLInputElement>('#github-token')!;
 const githubTokenRememberEl = document.querySelector<HTMLInputElement>('#github-token-remember')!;
 const importActionDataEl = document.querySelector<HTMLButtonElement>('#import-action-data')!;
+const importDataFileEl = document.querySelector<HTMLButtonElement>('#import-data-file')!;
+const importDataFileInputEl = document.querySelector<HTMLInputElement>('#import-data-file-input')!;
 const githubImportStatusEl = document.querySelector<HTMLParagraphElement>('#github-import-status')!;
 const githubImportProgressEl = document.querySelector<HTMLElement>('#github-import-progress')!;
 const githubImportProgressFillEl = document.querySelector<HTMLElement>('#github-import-progress-fill')!;
@@ -888,6 +903,10 @@ githubTokenRememberEl.addEventListener('change', persistGitHubToken);
 githubTokenEl.addEventListener('input', persistGitHubToken);
 importActionDataEl.addEventListener('click', () => {
   void importGitHubActionData();
+});
+importDataFileEl.addEventListener('click', () => importDataFileInputEl.click());
+importDataFileInputEl.addEventListener('change', () => {
+  void importDataFiles(importDataFileInputEl.files);
 });
 githubImportPreviewEl.addEventListener('input', handleImportPreviewInput);
 githubImportPreviewEl.addEventListener('change', handleImportPreviewInput);
@@ -1387,7 +1406,8 @@ function renderIcon(name: string): string {
     'grip-vertical': '<circle cx="9" cy="5" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="19" r="1"/>',
     'chevron-right': '<path d="m9 18 6-6-6-6"/>',
     'chevron-down': '<path d="m6 9 6 6 6-6"/>',
-    help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 4.5 1.5c0 1.7-2.5 2-2.5 3.5"/><path d="M12 17h.01"/>'
+    help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 4.5 1.5c0 1.7-2.5 2-2.5 3.5"/><path d="M12 17h.01"/>',
+    upload: '<path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>'
   };
   return `
     <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true">
@@ -3531,13 +3551,7 @@ async function importGitHubActionData(): Promise<void> {
       setImportProgress(fraction)
     );
     persistGitHubToken();
-    pendingImportSettings = createImportBatchSettings(run.runId);
-    pendingImportDrafts = seriesToDrafts(importedSeries).map((draft) => ({
-      selected: true,
-      sourceDraft: structuredClone({ ...draft, collapsed: true }),
-      draft: applyImportBatchSettingsToDraft({ ...draft, collapsed: true })
-    }));
-    renderImportPreview();
+    stageImportedSeries(importedSeries, run.runId);
     setImportStatus(
       `Fetched ${importedSeries.length} lines. Line ID suffix defaults to ${pendingImportSettings.idSuffix}. Review, edit, then click Add Selected. Current data was not changed.`
     );
@@ -3547,6 +3561,52 @@ async function importGitHubActionData(): Promise<void> {
     if (message.toLowerCase().includes('rate limit')) githubTokenEl.focus();
   } finally {
     importActionDataEl.disabled = false;
+    setImportProgress(null);
+  }
+}
+
+// Stage parsed series into the review panel (shared by GitHub and file imports).
+function stageImportedSeries(series: InferenceCurveSeries[], idSuffixSeed: string): void {
+  pendingImportSettings = createImportBatchSettings(idSuffixSeed);
+  pendingImportDrafts = seriesToDrafts(series).map((draft) => ({
+    selected: true,
+    sourceDraft: structuredClone({ ...draft, collapsed: true }),
+    draft: applyImportBatchSettingsToDraft({ ...draft, collapsed: true })
+  }));
+  renderImportPreview();
+}
+
+async function importDataFiles(files: FileList | null): Promise<void> {
+  if (!files || files.length === 0) return;
+  importDataFileEl.disabled = true;
+  try {
+    setImportStatus(`Reading ${files.length === 1 ? files[0]!.name : `${files.length} files`}...`);
+    setImportProgress(-1);
+    const imported: InferenceCurveSeries[] = [];
+    const failures: string[] = [];
+    for (const file of Array.from(files)) {
+      try {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        imported.push(...parseImportedArtifactFile(file.name, bytes, file.name));
+      } catch (error) {
+        failures.push(`${file.name}: ${error instanceof Error ? error.message : 'failed'}`);
+      }
+    }
+    const merged = mergeImportedSeries(imported);
+    if (merged.length === 0) {
+      const suffix = failures.length ? ` Last error: ${failures.at(-1)}` : '';
+      throw new Error(`No importable line data found in the selected file(s).${suffix}`);
+    }
+    const suffixSeed = files.length === 1 ? files[0]!.name.replace(/\.[^.]+$/u, '') : '';
+    stageImportedSeries(merged, suffixSeed);
+    setImportStatus(
+      `Loaded ${merged.length} lines. Line ID suffix defaults to ${pendingImportSettings.idSuffix}. Review, edit, then click Add Selected. Current data was not changed.`
+    );
+  } catch (error) {
+    setImportStatus(error instanceof Error ? error.message : 'Could not import the selected file(s).', true);
+  } finally {
+    importDataFileEl.disabled = false;
+    importDataFileInputEl.value = '';
     setImportProgress(null);
   }
 }
@@ -3806,6 +3866,24 @@ function looksLikeBenchmarkRecord(record: Record<string, unknown>): boolean {
     readMetricNumber(record, ['metrics.tput_per_gpu', 'tput_per_gpu', 'throughput', 'throughput_per_gpu', 'y']) !== null;
 }
 
+// Extra header aliases so a CSV produced by Download CSV (whose headers carry
+// units / different wording) round-trips through the editor import path.
+const POINT_IMPORT_ALIASES: Record<string, string[]> = {
+  interactivity: ['interactivity', 'Interactivity (tok/s/user)', 'tok/s/user'],
+  throughput: ['throughput', 'Throughput/GPU', 'Throughput/GPU (tok/s/gpu)', 'tok/s/gpu'],
+  shape: ['shape', 'Marker', 'Point Marker']
+};
+
+function readEditorColor(record: Record<string, unknown>): string {
+  const explicit = readMetricString(record, ['color']);
+  if (explicit) return explicit;
+  // Download CSV emits "Color Mode" + "Resolved Color"; keep the resolved value
+  // only when the line used a custom color, otherwise fall back to auto.
+  const mode = readMetricString(record, ['color mode', 'colormode']);
+  if (mode.toLowerCase() === 'custom') return readMetricString(record, ['resolved color', 'resolvedcolor']);
+  return '';
+}
+
 function seriesFromEditorRecords(records: Record<string, unknown>[]): InferenceCurveSeries[] {
   const hasEditorRows = records.some((record) => readMetricString(record, ['series_id', 'line id', 'line_id']) !== '');
   if (!hasEditorRows) return [];
@@ -3829,7 +3907,7 @@ function seriesFromEditorRecords(records: Record<string, unknown>[]): InferenceC
           readMetricString(record, ['line_marker', 'line marker', 'series_marker', 'series marker'])
         ),
         title,
-        color: readMetricString(record, ['color']),
+        color: readEditorColor(record),
         lineStyle: readMetricString(record, ['lineStyle', 'line type', 'linestyle']) || DEFAULT_LINE_STYLE,
         renderOrder: readMetricNumber(record, ['renderOrder', 'render order', 'layer', 'z-index', 'z index']) ?? rowIndex,
         collapsed: true,
@@ -3839,7 +3917,8 @@ function seriesFromEditorRecords(records: Record<string, unknown>[]): InferenceC
     const point = makeEmptyPointRow();
     [...pointColumns.map((column) => column.key), ...hiddenPointKeys].forEach((key) => {
       const column = pointColumns.find((item) => item.key === key);
-      const value = readMetricString(record, [key, column?.label ?? key]);
+      const aliases = POINT_IMPORT_ALIASES[key] ?? [key, column?.label ?? key];
+      const value = readMetricString(record, aliases);
       if (value) point[key] = value;
     });
     if (!isEmptyPointRow(point)) draft.points.push(point);

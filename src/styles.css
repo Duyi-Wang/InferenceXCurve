@@ -760,6 +760,13 @@ p {
   white-space: nowrap;
 }
 
+.action-import-buttons {
+  display: flex;
+  align-self: end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .action-import-field-label {
   display: flex;
   align-items: center;
