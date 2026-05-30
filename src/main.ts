@@ -1389,6 +1389,16 @@ function renderIcon(name: string): string {
   `;
 }
 
+// Point columns whose data-panel display is normalized to two decimal places.
+const DECIMAL_DISPLAY_KEYS = new Set(['interactivity', 'throughput']);
+
+function formatPointCellDisplay(key: string, value: string | undefined): string {
+  const raw = value ?? '';
+  if (!DECIMAL_DISPLAY_KEYS.has(key)) return raw;
+  const parsed = parseNumber(raw);
+  return parsed === null ? raw : parsed.toFixed(2);
+}
+
 function renderPointRow(row: PointRow, seriesIndex: number, rowIndex: number): string {
   return `
     <tr>
@@ -1429,7 +1439,7 @@ function renderPointRow(row: PointRow, seriesIndex: number, rowIndex: number): s
                 data-col="${colIndex}"
                 data-key="${column.key}"
                 class="point-cell point-cell-${column.key}${column.required ? ' required-cell' : ''}"
-              >${escapeHtml(row[column.key] ?? '')}</td>
+              >${escapeHtml(formatPointCellDisplay(column.key, row[column.key]))}</td>
             `
         )
         .join('')}
@@ -1825,7 +1835,12 @@ function commitSeriesDom(): void {
     const row = Number(cell.dataset.row);
     const key = cell.dataset.key!;
     ensurePointRow(seriesIndex, row);
-    seriesDrafts[seriesIndex]!.points[row]![key] = normalizeCellText(cell.textContent ?? '');
+    const text = normalizeCellText(cell.textContent ?? '');
+    // Keep the precise stored value when a two-decimal cell still shows its
+    // formatted display (i.e. the user did not actually edit it).
+    const stored = seriesDrafts[seriesIndex]!.points[row]![key];
+    if (DECIMAL_DISPLAY_KEYS.has(key) && text === formatPointCellDisplay(key, stored)) return;
+    seriesDrafts[seriesIndex]!.points[row]![key] = text;
   });
 
   seriesEditorEl.querySelectorAll<HTMLSelectElement>('select[data-point-field]').forEach((select) => {
