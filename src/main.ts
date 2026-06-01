@@ -524,6 +524,7 @@ function getSeriesForPersistence(): InferenceCurveSeries[] {
 }
 
 function scheduleLocalSave(): void {
+  skipNextBeforeUnloadSave = false;
   if (localSaveTimer !== null) window.clearTimeout(localSaveTimer);
   localSaveTimer = window.setTimeout(() => {
     localSaveTimer = null;
@@ -532,6 +533,7 @@ function scheduleLocalSave(): void {
 }
 
 function saveLocalDataNow(): void {
+  skipNextBeforeUnloadSave = false;
   if (localSaveTimer !== null) {
     window.clearTimeout(localSaveTimer);
     localSaveTimer = null;
@@ -585,6 +587,31 @@ function restoreStoredGitHubToken(): void {
   }
 }
 
+function resetStoredAppData(): void {
+  if (localSaveTimer !== null) {
+    window.clearTimeout(localSaveTimer);
+    localSaveTimer = null;
+  }
+  skipNextBeforeUnloadSave = true;
+  try {
+    window.localStorage.removeItem(LOCAL_STORAGE_KEY);
+    localStorageWarningShown = false;
+  } catch (error) {
+    console.warn('Could not clear saved browser data.', error);
+  }
+}
+
+function resetImportState(): void {
+  pendingImportDrafts = [];
+  pendingImportSettings = createImportBatchSettings();
+  renderImportPreview();
+  githubActionUrlEl.value = '';
+  githubImportProgressEl.hidden = true;
+  githubImportProgressEl.classList.remove('indeterminate');
+  githubImportProgressFillEl.style.width = '0%';
+  importDataFileInputEl.value = '';
+}
+
 function readPersistedText(record: Record<string, unknown>, key: string, fallback = ''): string {
   const value = record[key];
   if (value === null || value === undefined) return fallback;
@@ -620,6 +647,7 @@ let pendingMergeGroups: PendingMergeGroup[] = [];
 let state: AppState = initialData.state;
 let localSaveTimer: number | null = null;
 let localStorageWarningShown = false;
+let skipNextBeforeUnloadSave = false;
 let draggedSeriesIndex: number | null = null;
 let chartIsDirty = false;
 
@@ -713,7 +741,7 @@ app.innerHTML = `
             <div class="data-action-group data-action-group-muted" aria-label="Data actions">
               <button id="reset-data" class="action-button" type="button">
                 ${renderIcon('refresh')}
-                <span>Reset Example</span>
+                <span>Reset All</span>
               </button>
               <button id="clear-data" class="action-button danger" type="button">
                 ${renderIcon('trash')}
@@ -839,18 +867,16 @@ document.querySelector('#reset-data')?.addEventListener('click', () => {
   sortSeriesDraftsByLayer();
   normalizeDraftRenderOrderFromPanelOrder();
   syncCurrentSeriesOrderFromDrafts();
-  setDefaultFiltersForSeries(currentSeries);
-  state.search = '';
+  state = createInitialState(currentSeries);
+  applyTheme();
   renderFilterControls();
   renderSeriesEditor();
   renderAll();
-  setStatus('Example data restored');
+  resetImportState();
+  resetStoredAppData();
+  setStatus('All settings and data restored to the default example');
   setImportStatus('');
-  pendingImportDrafts = [];
-  pendingImportSettings = createImportBatchSettings();
-  renderImportPreview();
   clearMergePreview();
-  scheduleLocalSave();
 });
 
 document.querySelector('#clear-data')?.addEventListener('click', () => {
@@ -923,6 +949,7 @@ document.querySelector('#reset-zoom')?.addEventListener('click', resetInferenceC
 window.addEventListener('resize', renderAll);
 window.addEventListener('keydown', handleGlobalKeydown);
 window.addEventListener('beforeunload', () => {
+  if (skipNextBeforeUnloadSave) return;
   commitSeriesDom();
   saveLocalDataNow();
 });
@@ -2624,7 +2651,7 @@ function createInitialState(series: InferenceCurveSeries[]): AppState {
     islOslFilter,
     mtpFilter,
     showNonOptimalPoints: false,
-    hidePointLabels: false,
+    hidePointLabels: true,
     useAdvancedLabels: false,
     showGradientLabels: false,
     showLineLabels: false,

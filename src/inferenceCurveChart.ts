@@ -202,7 +202,7 @@ const defaultOptions: Required<
   Omit<InferenceCurveChartOptions, 'activeSeriesIds' | 'selectedPrecisions'>
 > = {
   showNonOptimalPoints: false,
-  hidePointLabels: false,
+  hidePointLabels: true,
   useAdvancedLabels: false,
   showGradientLabels: false,
   showLineLabels: false,
