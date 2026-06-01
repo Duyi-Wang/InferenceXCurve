@@ -689,14 +689,20 @@ app.innerHTML = `
               ${renderIcon('play')}
               <span>Render Chart</span>
             </button>
-            <button id="add-series" class="action-button" type="button">
-              ${renderIcon('plus')}
-              <span>Add Line</span>
-            </button>
-            <button id="import-data-file" class="action-button" type="button" title="Import a CSV/JSON file (e.g. one exported with Download CSV)">
-              ${renderIcon('upload')}
-              <span>Import File</span>
-            </button>
+            <div class="data-action-group" aria-label="Line actions">
+              <button id="add-series" class="action-button" type="button">
+                ${renderIcon('plus')}
+                <span>Add Line</span>
+              </button>
+              <button id="import-data-file" class="action-button" type="button" title="Import a CSV/JSON file (e.g. one exported with Download CSV)">
+                ${renderIcon('upload')}
+                <span>Import File</span>
+              </button>
+              <button id="merge-lines" class="action-button" type="button">
+                ${renderIcon('merge')}
+                <span>Merge Lines</span>
+              </button>
+            </div>
             <input
               id="import-data-file-input"
               type="file"
@@ -704,18 +710,16 @@ app.innerHTML = `
               multiple
               hidden
             />
-            <button id="merge-lines" class="action-button" type="button">
-              ${renderIcon('merge')}
-              <span>Merge Lines</span>
-            </button>
-            <button id="reset-data" class="action-button" type="button">
-              ${renderIcon('refresh')}
-              <span>Reset Example</span>
-            </button>
-            <button id="clear-data" class="action-button danger" type="button">
-              ${renderIcon('trash')}
-              <span>Clear Data</span>
-            </button>
+            <div class="data-action-group data-action-group-muted" aria-label="Data actions">
+              <button id="reset-data" class="action-button" type="button">
+                ${renderIcon('refresh')}
+                <span>Reset Example</span>
+              </button>
+              <button id="clear-data" class="action-button danger" type="button">
+                ${renderIcon('trash')}
+                <span>Clear Data</span>
+              </button>
+            </div>
           </div>
           <p id="status" class="status data-header-status" role="status"></p>
         </div>

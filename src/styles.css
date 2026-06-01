@@ -672,10 +672,10 @@ p {
 }
 
 .data-card-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) auto;
+  align-items: start;
+  gap: 18px;
   margin-bottom: 12px;
 }
 
@@ -686,7 +686,7 @@ p {
 
 .data-header-controls {
   display: flex;
-  min-width: min(620px, 100%);
+  min-width: min(700px, 100%);
   flex-direction: column;
   align-items: flex-end;
   gap: 7px;
@@ -695,8 +695,52 @@ p {
 .data-header-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 7px;
+}
+
+.data-header-actions > .action-button {
+  min-height: 34px;
+  padding: 0 13px;
+  white-space: nowrap;
+}
+
+.data-action-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--border) 34%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 46%, transparent);
+}
+
+.data-action-group-muted {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.data-action-group .action-button {
+  min-height: 30px;
+  padding: 0 9px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.data-action-group .action-button:hover,
+.data-action-group .action-button:focus-visible {
+  border-color: color-mix(in srgb, var(--border) 44%, transparent);
+  background: color-mix(in srgb, var(--background) 58%, transparent);
+  color: var(--foreground);
+}
+
+.data-action-group .action-button.danger:hover,
+.data-action-group .action-button.danger:focus-visible {
+  border-color: color-mix(in srgb, #ef4444 58%, transparent);
+  color: #ef4444;
 }
 
 .data-header-status {
@@ -1000,6 +1044,24 @@ p {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 6px;
+}
+
+.import-preview-actions .action-button.primary {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-weight: 700;
+}
+
+.import-preview-actions .action-button.primary:hover,
+.import-preview-actions .action-button.primary:focus-visible {
+  border-color: color-mix(in srgb, var(--primary) 82%, #fff);
+  background: color-mix(in srgb, var(--primary) 88%, #fff);
+  color: var(--primary-foreground);
+}
+
+.import-preview-actions .action-button.primary .button-icon {
+  color: currentColor;
 }
 
 .import-preview-list {
@@ -1990,8 +2052,20 @@ p {
     align-items: stretch;
   }
 
+  .data-card-header {
+    grid-template-columns: 1fr;
+  }
+
+  .data-header-controls {
+    min-width: 0;
+  }
+
   .data-header-actions {
     justify-content: flex-start;
+  }
+
+  .data-action-group {
+    flex-wrap: wrap;
   }
 
   .data-header-status {
