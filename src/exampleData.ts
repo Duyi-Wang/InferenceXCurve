@@ -1,6 +1,6 @@
 import type { InferenceCurveSeries } from './inferenceCurveChart';
 
-// Example snapshot generated from the InferenceX current benchmark API on 2026-05-28.
+// Example snapshot generated from the InferenceX current benchmark API on 2026-06-01.
 export const exampleSeries: InferenceCurveSeries[] = [
   {
     id: 'deepseek-r1-0528-isl-1024-osl-1024-fp4-mi355x-mori-sglang',
@@ -5173,8 +5173,8 @@ export const exampleSeries: InferenceCurveSeries[] = [
     title: 'DeepSeek-R1-0528 ISL 8192 / OSL 1024 FP4 MI355X (MoRI SGLang MTP)',
     points: [
       {
-        interactivity: 7.348768,
-        throughput: 9452.245369,
+        interactivity: 6.699216,
+        throughput: 8759.07009,
         strategy: 'TP8/EP8 MTP',
         precision: 'fp4',
         tp: 24,
@@ -5192,7 +5192,7 @@ export const exampleSeries: InferenceCurveSeries[] = [
         disagg: true,
         is_multinode: true,
         concurrency: 4096,
-        label: 'date 2026-05-27; run 26491418772'
+        label: 'date 2026-05-31; run 26714221123'
       },
       {
         interactivity: 7.453547,
@@ -5261,8 +5261,8 @@ export const exampleSeries: InferenceCurveSeries[] = [
         label: 'date 2026-03-13; run 23052579053'
       },
       {
-        interactivity: 12.457613,
-        throughput: 7798.902775,
+        interactivity: 11.052348,
+        throughput: 6935.855844,
         strategy: 'TP8/EP8 MTP',
         precision: 'fp4',
         tp: 24,
@@ -5280,11 +5280,11 @@ export const exampleSeries: InferenceCurveSeries[] = [
         disagg: true,
         is_multinode: true,
         concurrency: 2048,
-        label: 'date 2026-05-27; run 26491418772'
+        label: 'date 2026-05-31; run 26714221123'
       },
       {
-        interactivity: 15.680292,
-        throughput: 4904.830213,
+        interactivity: 13.576445,
+        throughput: 4367.067501,
         strategy: 'TP8/EP8 MTP',
         precision: 'fp4',
         tp: 24,
@@ -5302,11 +5302,11 @@ export const exampleSeries: InferenceCurveSeries[] = [
         disagg: true,
         is_multinode: true,
         concurrency: 1024,
-        label: 'date 2026-05-27; run 26491418772'
+        label: 'date 2026-05-31; run 26714221123'
       },
       {
-        interactivity: 23.77738,
-        throughput: 5473.895954,
+        interactivity: 35.560414,
+        throughput: 7842.202679,
         strategy: 'TP8/EP8 MTP',
         precision: 'fp4',
         tp: 16,
@@ -5324,11 +5324,11 @@ export const exampleSeries: InferenceCurveSeries[] = [
         disagg: true,
         is_multinode: true,
         concurrency: 512,
-        label: 'date 2026-05-27; run 26491418772'
+        label: 'date 2026-05-31; run 26714221123'
       },
       {
-        interactivity: 26.008962,
-        throughput: 1570.922275,
+        interactivity: 51.774399,
+        throughput: 8175.047484,
         strategy: 'TP8/EP8 MTP',
         precision: 'fp4',
         tp: 16,
@@ -5345,52 +5345,8 @@ export const exampleSeries: InferenceCurveSeries[] = [
         dp_attention: true,
         disagg: true,
         is_multinode: true,
-        concurrency: 128,
-        label: 'date 2026-05-27; run 26491418772'
-      },
-      {
-        interactivity: 30.250217,
-        throughput: 3499.668306,
-        strategy: 'TP8/EP8 MTP',
-        precision: 'fp4',
-        tp: 16,
-        num_prefill_gpu: 8,
-        num_decode_gpu: 8,
-        prefill_tp: 8,
-        prefill_ep: 8,
-        prefill_dp_attention: true,
-        prefill_num_workers: 1,
-        decode_tp: 8,
-        decode_ep: 8,
-        decode_dp_attention: true,
-        decode_num_workers: 1,
-        dp_attention: true,
-        disagg: true,
-        is_multinode: true,
-        concurrency: 256,
-        label: 'date 2026-05-27; run 26491418772'
-      },
-      {
-        interactivity: 32.680159,
-        throughput: 967.337917,
-        strategy: 'TP8/EP8 MTP',
-        precision: 'fp4',
-        tp: 16,
-        num_prefill_gpu: 8,
-        num_decode_gpu: 8,
-        prefill_tp: 8,
-        prefill_ep: 8,
-        prefill_dp_attention: true,
-        prefill_num_workers: 1,
-        decode_tp: 8,
-        decode_ep: 8,
-        decode_dp_attention: true,
-        decode_num_workers: 1,
-        dp_attention: true,
-        disagg: true,
-        is_multinode: true,
-        concurrency: 64,
-        label: 'date 2026-05-27; run 26491418772'
+        concurrency: 640,
+        label: 'date 2026-05-31; run 26714221123'
       },
       {
         interactivity: 61.235169,
@@ -5503,6 +5459,28 @@ export const exampleSeries: InferenceCurveSeries[] = [
         label: 'date 2026-02-13; run 21976393587'
       },
       {
+        interactivity: 86.785694,
+        throughput: 7919.760145,
+        strategy: 'TP8/EP8 MTP',
+        precision: 'fp4',
+        tp: 16,
+        num_prefill_gpu: 8,
+        num_decode_gpu: 8,
+        prefill_tp: 8,
+        prefill_ep: 8,
+        prefill_dp_attention: true,
+        prefill_num_workers: 1,
+        decode_tp: 8,
+        decode_ep: 8,
+        decode_dp_attention: true,
+        decode_num_workers: 1,
+        dp_attention: true,
+        disagg: true,
+        is_multinode: true,
+        concurrency: 256,
+        label: 'date 2026-05-31; run 26714221123'
+      },
+      {
         interactivity: 109.503062,
         throughput: 1055.341502,
         strategy: 'TP8/EP8 MTP',
@@ -5523,6 +5501,28 @@ export const exampleSeries: InferenceCurveSeries[] = [
         is_multinode: true,
         concurrency: 32,
         label: 'date 2026-02-13; run 21976393587'
+      },
+      {
+        interactivity: 113.436176,
+        throughput: 5991.999593,
+        strategy: 'TP8/EP8 MTP',
+        precision: 'fp4',
+        tp: 16,
+        num_prefill_gpu: 8,
+        num_decode_gpu: 8,
+        prefill_tp: 8,
+        prefill_ep: 8,
+        prefill_dp_attention: true,
+        prefill_num_workers: 1,
+        decode_tp: 8,
+        decode_ep: 8,
+        decode_dp_attention: true,
+        decode_num_workers: 1,
+        dp_attention: true,
+        disagg: true,
+        is_multinode: true,
+        concurrency: 128,
+        label: 'date 2026-05-31; run 26714221123'
       },
       {
         interactivity: 121.352722,
@@ -5635,8 +5635,30 @@ export const exampleSeries: InferenceCurveSeries[] = [
         label: 'date 2026-05-27; run 26491418772'
       },
       {
-        interactivity: 137.284073,
-        throughput: 2131.857572,
+        interactivity: 135.071504,
+        throughput: 3539.259449,
+        strategy: 'TP8/EP8 MTP',
+        precision: 'fp4',
+        tp: 16,
+        num_prefill_gpu: 8,
+        num_decode_gpu: 8,
+        prefill_tp: 8,
+        prefill_ep: 8,
+        prefill_dp_attention: true,
+        prefill_num_workers: 1,
+        decode_tp: 8,
+        decode_ep: 8,
+        decode_dp_attention: true,
+        decode_num_workers: 1,
+        dp_attention: true,
+        disagg: true,
+        is_multinode: true,
+        concurrency: 64,
+        label: 'date 2026-05-31; run 26714221123'
+      },
+      {
+        interactivity: 155.63132,
+        throughput: 2240.404304,
         strategy: 'TP8/EP1 MTP',
         precision: 'fp4',
         tp: 24,
@@ -5654,11 +5676,11 @@ export const exampleSeries: InferenceCurveSeries[] = [
         disagg: true,
         is_multinode: true,
         concurrency: 64,
-        label: 'date 2026-05-27; run 26491418772'
+        label: 'date 2026-05-31; run 26714221123'
       },
       {
-        interactivity: 178.707461,
-        throughput: 1475.059431,
+        interactivity: 176.943112,
+        throughput: 1503.071878,
         strategy: 'TP8/EP1 MTP',
         precision: 'fp4',
         tp: 24,
@@ -5676,11 +5698,11 @@ export const exampleSeries: InferenceCurveSeries[] = [
         disagg: true,
         is_multinode: true,
         concurrency: 32,
-        label: 'date 2026-05-27; run 26491418772'
+        label: 'date 2026-05-31; run 26714221123'
       },
       {
-        interactivity: 181.263998,
-        throughput: 929.381722,
+        interactivity: 181.3414,
+        throughput: 924.212232,
         strategy: 'TP8/EP1 MTP',
         precision: 'fp4',
         tp: 24,
@@ -5698,11 +5720,55 @@ export const exampleSeries: InferenceCurveSeries[] = [
         disagg: true,
         is_multinode: true,
         concurrency: 16,
-        label: 'date 2026-05-27; run 26491418772'
+        label: 'date 2026-05-31; run 26714221123'
       },
       {
-        interactivity: 216.80352,
-        throughput: 120.418382,
+        interactivity: 209.0677,
+        throughput: 763.267574,
+        strategy: 'TP8/EP1 MTP',
+        precision: 'fp4',
+        tp: 16,
+        num_prefill_gpu: 8,
+        num_decode_gpu: 8,
+        prefill_tp: 8,
+        prefill_ep: 1,
+        prefill_dp_attention: false,
+        prefill_num_workers: 1,
+        decode_tp: 8,
+        decode_ep: 1,
+        decode_dp_attention: false,
+        decode_num_workers: 1,
+        dp_attention: false,
+        disagg: true,
+        is_multinode: true,
+        concurrency: 8,
+        label: 'date 2026-05-31; run 26714221123'
+      },
+      {
+        interactivity: 240.927308,
+        throughput: 536.627318,
+        strategy: 'TP8/EP1 MTP',
+        precision: 'fp4',
+        tp: 24,
+        num_prefill_gpu: 8,
+        num_decode_gpu: 16,
+        prefill_tp: 8,
+        prefill_ep: 1,
+        prefill_dp_attention: false,
+        prefill_num_workers: 1,
+        decode_tp: 8,
+        decode_ep: 1,
+        decode_dp_attention: false,
+        decode_num_workers: 2,
+        dp_attention: false,
+        disagg: true,
+        is_multinode: true,
+        concurrency: 8,
+        label: 'date 2026-05-31; run 26714221123'
+      },
+      {
+        interactivity: 243.477334,
+        throughput: 132.171222,
         strategy: 'TP8/EP1 MTP',
         precision: 'fp4',
         tp: 16,
@@ -5720,77 +5786,11 @@ export const exampleSeries: InferenceCurveSeries[] = [
         disagg: true,
         is_multinode: true,
         concurrency: 1,
-        label: 'date 2026-05-27; run 26491418772'
+        label: 'date 2026-05-31; run 26714221123'
       },
       {
-        interactivity: 222.278238,
-        throughput: 736.126537,
-        strategy: 'TP8/EP1 MTP',
-        precision: 'fp4',
-        tp: 16,
-        num_prefill_gpu: 8,
-        num_decode_gpu: 8,
-        prefill_tp: 8,
-        prefill_ep: 1,
-        prefill_dp_attention: false,
-        prefill_num_workers: 1,
-        decode_tp: 8,
-        decode_ep: 1,
-        decode_dp_attention: false,
-        decode_num_workers: 1,
-        dp_attention: false,
-        disagg: true,
-        is_multinode: true,
-        concurrency: 8,
-        label: 'date 2026-05-27; run 26491418772'
-      },
-      {
-        interactivity: 239.476775,
-        throughput: 243.687306,
-        strategy: 'TP8/EP1 MTP',
-        precision: 'fp4',
-        tp: 16,
-        num_prefill_gpu: 8,
-        num_decode_gpu: 8,
-        prefill_tp: 8,
-        prefill_ep: 1,
-        prefill_dp_attention: false,
-        prefill_num_workers: 1,
-        decode_tp: 8,
-        decode_ep: 1,
-        decode_dp_attention: false,
-        decode_num_workers: 1,
-        dp_attention: false,
-        disagg: true,
-        is_multinode: true,
-        concurrency: 2,
-        label: 'date 2026-05-27; run 26491418772'
-      },
-      {
-        interactivity: 253.996143,
-        throughput: 559.70433,
-        strategy: 'TP8/EP1 MTP',
-        precision: 'fp4',
-        tp: 24,
-        num_prefill_gpu: 8,
-        num_decode_gpu: 16,
-        prefill_tp: 8,
-        prefill_ep: 1,
-        prefill_dp_attention: false,
-        prefill_num_workers: 1,
-        decode_tp: 8,
-        decode_ep: 1,
-        decode_dp_attention: false,
-        decode_num_workers: 2,
-        dp_attention: false,
-        disagg: true,
-        is_multinode: true,
-        concurrency: 8,
-        label: 'date 2026-05-27; run 26491418772'
-      },
-      {
-        interactivity: 278.232456,
-        throughput: 458.619612,
+        interactivity: 295.032405,
+        throughput: 502.206516,
         strategy: 'TP8/EP1 MTP',
         precision: 'fp4',
         tp: 16,
@@ -5808,11 +5808,11 @@ export const exampleSeries: InferenceCurveSeries[] = [
         disagg: true,
         is_multinode: true,
         concurrency: 4,
-        label: 'date 2026-05-27; run 26491418772'
+        label: 'date 2026-05-31; run 26714221123'
       },
       {
-        interactivity: 302.044874,
-        throughput: 333.323947,
+        interactivity: 296.072702,
+        throughput: 333.540209,
         strategy: 'TP8/EP1 MTP',
         precision: 'fp4',
         tp: 24,
@@ -5830,11 +5830,11 @@ export const exampleSeries: InferenceCurveSeries[] = [
         disagg: true,
         is_multinode: true,
         concurrency: 4,
-        label: 'date 2026-05-27; run 26491418772'
+        label: 'date 2026-05-31; run 26714221123'
       },
       {
-        interactivity: 324.630929,
-        throughput: 181.24262,
+        interactivity: 327.228472,
+        throughput: 174.750482,
         strategy: 'TP8/EP1 MTP',
         precision: 'fp4',
         tp: 24,
@@ -5852,7 +5852,29 @@ export const exampleSeries: InferenceCurveSeries[] = [
         disagg: true,
         is_multinode: true,
         concurrency: 2,
-        label: 'date 2026-05-27; run 26491418772'
+        label: 'date 2026-05-31; run 26714221123'
+      },
+      {
+        interactivity: 350.623801,
+        throughput: 294.141501,
+        strategy: 'TP8/EP1 MTP',
+        precision: 'fp4',
+        tp: 16,
+        num_prefill_gpu: 8,
+        num_decode_gpu: 8,
+        prefill_tp: 8,
+        prefill_ep: 1,
+        prefill_dp_attention: false,
+        prefill_num_workers: 1,
+        decode_tp: 8,
+        decode_ep: 1,
+        decode_dp_attention: false,
+        decode_num_workers: 1,
+        dp_attention: false,
+        disagg: true,
+        is_multinode: true,
+        concurrency: 2,
+        label: 'date 2026-05-31; run 26714221123'
       }
     ]
   },
