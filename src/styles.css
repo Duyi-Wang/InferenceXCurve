@@ -1047,17 +1047,27 @@ p {
 }
 
 .import-preview-actions .action-button.primary {
-  border-color: var(--primary);
-  background: var(--primary);
-  color: var(--primary-foreground);
+  border-color: #f7b041;
+  background: #f7b041;
+  color: #000;
   font-weight: 700;
+  opacity: 1;
+  -webkit-text-fill-color: #000;
 }
 
 .import-preview-actions .action-button.primary:hover,
 .import-preview-actions .action-button.primary:focus-visible {
-  border-color: color-mix(in srgb, var(--primary) 82%, #fff);
-  background: color-mix(in srgb, var(--primary) 88%, #fff);
-  color: var(--primary-foreground);
+  border-color: color-mix(in srgb, #f7b041 82%, #fff);
+  background: color-mix(in srgb, #f7b041 88%, #fff);
+  color: #000;
+  -webkit-text-fill-color: #000;
+}
+
+.import-preview-actions .action-button.primary span,
+.import-preview-actions .action-button.primary .button-icon {
+  color: #000;
+  opacity: 1;
+  -webkit-text-fill-color: #000;
 }
 
 .import-preview-actions .action-button.primary .button-icon {
