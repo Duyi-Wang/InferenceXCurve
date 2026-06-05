@@ -992,8 +992,8 @@ p {
     minmax(120px, 1fr)
     minmax(120px, 1fr)
     minmax(112px, 0.8fr)
-    minmax(112px, 0.8fr)
-    minmax(150px, 1fr);
+    minmax(86px, 0.55fr)
+    minmax(260px, 1.55fr);
   align-items: end;
   gap: 8px;
   margin-top: 10px;
@@ -1030,13 +1030,27 @@ p {
 
 .import-color-controls {
   display: grid;
-  grid-template-columns: minmax(82px, 1fr) 32px;
+  min-width: 0;
+  grid-template-columns: minmax(72px, 82px) 32px minmax(0, 1fr);
+  align-items: center;
   gap: 5px;
 }
 
 .import-color-controls input[type="color"] {
   min-height: 32px;
   padding: 2px;
+}
+
+.import-color-presets {
+  min-width: 0;
+  justify-content: flex-start;
+  overflow: hidden;
+}
+
+.import-color-presets .color-preset {
+  width: 14px;
+  min-width: 14px;
+  min-height: 14px;
 }
 
 .import-preview-actions {

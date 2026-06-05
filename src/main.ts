@@ -3294,6 +3294,25 @@ function renderImportBatchControls(): string {
             <option value="custom" ${pendingImportSettings.colorMode === 'custom' ? 'selected' : ''}>Custom</option>
           </select>
           <input type="color" data-import-batch-field="color" value="${escapeAttribute(toColorInputValue(pendingImportSettings.color, 0))}" title="Custom color for all imported lines" />
+          <div class="import-color-presets color-presets" aria-label="Standard import colors">
+            ${colorPresets
+              .map((preset) => {
+                const selected =
+                  pendingImportSettings.colorMode === 'custom' &&
+                  pendingImportSettings.color.toLowerCase() === preset.value.toLowerCase();
+                return `
+                  <button
+                    type="button"
+                    class="color-preset${selected ? ' selected' : ''}"
+                    data-import-color-preset="${escapeAttribute(preset.value)}"
+                    title="${escapeAttribute(preset.name)}"
+                    aria-label="${escapeAttribute(preset.name)}"
+                    style="--swatch-color:${escapeAttribute(preset.value)}"
+                  ></button>
+                `;
+              })
+              .join('')}
+          </div>
         </div>
       </label>
     </div>
@@ -3499,6 +3518,17 @@ function handleImportPreviewClick(event: MouseEvent): void {
   const styleButton = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-import-line-style-option]');
   if (styleButton) {
     pendingImportSettings.lineStyle = styleButton.dataset.importLineStyleOption || DEFAULT_LINE_STYLE;
+    applyImportBatchSettings();
+    renderImportPreview();
+    return;
+  }
+
+  const colorPresetButton = (event.target as HTMLElement).closest<HTMLButtonElement>(
+    'button[data-import-color-preset]'
+  );
+  if (colorPresetButton) {
+    pendingImportSettings.color = colorPresetButton.dataset.importColorPreset || colorInputFallbacks[0]!;
+    pendingImportSettings.colorMode = 'custom';
     applyImportBatchSettings();
     renderImportPreview();
     return;
