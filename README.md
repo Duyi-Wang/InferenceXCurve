@@ -60,6 +60,10 @@ Default	11.75	7397.06	4	8	4	4	true	8	8	true	4096	date 2026-05-07
 Star	15.51	4893.40	4	8	4	4	true	8	8	true	2048	highlighted point
 ```
 
+Line and point edits are auto-rendered after a short debounce, so the chart
+updates without pressing `Render Chart`. The button remains available for an
+immediate redraw.
+
 ## Filters and View Controls
 
 The top controls filter by `Model`, `ISL/OSL`, `Precision`, and `MTP`. Defaults
@@ -68,6 +72,12 @@ select the first available value rather than showing all values.
 The legend panel includes:
 
 - line visibility search and toggles
+- per-filter active-line memory for each `Model` / `ISL/OSL` / `Precision` /
+  `MTP` view
+- hover-only `Only` actions for quickly isolating one line
+- hover-only locate actions for jumping from a legend line to its Line Project
+- `Show all lines` below the line list to reactivate every line in the current
+  filtered view
 - `Log Scale`
 - `Optimal Only`
 - `Hide Labels`
@@ -78,6 +88,9 @@ The legend panel includes:
 
 By default, `Optimal Only` is enabled and `Gradient Labels` / `Line Labels` are
 disabled.
+
+Newly added, copied, or imported lines are activated automatically in the
+current view.
 
 ## GitHub Actions Import
 
