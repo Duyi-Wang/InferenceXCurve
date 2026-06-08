@@ -1190,7 +1190,12 @@ function renderSeriesCard(series: SeriesDraft, seriesIndex: number, autoColor: s
   const pointCount = countPointRows([series]);
   const collapsed = series.collapsed;
   return `
-    <section class="series-card${collapsed ? ' collapsed' : ''}" data-series-card data-series-index="${seriesIndex}">
+    <section
+      class="series-card${collapsed ? ' collapsed' : ''}"
+      data-series-card
+      data-series-index="${seriesIndex}"
+      data-series-id="${escapeAttribute(getDraftSeriesId(series, seriesIndex))}"
+    >
       <div class="series-card-head">
         <div class="series-card-title">
           <button
@@ -1512,6 +1517,7 @@ function renderIcon(name: string): string {
     'grip-vertical': '<circle cx="9" cy="5" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="19" r="1"/>',
     'chevron-right': '<path d="m9 18 6-6-6-6"/>',
     'chevron-down': '<path d="m6 9 6 6 6-6"/>',
+    target: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3"/><path d="M12 19v3"/><path d="M2 12h3"/><path d="M19 12h3"/>',
     help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 4.5 1.5c0 1.7-2.5 2-2.5 3.5"/><path d="M12 17h.01"/>',
     upload: '<path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>'
   };
@@ -2028,6 +2034,15 @@ function renderLegend(): void {
                 <button class="legend-only" type="button" data-series-only="${escapeAttribute(series.id)}" title="Show only this line">
                   Only
                 </button>
+                <button
+                  class="legend-locate"
+                  type="button"
+                  data-series-locate="${escapeAttribute(series.id)}"
+                  title="Locate in data panel"
+                  aria-label="Locate ${escapeAttribute(series.name)} in data panel"
+                >
+                  ${renderIcon('target')}
+                </button>
               </li>
             `;
           })
@@ -2086,6 +2101,13 @@ function renderLegend(): void {
       scheduleLocalSave();
     });
   });
+  legendEl.querySelectorAll<HTMLButtonElement>('button[data-series-locate]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const id = button.dataset.seriesLocate;
+      if (!id) return;
+      locateSeriesInEditor(id);
+    });
+  });
   legendEl.querySelectorAll<HTMLInputElement>('input[data-switch]').forEach((input) => {
     input.addEventListener('change', () => {
       const key = input.dataset.switch as keyof AppState;
@@ -2124,6 +2146,26 @@ function renderLegend(): void {
     renderAll();
     scheduleLocalSave();
   });
+}
+
+function locateSeriesInEditor(seriesId: string): void {
+  const card = Array.from(seriesEditorEl.querySelectorAll<HTMLElement>('[data-series-card]')).find(
+    (element) => element.dataset.seriesId === seriesId
+  );
+  if (!card) {
+    setStatus('Line is not visible in the current data panel.', true);
+    return;
+  }
+
+  card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  card.classList.remove('located');
+  void card.offsetWidth;
+  card.classList.add('located');
+  const focusTarget = card.querySelector<HTMLElement>('[data-series-drag-handle]');
+  focusTarget?.focus({ preventScroll: true });
+  window.setTimeout(() => {
+    card.classList.remove('located');
+  }, 1800);
 }
 
 function renderSwitch(key: string, label: string, checked: boolean): string {

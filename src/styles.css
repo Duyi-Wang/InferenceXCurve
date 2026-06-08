@@ -574,10 +574,10 @@ p {
   text-overflow: clip;
 }
 
-.legend-only {
+.legend-only,
+.legend-locate {
   min-height: 20px;
   margin-top: 1px;
-  padding: 1px 5px;
   flex: 0 0 auto;
   border-color: var(--border);
   background: var(--background);
@@ -589,13 +589,30 @@ p {
   transition: opacity 120ms ease, color 120ms ease;
 }
 
+.legend-only {
+  padding: 1px 5px;
+}
+
+.legend-locate {
+  width: 22px;
+  padding: 0;
+}
+
+.legend-locate .button-icon {
+  width: 13px;
+  height: 13px;
+}
+
 .legend-list li:hover .legend-only,
-.legend-list li:focus-within .legend-only {
+.legend-list li:focus-within .legend-only,
+.legend-list li:hover .legend-locate,
+.legend-list li:focus-within .legend-locate {
   opacity: 0.78;
   pointer-events: auto;
 }
 
-.legend-only:hover {
+.legend-only:hover,
+.legend-locate:hover {
   color: var(--foreground);
   opacity: 1;
 }
@@ -1369,6 +1386,23 @@ p {
 
 .series-card.drop-after::after {
   bottom: -2px;
+}
+
+.series-card.located {
+  animation: locate-series-card 1.8s ease-out;
+}
+
+@keyframes locate-series-card {
+  0%,
+  60% {
+    border-color: color-mix(in srgb, var(--primary) 82%, var(--border));
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 26%, transparent);
+  }
+
+  100% {
+    border-color: color-mix(in srgb, var(--border) 42%, transparent);
+    box-shadow: none;
+  }
 }
 
 .series-empty {
