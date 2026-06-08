@@ -625,17 +625,34 @@ p {
   opacity: 1;
 }
 
-.legend-line-action {
-  align-self: flex-start;
-  margin-top: 6px;
+.legend-line-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
   margin-bottom: 8px;
+}
+
+.legend-line-toolbar-precision {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.legend-line-action {
+  flex: 0 0 auto;
   min-height: auto;
+  margin-top: 1px;
   padding: 0;
   border: 0;
   background: transparent;
   color: var(--muted-foreground);
   font-size: 12px;
   text-decoration: underline;
+}
+
+.legend-line-action:disabled {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .legend-line-action:hover {
@@ -712,7 +729,7 @@ p {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 4px 12px;
-  margin-bottom: 8px;
+  margin: 0;
   color: var(--muted-foreground);
   font-size: 12px;
 }

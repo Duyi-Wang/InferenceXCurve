@@ -1992,6 +1992,7 @@ function commitSeriesDom(): void {
 }
 
 function renderLegend(): void {
+  const previousListScrollTop = legendEl.querySelector<HTMLElement>('.legend-list')?.scrollTop ?? 0;
   const filteredSeries = getFilteredSeriesForChart();
   const prepared = prepareInferenceCurveSeries(filteredSeries, state.highContrast, state.theme);
   const query = state.search.trim().toLowerCase();
@@ -2002,6 +2003,7 @@ function renderLegend(): void {
       (series.title && series.title.toLowerCase().includes(query))
   );
   const activeCount = prepared.filter((series) => state.activeSeriesIds.has(series.id)).length;
+  const precisionKey = renderPrecisionKey();
 
   legendEl.innerHTML = `
     <div class="legend-container">
@@ -2050,13 +2052,22 @@ function renderLegend(): void {
           })
           .join('')}
       </ul>
-      ${
-        activeCount < prepared.length
-          ? '<button id="show-all-lines" class="legend-line-action" type="button">Show all lines</button>'
-          : ''
-      }
       <div class="legend-bottom">
-        ${renderPrecisionKey()}
+        ${
+          precisionKey || activeCount < prepared.length
+            ? `<div class="legend-line-toolbar">
+                <div class="legend-line-toolbar-precision">${precisionKey}</div>
+                <button
+                  id="show-all-lines"
+                  class="legend-line-action"
+                  type="button"
+                  ${activeCount < prepared.length ? '' : 'disabled aria-hidden="true" tabindex="-1"'}
+                >
+                  Show all lines
+                </button>
+              </div>`
+            : ''
+        }
         ${renderSwitch('logY', 'Log Scale', state.logY)}
         ${renderSwitch('showNonOptimalPoints', 'Optimal Only', !state.showNonOptimalPoints)}
         ${renderSwitch('hidePointLabels', 'Hide Labels', state.hidePointLabels)}
@@ -2148,6 +2159,9 @@ function renderLegend(): void {
     renderAll();
     scheduleLocalSave();
   });
+
+  const nextList = legendEl.querySelector<HTMLElement>('.legend-list');
+  if (nextList) nextList.scrollTop = previousListScrollTop;
 }
 
 function locateSeriesInEditor(seriesId: string): void {
