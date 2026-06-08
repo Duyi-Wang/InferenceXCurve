@@ -284,6 +284,8 @@ const pointColumns: TableColumn[] = [
 
 const hiddenPointKeys = ['strategy', 'tp', 'dp_attention'] as const;
 const knownPointKeys = new Set([...pointColumns.map((column) => column.key), ...hiddenPointKeys]);
+// Point columns whose data-panel display is normalized to two decimal places.
+const DECIMAL_DISPLAY_KEYS = new Set(['interactivity', 'throughput']);
 
 const pointShapeOptions = [
   { value: '', label: 'Default', symbol: '●' },
@@ -1446,9 +1448,6 @@ function renderIcon(name: string): string {
     </svg>
   `;
 }
-
-// Point columns whose data-panel display is normalized to two decimal places.
-const DECIMAL_DISPLAY_KEYS = new Set(['interactivity', 'throughput']);
 
 function formatPointCellDisplay(key: string, value: string | undefined): string {
   const raw = value ?? '';
