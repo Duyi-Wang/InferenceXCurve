@@ -34,6 +34,7 @@ type PointRow = Record<string, string>;
 interface AppState {
   theme: Theme;
   activeSeriesIds: Set<string>;
+  activeSeriesIdsByView: Map<string, Set<string>>;
   selectedPrecisions: Set<string>;
   modelFilter: string;
   islOslFilter: string;
@@ -103,6 +104,7 @@ interface PendingMergeGroup {
 interface PersistedAppState {
   theme?: Theme;
   activeSeriesIds?: string[];
+  activeSeriesIdsByView?: Record<string, string[]>;
   selectedPrecisions?: string[];
   modelFilter?: string;
   islOslFilter?: string;
@@ -450,6 +452,7 @@ function restorePersistedState(value: unknown): PersistedAppState {
   return {
     theme: value.theme === 'light' || value.theme === 'dark' ? value.theme : undefined,
     activeSeriesIds: readPersistedStringArray(value.activeSeriesIds),
+    activeSeriesIdsByView: readPersistedActiveSeriesByView(value.activeSeriesIdsByView),
     selectedPrecisions: readPersistedStringArray(value.selectedPrecisions),
     modelFilter: readPersistedText(value, 'modelFilter') || undefined,
     islOslFilter: readPersistedText(value, 'islOslFilter') || undefined,
@@ -468,6 +471,12 @@ function restorePersistedState(value: unknown): PersistedAppState {
 function restoreAppState(defaults: AppState, saved: PersistedAppState, series: InferenceCurveSeries[]): AppState {
   const ids = new Set(series.map((line) => line.id));
   const activeSeriesIds = (saved.activeSeriesIds ?? []).filter((id) => ids.has(id));
+  const activeSeriesIdsByView = new Map(
+    Object.entries(saved.activeSeriesIdsByView ?? {}).map(([key, values]) => [
+      key,
+      new Set(values.filter((id) => ids.has(id)))
+    ])
+  );
   const precisionValues = new Set(getAvailablePrecisions(series));
   const selectedPrecisions = (saved.selectedPrecisions ?? []).filter((precision) =>
     precisionValues.has(precision)
@@ -479,6 +488,7 @@ function restoreAppState(defaults: AppState, saved: PersistedAppState, series: I
       activeSeriesIds.length > 0 || series.length === 0
         ? new Set(activeSeriesIds)
         : new Set(defaults.activeSeriesIds),
+    activeSeriesIdsByView,
     selectedPrecisions:
       selectedPrecisions.length > 0 || precisionValues.size === 0
         ? new Set(selectedPrecisions)
@@ -501,6 +511,7 @@ function serializeAppState(): PersistedAppState {
   return {
     theme: state.theme,
     activeSeriesIds: Array.from(state.activeSeriesIds),
+    activeSeriesIdsByView: serializeActiveSeriesByView(),
     selectedPrecisions: Array.from(state.selectedPrecisions),
     modelFilter: state.modelFilter,
     islOslFilter: state.islOslFilter,
@@ -514,6 +525,14 @@ function serializeAppState(): PersistedAppState {
     logY: state.logY,
     search: state.search
   };
+}
+
+function serializeActiveSeriesByView(): Record<string, string[]> {
+  const result: Record<string, string[]> = {};
+  state.activeSeriesIdsByView.forEach((ids, key) => {
+    result[key] = Array.from(ids);
+  });
+  return result;
 }
 
 function getSeriesForPersistence(): InferenceCurveSeries[] {
@@ -625,6 +644,16 @@ function readPersistedStringArray(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const values = value.map((item) => normalizeCellText(String(item))).filter(Boolean);
   return values.length ? values : undefined;
+}
+
+function readPersistedActiveSeriesByView(value: unknown): Record<string, string[]> | undefined {
+  if (!isRecord(value)) return undefined;
+  const result: Record<string, string[]> = {};
+  Object.entries(value).forEach(([key, ids]) => {
+    if (!Array.isArray(ids)) return;
+    result[key] = ids.map((id) => normalizeCellText(String(id))).filter(Boolean);
+  });
+  return Object.keys(result).length ? result : undefined;
 }
 
 function readPersistedBoolean(value: unknown): boolean | undefined {
@@ -1052,9 +1081,11 @@ function renderFilterControls(): void {
   mtpFilterEl.innerHTML = renderMtpFilterOptions(mtpValues);
 
   modelFilterEl.onchange = () => {
+    saveActiveSeriesForCurrentView();
     state.modelFilter = modelFilterEl.value;
     reconcileFiltersForSeries(currentSeries);
     resetSelectionsForSeries(getModelSequenceMtpFilteredSeries());
+    restoreActiveSeriesForCurrentView();
     renderFilterControls();
     renderSeriesEditor();
     renderAll();
@@ -1062,9 +1093,11 @@ function renderFilterControls(): void {
     scheduleLocalSave();
   };
   islOslFilterEl.onchange = () => {
+    saveActiveSeriesForCurrentView();
     state.islOslFilter = islOslFilterEl.value;
     reconcileFiltersForSeries(currentSeries);
     resetSelectionsForSeries(getModelSequenceMtpFilteredSeries());
+    restoreActiveSeriesForCurrentView();
     renderFilterControls();
     renderSeriesEditor();
     renderAll();
@@ -1072,19 +1105,22 @@ function renderFilterControls(): void {
     scheduleLocalSave();
   };
   precisionFilterEl.onchange = () => {
+    saveActiveSeriesForCurrentView();
     const precision = precisionFilterEl.value;
     const availablePrecisions = getAvailablePrecisions(getModelSequenceMtpFilteredSeries());
     state.selectedPrecisions =
       precision === ALL_VALUE ? new Set(availablePrecisions) : new Set([precision]);
+    restoreActiveSeriesForCurrentView();
     renderSeriesEditor();
     renderAll();
     clearMergePreview();
     scheduleLocalSave();
   };
   mtpFilterEl.onchange = () => {
+    saveActiveSeriesForCurrentView();
     state.mtpFilter = mtpFilterEl.value;
     reconcileFiltersForSeries(currentSeries);
-    resetActiveSeriesForSeries(getModelSequenceMtpFilteredSeries());
+    restoreActiveSeriesForCurrentView();
     renderFilterControls();
     renderSeriesEditor();
     renderAll();
@@ -1983,11 +2019,19 @@ function renderLegend(): void {
                   </svg>
                   <span class="legend-text">${escapeHtml(series.name)}</span>
                 </label>
+                <button class="legend-only" type="button" data-series-only="${escapeAttribute(series.id)}" title="Show only this line">
+                  Only
+                </button>
               </li>
             `;
           })
           .join('')}
       </ul>
+      ${
+        activeCount < prepared.length
+          ? '<button id="show-all-lines" class="legend-line-action" type="button">Show all lines</button>'
+          : ''
+      }
       <div class="legend-bottom">
         ${renderPrecisionKey()}
         ${renderSwitch('logY', 'Log Scale', state.logY)}
@@ -1997,11 +2041,6 @@ function renderLegend(): void {
         ${renderSwitch('useAdvancedLabels', 'Parallelism Labels', state.useAdvancedLabels)}
         ${renderSwitch('showGradientLabels', 'Gradient Labels', state.showGradientLabels)}
         ${renderSwitch('showLineLabels', 'Line Labels', state.showLineLabels)}
-        ${
-          activeCount < prepared.length
-            ? '<button id="reset-filter" class="legend-link" type="button">Reset filter</button>'
-            : ''
-        }
       </div>
     </div>
   `;
@@ -2026,6 +2065,17 @@ function renderLegend(): void {
       } else {
         input.checked = true;
       }
+      saveActiveSeriesForCurrentView();
+      renderAll();
+      scheduleLocalSave();
+    });
+  });
+  legendEl.querySelectorAll<HTMLButtonElement>('button[data-series-only]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const id = button.dataset.seriesOnly;
+      if (!id) return;
+      state.activeSeriesIds = new Set([id]);
+      saveActiveSeriesForCurrentView();
       renderAll();
       scheduleLocalSave();
     });
@@ -2044,6 +2094,7 @@ function renderLegend(): void {
   });
   legendEl.querySelectorAll<HTMLInputElement>('input[data-precision]').forEach((input) => {
     input.addEventListener('change', () => {
+      saveActiveSeriesForCurrentView();
       const precision = input.dataset.precision!;
       if (input.checked) {
         state.selectedPrecisions.add(precision);
@@ -2052,6 +2103,7 @@ function renderLegend(): void {
       } else {
         input.checked = true;
       }
+      restoreActiveSeriesForCurrentView();
       renderFilterControls();
       renderSeriesEditor();
       renderAll();
@@ -2059,14 +2111,11 @@ function renderLegend(): void {
       scheduleLocalSave();
     });
   });
-  legendEl.querySelector('#reset-filter')?.addEventListener('click', () => {
+  legendEl.querySelector('#show-all-lines')?.addEventListener('click', () => {
     const nextSeries = getFilteredSeriesForChart();
     state.activeSeriesIds = new Set(nextSeries.map((series) => series.id));
-    state.selectedPrecisions = new Set(getAvailablePrecisions(nextSeries));
-    renderFilterControls();
-    renderSeriesEditor();
+    saveActiveSeriesForCurrentView();
     renderAll();
-    clearMergePreview();
     scheduleLocalSave();
   });
 }
@@ -2622,30 +2671,53 @@ function normalizePointShapeValue(value: string | undefined): string {
 }
 
 function resetSelectionsForSeries(series: InferenceCurveSeries[]): void {
-  state.activeSeriesIds = new Set(series.map((line) => line.id));
   state.selectedPrecisions = firstPrecisionSelection(series);
-}
-
-function resetActiveSeriesForSeries(series: InferenceCurveSeries[]): void {
-  state.activeSeriesIds = new Set(series.map((line) => line.id));
 }
 
 function activateSeriesForChart(series: InferenceCurveSeries[]): void {
   series.forEach((line) => {
     state.activeSeriesIds.add(line.id);
   });
+  saveActiveSeriesForCurrentView();
 }
 
-function reconcileActiveSeriesForChart(): void {
-  const visibleSeries = getFilteredSeriesForChart();
-  if (visibleSeries.length === 0) {
+function getActiveSeriesViewKey(): string {
+  const precisionKey = Array.from(state.selectedPrecisions).sort((a, b) => a.localeCompare(b)).join(',');
+  return [state.modelFilter, state.islOslFilter, state.mtpFilter, precisionKey]
+    .map((value) => encodeURIComponent(value || ''))
+    .join('|');
+}
+
+function getCurrentViewSeriesIds(): Set<string> {
+  return new Set(getFilteredSeriesForChart().map((line) => line.id));
+}
+
+function saveActiveSeriesForCurrentView(): void {
+  const visibleIds = getCurrentViewSeriesIds();
+  const activeIds = Array.from(state.activeSeriesIds).filter((id) => visibleIds.has(id));
+  state.activeSeriesIdsByView.set(getActiveSeriesViewKey(), new Set(activeIds));
+}
+
+function restoreActiveSeriesForCurrentView(): void {
+  const visibleIds = getCurrentViewSeriesIds();
+  if (visibleIds.size === 0) {
     state.activeSeriesIds = new Set();
     return;
   }
 
-  const visibleIds = new Set(visibleSeries.map((line) => line.id));
-  const selected = Array.from(state.activeSeriesIds).filter((id) => visibleIds.has(id));
-  state.activeSeriesIds = selected.length > 0 ? new Set(selected) : visibleIds;
+  const key = getActiveSeriesViewKey();
+  const savedIds = state.activeSeriesIdsByView.get(key);
+  if (savedIds) {
+    state.activeSeriesIds = new Set(Array.from(savedIds).filter((id) => visibleIds.has(id)));
+    return;
+  }
+
+  const currentIds = Array.from(state.activeSeriesIds).filter((id) => visibleIds.has(id));
+  state.activeSeriesIds = currentIds.length ? new Set(currentIds) : visibleIds;
+}
+
+function reconcileActiveSeriesForChart(): void {
+  restoreActiveSeriesForCurrentView();
 }
 
 function reconcileFiltersForSeries(series: InferenceCurveSeries[]): void {
@@ -2689,6 +2761,7 @@ function createInitialState(series: InferenceCurveSeries[]): AppState {
   return {
     theme: 'dark',
     activeSeriesIds: new Set(visibleSeries.map((line) => line.id)),
+    activeSeriesIdsByView: new Map(),
     selectedPrecisions: firstPrecisionSelection(visibleSeries),
     modelFilter,
     islOslFilter,
@@ -2710,6 +2783,7 @@ function setDefaultFiltersForSeries(series: InferenceCurveSeries[]): void {
   state.islOslFilter = defaults.islOslFilter;
   state.mtpFilter = defaults.mtpFilter;
   state.activeSeriesIds = defaults.activeSeriesIds;
+  state.activeSeriesIdsByView = defaults.activeSeriesIdsByView;
   state.selectedPrecisions = defaults.selectedPrecisions;
 }
 
