@@ -201,6 +201,7 @@ const DEFAULT_LINE_STYLE = 'solid';
 const LOCAL_STORAGE_KEY = 'inferencex-curve:user-data:v1';
 const TOKEN_STORAGE_KEY = 'inferencex-curve:github-token:v1';
 const LOCAL_SAVE_DEBOUNCE_MS = 350;
+const AUTO_RENDER_DEBOUNCE_MS = 400;
 const EXPORT_PADDING = 32;
 const EXPORT_TITLE_HEIGHT = 62;
 const EXPORT_LAYOUT_GAP = 16;
@@ -648,10 +649,10 @@ let pendingImportSettings: ImportBatchSettings = createImportBatchSettings();
 let pendingMergeGroups: PendingMergeGroup[] = [];
 let state: AppState = initialData.state;
 let localSaveTimer: number | null = null;
+let autoRenderTimer: number | null = null;
 let localStorageWarningShown = false;
 let skipNextBeforeUnloadSave = false;
 let draggedSeriesIndex: number | null = null;
-let chartIsDirty = false;
 
 sortSeriesDraftsByLayer();
 normalizeDraftRenderOrderFromPanelOrder();
@@ -864,6 +865,7 @@ document.querySelector('#quick-top')?.addEventListener('click', () => {
 });
 
 document.querySelector('#reset-data')?.addEventListener('click', () => {
+  clearAutoRenderTimer();
   currentSeries = structuredClone(exampleSeries);
   seriesDrafts = seriesToDrafts(currentSeries);
   sortSeriesDraftsByLayer();
@@ -882,6 +884,7 @@ document.querySelector('#reset-data')?.addEventListener('click', () => {
 });
 
 document.querySelector('#clear-data')?.addEventListener('click', () => {
+  clearAutoRenderTimer();
   currentSeries = [];
   seriesDrafts = [makeEmptySeriesDraft(0)];
   normalizeDraftRenderOrderFromPanelOrder();
@@ -957,6 +960,7 @@ window.addEventListener('beforeunload', () => {
 });
 
 function renderDraftData(): void {
+  clearAutoRenderTimer();
   try {
     commitSeriesDom();
     normalizeDraftRenderOrderFromPanelOrder();
@@ -973,6 +977,36 @@ function renderDraftData(): void {
   } catch (error) {
     setStatus(error instanceof Error ? error.message : 'Invalid line data', true);
   }
+}
+
+function autoRenderDraftData(): void {
+  try {
+    commitSeriesDom();
+    normalizeDraftRenderOrderFromPanelOrder();
+    currentSeries = draftsToSeries(seriesDrafts);
+    syncCurrentSeriesOrderFromDrafts();
+    reconcileFiltersForSeries(currentSeries);
+    reconcileActiveSeriesForChart();
+    renderFilterControls();
+    renderAll();
+    setStatus(`${currentSeries.length} lines auto-rendered from ${countPointRows(seriesDrafts)} point rows`);
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : 'Invalid line data', true);
+  }
+}
+
+function scheduleAutoRender(): void {
+  if (autoRenderTimer !== null) window.clearTimeout(autoRenderTimer);
+  autoRenderTimer = window.setTimeout(() => {
+    autoRenderTimer = null;
+    autoRenderDraftData();
+  }, AUTO_RENDER_DEBOUNCE_MS);
+}
+
+function clearAutoRenderTimer(): void {
+  if (autoRenderTimer === null) return;
+  window.clearTimeout(autoRenderTimer);
+  autoRenderTimer = null;
 }
 
 function handleGlobalKeydown(event: KeyboardEvent): void {
@@ -5011,18 +5045,16 @@ function downloadBlob(filename: string, content: string, type: string): void {
 }
 
 function setStatus(message: string, error = false): void {
-  chartIsDirty = false;
   statusEl.textContent = message;
   statusEl.classList.toggle('error', error);
   statusEl.classList.remove('dirty');
 }
 
 function markChartDirty(): void {
-  if (chartIsDirty && statusEl.classList.contains('dirty')) return;
-  chartIsDirty = true;
-  statusEl.textContent = 'Chart has unrendered changes. Press Ctrl/Cmd+Enter to render.';
+  statusEl.textContent = 'Rendering chart changes...';
   statusEl.classList.remove('error');
   statusEl.classList.add('dirty');
+  scheduleAutoRender();
 }
 
 function setImportStatus(message: string, error = false): void {
