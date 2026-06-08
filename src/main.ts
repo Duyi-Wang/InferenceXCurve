@@ -682,6 +682,7 @@ let autoRenderTimer: number | null = null;
 let localStorageWarningShown = false;
 let skipNextBeforeUnloadSave = false;
 let draggedSeriesIndex: number | null = null;
+let pendingActiveSeriesIds = new Set<string>();
 
 sortSeriesDraftsByLayer();
 normalizeDraftRenderOrderFromPanelOrder();
@@ -936,7 +937,7 @@ document.querySelector('#add-series')?.addEventListener('click', () => {
   const nextIndex = seriesDrafts.length + 1;
   const defaultMtp = getDefaultDraftMtp();
   const defaultIsMtp = defaultMtp === MTP_VALUE;
-  seriesDrafts.push({
+  const draft = {
     id: `line-${nextIndex}${defaultIsMtp ? '-mtp' : ''}`,
     name: `Line ${nextIndex}${defaultIsMtp ? ' MTP' : ''}`,
     model: getDefaultDraftModel(),
@@ -950,7 +951,9 @@ document.querySelector('#add-series')?.addEventListener('click', () => {
     renderOrder: getNextDraftRenderOrder(),
     collapsed: true,
     points: [makeEmptyPointRow()]
-  });
+  };
+  seriesDrafts.push(draft);
+  queueSeriesActiveByDraft(draft, seriesDrafts.length - 1);
   sortSeriesDraftsByLayer();
   normalizeDraftRenderOrderFromPanelOrder();
   renderSeriesEditor();
@@ -997,6 +1000,7 @@ function renderDraftData(): void {
     syncCurrentSeriesOrderFromDrafts();
     reconcileFiltersForSeries(currentSeries);
     reconcileActiveSeriesForChart();
+    activatePendingSeriesForCurrentView();
     renderFilterControls();
     renderSeriesEditor();
     renderAll();
@@ -1016,6 +1020,7 @@ function autoRenderDraftData(): void {
     syncCurrentSeriesOrderFromDrafts();
     reconcileFiltersForSeries(currentSeries);
     reconcileActiveSeriesForChart();
+    activatePendingSeriesForCurrentView();
     renderFilterControls();
     renderAll();
     setStatus(`${currentSeries.length} lines auto-rendered from ${countPointRows(seriesDrafts)} point rows`);
@@ -1715,6 +1720,7 @@ function attachSeriesEditorEvents(): void {
         const copy = copySeriesDraft(draft);
         copy.renderOrder = getNextDraftRenderOrder();
         seriesDrafts.push(copy);
+        queueSeriesActiveByDraft(copy, seriesDrafts.length - 1);
         setStatus(`Copied ${draft.name || `Line ${seriesIndex + 1}`}`);
       } else if (action === 'add-row') {
         draft.points.push(makeEmptyPointRow());
@@ -2679,6 +2685,23 @@ function activateSeriesForChart(series: InferenceCurveSeries[]): void {
     state.activeSeriesIds.add(line.id);
   });
   saveActiveSeriesForCurrentView();
+}
+
+function queueSeriesActiveByDraft(draft: SeriesDraft, index: number): void {
+  pendingActiveSeriesIds.add(getDraftSeriesId(draft, index));
+}
+
+function activatePendingSeriesForCurrentView(): void {
+  if (pendingActiveSeriesIds.size === 0) return;
+  const visibleIds = getCurrentViewSeriesIds();
+  let changed = false;
+  pendingActiveSeriesIds.forEach((id) => {
+    if (!visibleIds.has(id)) return;
+    state.activeSeriesIds.add(id);
+    changed = true;
+  });
+  pendingActiveSeriesIds = new Set();
+  if (changed) saveActiveSeriesForCurrentView();
 }
 
 function getActiveSeriesViewKey(): string {
