@@ -2596,6 +2596,12 @@ function resetActiveSeriesForSeries(series: InferenceCurveSeries[]): void {
   state.activeSeriesIds = new Set(series.map((line) => line.id));
 }
 
+function activateSeriesForChart(series: InferenceCurveSeries[]): void {
+  series.forEach((line) => {
+    state.activeSeriesIds.add(line.id);
+  });
+}
+
 function reconcileActiveSeriesForChart(): void {
   const visibleSeries = getFilteredSeriesForChart();
   if (visibleSeries.length === 0) {
@@ -3575,6 +3581,7 @@ function addSelectedImportLines(): void {
     const existingSeries = draftsToSeriesAllowEmpty(seriesDrafts);
     const selectedSeries = draftsToSeries(selectedDrafts);
     currentSeries = mergeImportedSeries([...existingSeries, ...selectedSeries]);
+    activateSeriesForChart(selectedSeries);
     seriesDrafts = seriesToDrafts(currentSeries);
     sortSeriesDraftsByLayer();
     normalizeDraftRenderOrderFromPanelOrder();
