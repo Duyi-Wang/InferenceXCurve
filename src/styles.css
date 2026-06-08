@@ -518,8 +518,8 @@ p {
 
 .legend-list li {
   display: flex;
+  position: relative;
   align-items: flex-start;
-  gap: 6px;
   transition: opacity 180ms ease;
 }
 
@@ -574,18 +574,28 @@ p {
   text-overflow: clip;
 }
 
+.legend-row-actions {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: inline-flex;
+  gap: 4px;
+  padding-left: 8px;
+  background: linear-gradient(90deg, transparent, var(--accent) 18%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
 .legend-only,
 .legend-locate {
   min-height: 20px;
   margin-top: 1px;
-  flex: 0 0 auto;
   border-color: var(--border);
   background: var(--background);
   color: var(--muted-foreground);
   font-size: 10px;
   line-height: 1.2;
-  opacity: 0;
-  pointer-events: none;
   transition: opacity 120ms ease, color 120ms ease;
 }
 
@@ -603,10 +613,8 @@ p {
   height: 13px;
 }
 
-.legend-list li:hover .legend-only,
-.legend-list li:focus-within .legend-only,
-.legend-list li:hover .legend-locate,
-.legend-list li:focus-within .legend-locate {
+.legend-list li:hover .legend-row-actions,
+.legend-list li:focus-within .legend-row-actions {
   opacity: 0.78;
   pointer-events: auto;
 }

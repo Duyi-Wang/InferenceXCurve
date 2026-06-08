@@ -2031,18 +2031,20 @@ function renderLegend(): void {
                   </svg>
                   <span class="legend-text">${escapeHtml(series.name)}</span>
                 </label>
-                <button class="legend-only" type="button" data-series-only="${escapeAttribute(series.id)}" title="Show only this line">
-                  Only
-                </button>
-                <button
-                  class="legend-locate"
-                  type="button"
-                  data-series-locate="${escapeAttribute(series.id)}"
-                  title="Locate in data panel"
-                  aria-label="Locate ${escapeAttribute(series.name)} in data panel"
-                >
-                  ${renderIcon('target')}
-                </button>
+                <span class="legend-row-actions">
+                  <button class="legend-only" type="button" data-series-only="${escapeAttribute(series.id)}" title="Show only this line">
+                    Only
+                  </button>
+                  <button
+                    class="legend-locate"
+                    type="button"
+                    data-series-locate="${escapeAttribute(series.id)}"
+                    title="Locate in data panel"
+                    aria-label="Locate ${escapeAttribute(series.name)} in data panel"
+                  >
+                    ${renderIcon('target')}
+                  </button>
+                </span>
               </li>
             `;
           })
