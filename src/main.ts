@@ -1050,7 +1050,7 @@ function renderFilterControls(): void {
   mtpFilterEl.onchange = () => {
     state.mtpFilter = mtpFilterEl.value;
     reconcileFiltersForSeries(currentSeries);
-    resetSelectionsForSeries(getModelSequenceMtpFilteredSeries());
+    resetActiveSeriesForSeries(getModelSequenceMtpFilteredSeries());
     renderFilterControls();
     renderSeriesEditor();
     renderAll();
@@ -2590,6 +2590,10 @@ function normalizePointShapeValue(value: string | undefined): string {
 function resetSelectionsForSeries(series: InferenceCurveSeries[]): void {
   state.activeSeriesIds = new Set(series.map((line) => line.id));
   state.selectedPrecisions = firstPrecisionSelection(series);
+}
+
+function resetActiveSeriesForSeries(series: InferenceCurveSeries[]): void {
+  state.activeSeriesIds = new Set(series.map((line) => line.id));
 }
 
 function reconcileActiveSeriesForChart(): void {
