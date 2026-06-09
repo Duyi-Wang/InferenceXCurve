@@ -4,10 +4,12 @@
 
 This is a Vite + TypeScript single-page app for recreating the InferenceX throughput/interactivity chart at `https://inferencex.semianalysis.com/inference`.
 
-- `src/main.ts`: application state, filters, editable data panels, CSV/GitHub Actions import, and UI event wiring.
+- `src/main.ts`: application state, filters, editable data panels, CSV/GitHub Actions import, InferenceX sync state, and UI event wiring.
+- `src/inferenceXSync.ts`: public InferenceX API client, availability parsing, benchmark filtering, fingerprints, and sync line generation.
 - `src/inferenceCurveChart.ts`: reusable D3 chart rendering, roofline calculation, labels, colors, tooltips, and export logic.
-- `src/exampleData.ts`: default benchmark line data loaded at startup.
+- `src/exampleData.ts`: offline fallback benchmark line data.
 - `src/styles.css`: global theme, chart layout, legend, and data editor styling.
+- `vite.config.ts`: Vite base path and `/inferencex-api` dev proxy.
 - `index.html`: Vite entry HTML.
 - `dist/`: generated production output; do not edit by hand.
 
@@ -27,7 +29,7 @@ Installs dependencies from `package-lock.json`.
 npm run dev
 ```
 
-Starts the Vite development server on `0.0.0.0`; open the printed localhost URL.
+Starts the Vite development server on `0.0.0.0`; open the printed localhost URL. In dev, `vite.config.ts` proxies `/inferencex-api` to `https://inferencex.semianalysis.com/api` so public InferenceX API requests avoid browser CORS failures.
 
 ```bash
 npm run build
@@ -65,7 +67,7 @@ Pull requests should include a short summary, verification steps, screenshots fo
 
 ## Security & Configuration Tips
 
-GitHub tokens entered in the import panel are used only for browser requests. By default they are not stored; if the user ticks "Remember token in this browser", the token is saved to `localStorage` under the `inferencex-curve:github-token:v1` key (separate from the app data key, so it is never included in exported data and does not sync across machines). Do not hard-code tokens, benchmark credentials, or private artifact URLs in source files. Keep large benchmark snapshots in `src/exampleData.ts` only when they are useful as default demo data.
+GitHub tokens entered in the import panel are used only for browser requests. By default they are not stored; if the user ticks "Remember token in this browser", the token is saved to `localStorage` under the `inferencex-curve:github-token:v1` key (separate from the app data key, so it is never included in exported data and does not sync across machines). InferenceX sync configs, fingerprints, and timestamps are saved with the normal browser data under `inferencex-curve:user-data:v1`; they must not include GitHub tokens. Do not hard-code tokens, benchmark credentials, or private artifact URLs in source files. Keep large benchmark snapshots in `src/exampleData.ts` only when they are useful as offline fallback data.
 
 ### Importing GitHub Actions artifacts: token scope
 
@@ -76,6 +78,18 @@ Downloading run artifacts (the `archive_download_url` / `.../artifacts/{id}/zip`
 - **Org-owned private repo:** the org must enable fine-grained token access; otherwise fall back to a classic PAT with `repo` scope.
 
 Suggest a long expiry stored in a password manager so the token is available when viewing from a different machine, since the "Remember token" option only covers the same browser.
+
+## Agent Notes: InferenceX Data Sync
+
+The app now treats the public InferenceX API as the primary source for default benchmark data, with `src/exampleData.ts` as offline fallback. Sync implementation lives in `src/inferenceXSync.ts`; UI state and local persistence live in `src/main.ts`.
+
+- App startup with no saved browser data should fetch default sync configs and render the API result; if that fails, keep the bundled `exampleSeries`.
+- App startup with saved browser data should check for updates only once and should not overwrite chart data until the user clicks `Update`.
+- `Check Updates` fetches enabled configs and stages changed series; `Update` applies staged series.
+- `Add Config` only creates sync configs, then automatically runs a staged update check. It must not apply chart data directly.
+- The Add Config UI defaults `ISL/OSL`, `Precision`, `Framework`, and `MTP` to `All`. These are UI-only selections: never persist `__all__` in an `InferenceXSyncConfig`. Expand All selections from availability rows into concrete `isl`, `osl`, `precision`, `hardware`, `framework`, `specMethod`, and `disagg` configs.
+- Sync-generated line ids are stable and derived from model, ISL/OSL, precision, hardware, framework, MTP, and disagg. Updating a sync line should replace data/source fields while preserving user style fields such as `color`, `lineStyle`, `marker`, `renderOrder`, and `collapsed`.
+- Match hardware strictly. Do not alias `b200` to `gb200` or vice versa.
 
 ## Agent Notes: Refreshing InferenceX Example Data
 

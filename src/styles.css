@@ -1224,6 +1224,243 @@ p {
   white-space: nowrap;
 }
 
+.inferencex-sync-panel {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--border) 36%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.inferencex-sync-head,
+.inferencex-sync-manager-head,
+.inferencex-sync-config-row,
+.inferencex-sync-actions,
+.inferencex-sync-manager-actions {
+  display: flex;
+}
+
+.inferencex-sync-head,
+.inferencex-sync-manager-head {
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.inferencex-sync-head strong,
+.inferencex-sync-head span,
+.inferencex-sync-manager-head strong,
+.inferencex-sync-manager-head span {
+  display: block;
+}
+
+.inferencex-sync-head strong,
+.inferencex-sync-manager-head strong,
+.inferencex-sync-config-main strong {
+  color: var(--foreground);
+  font-size: 13px;
+}
+
+.inferencex-sync-head span,
+.inferencex-sync-manager-head span,
+.inferencex-sync-meta,
+.inferencex-sync-config-main code,
+.inferencex-sync-config-main small {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.inferencex-sync-actions,
+.inferencex-sync-manager-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.inferencex-sync-status-row {
+  display: grid;
+  gap: 2px;
+}
+
+.inferencex-sync-status,
+.inferencex-sync-meta {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.inferencex-sync-status {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.inferencex-sync-status.error,
+.inferencex-sync-summary.error,
+.inferencex-sync-config-main .warning {
+  color: #ef4444;
+}
+
+.inferencex-sync-summary {
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--primary) 36%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--primary) 9%, transparent);
+  color: var(--foreground);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.inferencex-sync-manager {
+  display: grid;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 34%, transparent);
+}
+
+.inferencex-sync-config-list {
+  display: grid;
+  gap: 7px;
+  max-height: 320px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.inferencex-sync-config-row {
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 30%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--background) 68%, transparent);
+}
+
+.inferencex-sync-config-row.disabled {
+  opacity: 0.62;
+}
+
+.inferencex-sync-enable {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.inferencex-sync-enable input {
+  width: auto;
+  min-height: auto;
+}
+
+.inferencex-sync-config-main {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 2px;
+}
+
+.inferencex-sync-config-main strong,
+.inferencex-sync-config-main code,
+.inferencex-sync-config-main small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inferencex-sync-add {
+  display: grid;
+  grid-template-columns:
+    minmax(150px, 1.1fr)
+    minmax(116px, 0.8fr)
+    minmax(90px, 0.55fr)
+    minmax(90px, 0.55fr)
+    minmax(120px, 0.8fr)
+    minmax(94px, 0.6fr)
+    minmax(86px, 0.55fr)
+    auto;
+  align-items: end;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 30%, transparent);
+}
+
+.inferencex-sync-add label {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.inferencex-sync-add span {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.inferencex-sync-add select {
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  padding: 5px 8px;
+  background: color-mix(in srgb, var(--background) 86%, transparent);
+  font-size: 12px;
+}
+
+.inferencex-sync-add .action-button {
+  min-height: 32px;
+  white-space: nowrap;
+}
+
+.inferencex-sync-actions .action-button.primary,
+.inferencex-sync-add .action-button.primary {
+  border-color: #f7b041;
+  background: #f7b041;
+  color: #000;
+  font-weight: 700;
+  opacity: 1;
+  -webkit-text-fill-color: #000;
+}
+
+.inferencex-sync-actions .action-button.primary:hover,
+.inferencex-sync-actions .action-button.primary:focus-visible,
+.inferencex-sync-add .action-button.primary:hover,
+.inferencex-sync-add .action-button.primary:focus-visible {
+  border-color: color-mix(in srgb, #f7b041 82%, #fff);
+  background: color-mix(in srgb, #f7b041 88%, #fff);
+  color: #000;
+  -webkit-text-fill-color: #000;
+}
+
+.inferencex-sync-actions .action-button.primary span,
+.inferencex-sync-actions .action-button.primary .button-icon,
+.inferencex-sync-add .action-button.primary span,
+.inferencex-sync-add .action-button.primary .button-icon {
+  color: #000;
+  opacity: 1;
+  -webkit-text-fill-color: #000;
+}
+
+.inferencex-sync-actions .action-button.primary .button-icon,
+.inferencex-sync-add .action-button.primary .button-icon {
+  color: currentColor;
+}
+
+.inferencex-sync-actions .action-button.primary:disabled {
+  border-color: color-mix(in srgb, var(--border) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 42%, transparent);
+  color: var(--muted-foreground);
+  cursor: not-allowed;
+  opacity: 0.72;
+  -webkit-text-fill-color: var(--muted-foreground);
+}
+
+.inferencex-sync-actions .action-button.primary:disabled span,
+.inferencex-sync-actions .action-button.primary:disabled .button-icon {
+  color: var(--muted-foreground);
+  -webkit-text-fill-color: var(--muted-foreground);
+}
+
 .merge-preview {
   margin-bottom: 14px;
 }
@@ -2114,6 +2351,15 @@ p {
     flex-direction: column;
   }
 
+  .inferencex-sync-add {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .inferencex-sync-add .action-button {
+    grid-column: span 3;
+    justify-self: start;
+  }
+
   .series-fields {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -2226,6 +2472,34 @@ p {
 
   .import-preview-points {
     text-align: left;
+  }
+
+  .inferencex-sync-head,
+  .inferencex-sync-manager-head,
+  .inferencex-sync-config-row,
+  .inferencex-sync-actions,
+  .inferencex-sync-manager-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .inferencex-sync-actions,
+  .inferencex-sync-manager-actions {
+    justify-content: flex-start;
+  }
+
+  .inferencex-sync-config-main strong,
+  .inferencex-sync-config-main code,
+  .inferencex-sync-config-main small {
+    white-space: normal;
+  }
+
+  .inferencex-sync-add {
+    grid-template-columns: 1fr;
+  }
+
+  .inferencex-sync-add .action-button {
+    grid-column: span 1;
   }
 
   .merge-preview-head,

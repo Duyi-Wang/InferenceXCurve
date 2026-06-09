@@ -126,6 +126,36 @@ The importer normalizes common InferenceX artifact fields:
 - `spec_method` / `spec_decoding` map to `MTP` or `Non-MTP`
 - `hw` values such as `mi355x-amds` normalize to the chart hardware key
 
+## InferenceX Public API Sync
+
+The `InferenceX Sync` panel can keep chart data aligned with the public
+InferenceX API without editing `src/exampleData.ts`.
+
+On first open, if no browser data exists, the app tries to load the default
+InferenceX sync configuration from the API. If the request fails or no matching
+rows are returned, it falls back to the bundled `exampleSeries`. On later opens,
+the app checks for updates once and stages the result, but it does not overwrite
+the current chart until you click `Update`.
+
+The panel actions are:
+
+- `Check Updates`: fetch enabled sync configs and stage any new or changed lines.
+- `Update`: apply staged API data to the chart. User-created, CSV-imported, and
+  GitHub-imported lines are kept unless they share the stable InferenceX sync
+  line id.
+- `Manage Configs`: enable, disable, remove, reset, or add sync configs.
+
+Config management uses live `availability` data from the API. The Add Config
+form defaults `ISL/OSL`, `Precision`, `Framework`, and `MTP` to `All`; clicking
+`Add Config` expands those selections into only the real combinations returned
+by availability, then automatically runs `Check Updates`. The user still needs
+to click `Update` before the new data is applied to the chart.
+
+Sync configs, fingerprints, timestamps, and staged status metadata are saved in
+the normal browser data payload under `localStorage` key
+`inferencex-curve:user-data:v1`. The GitHub token remains separate under
+`inferencex-curve:github-token:v1`.
+
 ## Import Data File
 
 `Import File` (next to `Import Action Data`) loads a local `.csv`, `.tsv`,
@@ -156,8 +186,12 @@ included.
 
 ## Project Structure
 
-- `src/main.ts`: UI, data editor, CSV handling, GitHub Actions import.
+- `src/main.ts`: UI, data editor, CSV handling, GitHub Actions import, and
+  InferenceX sync state wiring.
+- `src/inferenceXSync.ts`: public InferenceX API client, availability parsing,
+  benchmark filtering, fingerprints, and sync line generation.
 - `src/inferenceCurveChart.ts`: D3 chart rendering and curve logic.
-- `src/exampleData.ts`: default DeepSeek R1 0528 example series.
+- `src/exampleData.ts`: offline fallback DeepSeek R1 0528 example series.
 - `src/styles.css`: application and chart styling.
+- `vite.config.ts`: Vite base path and dev proxy for `/inferencex-api`.
 - `AGENTS.md`: contributor guidance for coding agents.

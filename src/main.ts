@@ -4,6 +4,22 @@ import { strFromU8, unzipSync } from 'fflate';
 
 import { exampleSeries } from './exampleData';
 import {
+  createDefaultInferenceXSyncConfigs,
+  fetchInferenceXAvailability,
+  fetchInferenceXSyncSeries,
+  fingerprintInferenceCurveSeries,
+  formatInferenceXConfigLabel,
+  getInferenceXDisplayModel,
+  inferenceXAvailabilityRowMatchesConfig,
+  makeInferenceXSyncLineId,
+  normalizeInferenceXSyncConfig,
+  normalizeInferenceXSyncConfigs,
+  type InferenceXAvailabilityRow,
+  type InferenceXSyncConfig,
+  type InferenceXSyncResult,
+  type InferenceXSyncSummaryItem
+} from './inferenceXSync';
+import {
   getAvailablePrecisions,
   INFERENCE_CURVE_MARGIN,
   prepareInferenceCurveSeries,
@@ -119,18 +135,64 @@ interface PersistedAppState {
   search?: string;
 }
 
+type InferenceXSyncStatus =
+  | 'idle'
+  | 'checking'
+  | 'updates-available'
+  | 'up-to-date'
+  | 'updating'
+  | 'error';
+
+type InferenceXSyncAddDraft = Omit<InferenceXSyncConfig, 'id' | 'enabled'>;
+
+interface PersistedInferenceXSyncState {
+  configs?: InferenceXSyncConfig[];
+  fingerprints?: Record<string, string>;
+  lineIdsByConfigKey?: Record<string, string>;
+  lastCheckedAt?: string;
+  lastUpdatedAt?: string;
+  status?: InferenceXSyncStatus;
+  availableUpdateCount?: number;
+  lastError?: string;
+}
+
+interface InferenceXSyncState {
+  configs: InferenceXSyncConfig[];
+  fingerprints: Record<string, string>;
+  lineIdsByConfigKey: Record<string, string>;
+  lastCheckedAt: string;
+  lastUpdatedAt: string;
+  status: InferenceXSyncStatus;
+  availableUpdateCount: number;
+  lastError: string;
+  stagedResult: InferenceXSyncResult | null;
+  changedConfigIds: Set<string>;
+  missingConfigIds: Set<string>;
+  manageOpen: boolean;
+  availabilityRows: InferenceXAvailabilityRow[];
+  availabilityLoaded: boolean;
+  availabilityLoading: boolean;
+  addDraft: InferenceXSyncAddDraft;
+  addShapeSelection: string;
+  addPrecisionSelection: string;
+  addFrameworkSelection: string;
+  addSpecMethodSelection: string;
+}
+
 interface PersistedAppData {
   version: 1;
   savedAt: string;
   currentSeries: InferenceCurveSeries[];
   seriesDrafts: SeriesDraft[];
   state: PersistedAppState;
+  inferenceXSync?: PersistedInferenceXSyncState;
 }
 
 interface InitialDataState {
   currentSeries: InferenceCurveSeries[];
   seriesDrafts: SeriesDraft[];
   state: AppState;
+  inferenceXSync: InferenceXSyncState;
   loadedFromStorage: boolean;
 }
 
@@ -348,6 +410,7 @@ function createInitialDataState(): InitialDataState {
       currentSeries: defaultSeries,
       seriesDrafts: draftsFromSeriesForRestore(defaultSeries),
       state: createInitialState(defaultSeries),
+      inferenceXSync: createInferenceXSyncState(),
       loadedFromStorage: false
     };
   }
@@ -369,6 +432,7 @@ function createInitialDataState(): InitialDataState {
     currentSeries: restoredSeries,
     seriesDrafts: restoredDrafts.length ? restoredDrafts : [makeRestoredEmptySeriesDraft(0)],
     state: restoreAppState(createInitialState(restoredSeries), persisted.state, restoredSeries),
+    inferenceXSync: createInferenceXSyncState(persisted.inferenceXSync),
     loadedFromStorage: true
   };
 }
@@ -385,12 +449,68 @@ function loadPersistedAppData(): PersistedAppData | null {
       savedAt: readPersistedText(data, 'savedAt'),
       currentSeries: Array.isArray(data.currentSeries) ? readNativeSeries(data.currentSeries) : [],
       seriesDrafts: restorePersistedSeriesDrafts(data.seriesDrafts),
-      state: restorePersistedState(data.state)
+      state: restorePersistedState(data.state),
+      inferenceXSync: restorePersistedInferenceXSyncState(data.inferenceXSync)
     };
   } catch (error) {
     console.warn('Could not load saved browser data.', error);
     return null;
   }
+}
+
+function createInferenceXSyncState(saved?: PersistedInferenceXSyncState): InferenceXSyncState {
+  const configs = normalizeInferenceXSyncConfigs(saved?.configs);
+  const addConfig = configs[0] ?? createDefaultInferenceXSyncConfigs()[0]!;
+  const restoredStatus = saved?.status === 'updates-available' ? 'idle' : (saved?.status ?? 'idle');
+  return {
+    configs,
+    fingerprints: saved?.fingerprints ?? {},
+    lineIdsByConfigKey: saved?.lineIdsByConfigKey ?? {},
+    lastCheckedAt: saved?.lastCheckedAt ?? '',
+    lastUpdatedAt: saved?.lastUpdatedAt ?? '',
+    status: restoredStatus,
+    availableUpdateCount: restoredStatus === 'idle' ? 0 : (saved?.availableUpdateCount ?? 0),
+    lastError: saved?.lastError ?? '',
+    stagedResult: null,
+    changedConfigIds: new Set(),
+    missingConfigIds: new Set(),
+    manageOpen: false,
+    availabilityRows: [],
+    availabilityLoaded: false,
+    availabilityLoading: false,
+    addDraft: createInferenceXSyncAddDraft(addConfig),
+    addShapeSelection: ALL_VALUE,
+    addPrecisionSelection: ALL_VALUE,
+    addFrameworkSelection: ALL_VALUE,
+    addSpecMethodSelection: ALL_VALUE
+  };
+}
+
+function restorePersistedInferenceXSyncState(value: unknown): PersistedInferenceXSyncState | undefined {
+  if (!isRecord(value)) return undefined;
+  return {
+    configs: normalizeInferenceXSyncConfigs(value.configs),
+    fingerprints: readPersistedStringRecord(value.fingerprints),
+    lineIdsByConfigKey: readPersistedStringRecord(value.lineIdsByConfigKey),
+    lastCheckedAt: readPersistedText(value, 'lastCheckedAt'),
+    lastUpdatedAt: readPersistedText(value, 'lastUpdatedAt'),
+    status: readPersistedInferenceXSyncStatus(value.status),
+    availableUpdateCount: readPersistedNumber(value, 'availableUpdateCount', 0),
+    lastError: readPersistedText(value, 'lastError')
+  };
+}
+
+function createInferenceXSyncAddDraft(config: InferenceXSyncConfig): InferenceXSyncAddDraft {
+  return {
+    model: config.model,
+    isl: config.isl,
+    osl: config.osl,
+    precision: config.precision,
+    hardware: config.hardware,
+    framework: config.framework,
+    specMethod: config.specMethod,
+    disagg: config.disagg
+  };
 }
 
 function draftsFromSeriesForRestore(series: InferenceCurveSeries[]): SeriesDraft[] {
@@ -535,6 +655,24 @@ function serializeActiveSeriesByView(): Record<string, string[]> {
   return result;
 }
 
+function serializeInferenceXSyncState(): PersistedInferenceXSyncState {
+  return {
+    configs: inferenceXSync.configs,
+    fingerprints: inferenceXSync.fingerprints,
+    lineIdsByConfigKey: inferenceXSync.lineIdsByConfigKey,
+    lastCheckedAt: inferenceXSync.lastCheckedAt,
+    lastUpdatedAt: inferenceXSync.lastUpdatedAt,
+    status:
+      inferenceXSync.status === 'checking' ||
+      inferenceXSync.status === 'updating' ||
+      inferenceXSync.status === 'updates-available'
+        ? 'idle'
+        : inferenceXSync.status,
+    availableUpdateCount: inferenceXSync.status === 'updates-available' ? 0 : inferenceXSync.availableUpdateCount,
+    lastError: inferenceXSync.lastError
+  };
+}
+
 function getSeriesForPersistence(): InferenceCurveSeries[] {
   try {
     const parsedSeries = draftsToSeriesAllowEmpty(seriesDrafts);
@@ -567,7 +705,8 @@ function saveLocalDataNow(): void {
       savedAt: new Date().toISOString(),
       currentSeries: getSeriesForPersistence(),
       seriesDrafts,
-      state: serializeAppState()
+      state: serializeAppState(),
+      inferenceXSync: serializeInferenceXSyncState()
     };
     window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(payload));
     localStorageWarningShown = false;
@@ -656,6 +795,32 @@ function readPersistedActiveSeriesByView(value: unknown): Record<string, string[
   return Object.keys(result).length ? result : undefined;
 }
 
+function readPersistedStringRecord(value: unknown): Record<string, string> | undefined {
+  if (!isRecord(value)) return undefined;
+  const result: Record<string, string> = {};
+  Object.entries(value).forEach(([key, item]) => {
+    if (typeof item !== 'string') return;
+    const normalizedKey = normalizeCellText(key);
+    const normalizedValue = normalizeCellText(item);
+    if (normalizedKey && normalizedValue) result[normalizedKey] = normalizedValue;
+  });
+  return Object.keys(result).length ? result : undefined;
+}
+
+function readPersistedInferenceXSyncStatus(value: unknown): InferenceXSyncStatus | undefined {
+  if (
+    value === 'idle' ||
+    value === 'checking' ||
+    value === 'updates-available' ||
+    value === 'up-to-date' ||
+    value === 'updating' ||
+    value === 'error'
+  ) {
+    return value;
+  }
+  return undefined;
+}
+
 function readPersistedBoolean(value: unknown): boolean | undefined {
   return typeof value === 'boolean' ? value : undefined;
 }
@@ -677,6 +842,7 @@ let pendingImportDrafts: PendingImportDraft[] = [];
 let pendingImportSettings: ImportBatchSettings = createImportBatchSettings();
 let pendingMergeGroups: PendingMergeGroup[] = [];
 let state: AppState = initialData.state;
+let inferenceXSync: InferenceXSyncState = initialData.inferenceXSync;
 let localSaveTimer: number | null = null;
 let autoRenderTimer: number | null = null;
 let localStorageWarningShown = false;
@@ -843,6 +1009,8 @@ app.innerHTML = `
         <div id="github-import-preview" class="import-preview"></div>
       </div>
 
+      <div id="inferencex-sync" class="inferencex-sync-panel"></div>
+
       <div id="merge-preview" class="merge-preview"></div>
 
       <div id="series-editor" class="series-editor"></div>
@@ -877,11 +1045,13 @@ const githubImportStatusEl = document.querySelector<HTMLParagraphElement>('#gith
 const githubImportProgressEl = document.querySelector<HTMLElement>('#github-import-progress')!;
 const githubImportProgressFillEl = document.querySelector<HTMLElement>('#github-import-progress-fill')!;
 const githubImportPreviewEl = document.querySelector<HTMLElement>('#github-import-preview')!;
+const inferenceXSyncEl = document.querySelector<HTMLElement>('#inferencex-sync')!;
 const mergeLinesEl = document.querySelector<HTMLButtonElement>('#merge-lines')!;
 const mergePreviewEl = document.querySelector<HTMLElement>('#merge-preview')!;
 
 applyTheme();
 renderFilterControls();
+renderInferenceXSyncPanel();
 renderSeriesEditor();
 renderAll();
 if (initialData.loadedFromStorage) {
@@ -898,12 +1068,14 @@ document.querySelector('#reset-data')?.addEventListener('click', () => {
   clearAutoRenderTimer();
   currentSeries = structuredClone(exampleSeries);
   seriesDrafts = seriesToDrafts(currentSeries);
+  inferenceXSync = createInferenceXSyncState();
   sortSeriesDraftsByLayer();
   normalizeDraftRenderOrderFromPanelOrder();
   syncCurrentSeriesOrderFromDrafts();
   state = createInitialState(currentSeries);
   applyTheme();
   renderFilterControls();
+  renderInferenceXSyncPanel();
   renderSeriesEditor();
   renderAll();
   resetImportState();
@@ -917,10 +1089,14 @@ document.querySelector('#clear-data')?.addEventListener('click', () => {
   clearAutoRenderTimer();
   currentSeries = [];
   seriesDrafts = [makeEmptySeriesDraft(0)];
+  inferenceXSync.stagedResult = null;
+  inferenceXSync.changedConfigIds = new Set();
+  inferenceXSync.availableUpdateCount = 0;
   normalizeDraftRenderOrderFromPanelOrder();
   setDefaultFiltersForSeries(currentSeries);
   state.search = '';
   renderFilterControls();
+  renderInferenceXSyncPanel();
   renderSeriesEditor();
   renderAll();
   setStatus('Data cleared');
@@ -976,6 +1152,8 @@ importDataFileInputEl.addEventListener('change', () => {
 githubImportPreviewEl.addEventListener('input', handleImportPreviewInput);
 githubImportPreviewEl.addEventListener('change', handleImportPreviewInput);
 githubImportPreviewEl.addEventListener('click', handleImportPreviewClick);
+inferenceXSyncEl.addEventListener('click', handleInferenceXSyncClick);
+inferenceXSyncEl.addEventListener('change', handleInferenceXSyncChange);
 mergePreviewEl.addEventListener('input', handleMergePreviewInput);
 mergePreviewEl.addEventListener('change', handleMergePreviewInput);
 mergePreviewEl.addEventListener('click', handleMergePreviewClick);
@@ -990,6 +1168,7 @@ window.addEventListener('beforeunload', () => {
   commitSeriesDom();
   saveLocalDataNow();
 });
+void initializeInferenceXSync();
 
 function renderDraftData(): void {
   clearAutoRenderTimer();
@@ -1069,6 +1248,880 @@ function renderAll(): void {
   chartSubtitleEl.textContent = getChartSubtitle();
   renderInferenceCurveChart(chartEl, getFilteredSeriesForChart(), getChartOptions());
   renderLegend();
+}
+
+function renderInferenceXSyncPanel(): void {
+  const enabledCount = inferenceXSync.configs.filter((config) => config.enabled).length;
+  const hasStagedUpdate = inferenceXSync.stagedResult !== null && inferenceXSync.availableUpdateCount > 0;
+  const changedSummary = getInferenceXChangedSummaryItems();
+
+  inferenceXSyncEl.innerHTML = `
+    <div class="inferencex-sync-head">
+      <div>
+        <strong>InferenceX Sync</strong>
+        <span>${enabledCount}/${inferenceXSync.configs.length} configs enabled</span>
+      </div>
+      <div class="inferencex-sync-actions">
+        <button
+          type="button"
+          class="series-action-button"
+          data-sync-action="check"
+          ${inferenceXSync.status === 'checking' || inferenceXSync.status === 'updating' ? 'disabled' : ''}
+        >
+          ${renderIcon('refresh')}
+          <span>Check Updates</span>
+        </button>
+        <button
+          type="button"
+          class="primary action-button"
+          data-sync-action="update"
+          ${hasStagedUpdate || inferenceXSync.status === 'updating' ? '' : 'disabled'}
+        >
+          ${renderIcon('download-cloud')}
+          <span>Update</span>
+        </button>
+        <button type="button" class="series-action-button" data-sync-action="manage">
+          ${renderIcon('target')}
+          <span>${inferenceXSync.manageOpen ? 'Close Configs' : 'Manage Configs'}</span>
+        </button>
+      </div>
+    </div>
+    <div class="inferencex-sync-status-row">
+      <p class="inferencex-sync-status${inferenceXSync.status === 'error' ? ' error' : ''}" role="status">
+        ${escapeHtml(formatInferenceXSyncStatus())}
+      </p>
+      <p class="inferencex-sync-meta">
+        Last checked: ${escapeHtml(formatDateTimeShort(inferenceXSync.lastCheckedAt))}
+        · Last updated: ${escapeHtml(formatDateTimeShort(inferenceXSync.lastUpdatedAt))}
+      </p>
+    </div>
+    ${renderInferenceXSyncUpdateSummary(changedSummary)}
+    ${inferenceXSync.manageOpen ? renderInferenceXSyncManager() : ''}
+  `;
+}
+
+function renderInferenceXSyncUpdateSummary(items: InferenceXSyncSummaryItem[]): string {
+  if (inferenceXSync.status === 'error' && inferenceXSync.lastError) {
+    return `<div class="inferencex-sync-summary error">${escapeHtml(inferenceXSync.lastError)}</div>`;
+  }
+  if (inferenceXSync.status !== 'updates-available' || items.length === 0) return '';
+
+  const visible = items
+    .slice(0, 8)
+    .map(
+      (item) =>
+        `${item.name} ${item.precision.toUpperCase()} ${item.isl}/${item.osl}${item.latestDate ? ` (${item.latestDate})` : ''}`
+    );
+  const hiddenCount = Math.max(0, items.length - visible.length);
+  const suffix = hiddenCount > 0 ? `; +${hiddenCount} more` : '';
+  return `
+    <div class="inferencex-sync-summary">
+      ${inferenceXSync.availableUpdateCount} line updates staged: ${escapeHtml(visible.join('; '))}${escapeHtml(suffix)}.
+    </div>
+  `;
+}
+
+function renderInferenceXSyncManager(): string {
+  const configRows = inferenceXSync.configs
+    .map((config, index) => renderInferenceXSyncConfigRow(config, index))
+    .join('');
+  return `
+    <div class="inferencex-sync-manager">
+      <div class="inferencex-sync-manager-head">
+        <div>
+          <strong>Sync Configs</strong>
+          <span>${inferenceXSync.availabilityLoaded ? `${inferenceXSync.availabilityRows.length} API combinations loaded` : 'Availability loads when this panel opens'}</span>
+        </div>
+        <div class="inferencex-sync-manager-actions">
+          <button
+            type="button"
+            class="series-action-button"
+            data-sync-action="reload-availability"
+            ${inferenceXSync.availabilityLoading ? 'disabled' : ''}
+          >
+            ${renderIcon('refresh')}
+            <span>${inferenceXSync.availabilityLoading ? 'Loading' : 'Reload Options'}</span>
+          </button>
+          <button type="button" class="series-action-button danger" data-sync-action="reset-configs">
+            ${renderIcon('trash')}
+            <span>Reset to Default Configs</span>
+          </button>
+        </div>
+      </div>
+      <div class="inferencex-sync-config-list">
+        ${configRows}
+      </div>
+      ${renderInferenceXSyncAddConfig()}
+    </div>
+  `;
+}
+
+function renderInferenceXSyncConfigRow(config: InferenceXSyncConfig, index: number): string {
+  const warning =
+    inferenceXSync.availabilityLoaded &&
+    !inferenceXSync.availabilityRows.some((row) => inferenceXAvailabilityRowMatchesConfig(row, config));
+  const missing = inferenceXSync.missingConfigIds.has(config.id);
+  return `
+    <div class="inferencex-sync-config-row${config.enabled ? '' : ' disabled'}">
+      <label class="inferencex-sync-enable">
+        <input
+          type="checkbox"
+          data-sync-config-index="${index}"
+          data-sync-config-field="enabled"
+          ${config.enabled ? 'checked' : ''}
+        />
+        <span>Enabled</span>
+      </label>
+      <div class="inferencex-sync-config-main">
+        <strong>${escapeHtml(formatInferenceXConfigLabel(config))}</strong>
+        <code>${escapeHtml(makeInferenceXSyncLineId(config))}</code>
+        ${warning ? '<small class="warning">Not present in current API availability</small>' : ''}
+        ${missing ? '<small class="warning">No benchmark rows matched during the last check</small>' : ''}
+      </div>
+      <button
+        type="button"
+        class="series-action-button danger"
+        data-sync-action="remove-config"
+        data-sync-config-index="${index}"
+      >
+        ${renderIcon('trash')}
+        <span>Remove</span>
+      </button>
+    </div>
+  `;
+}
+
+function renderInferenceXSyncAddConfig(): string {
+  const options = getInferenceXAddOptions();
+  return `
+    <div class="inferencex-sync-add">
+      <label>
+        <span>Model</span>
+        <select data-sync-add-field="model">
+          ${renderSimpleOptions(options.models, inferenceXSync.addDraft.model)}
+        </select>
+      </label>
+      <label>
+        <span>ISL/OSL</span>
+        <select data-sync-add-field="shape">
+          ${renderInferenceXShapeOptions(options.shapes, inferenceXSync.addShapeSelection)}
+        </select>
+      </label>
+      <label>
+        <span>Precision</span>
+        <select data-sync-add-field="precision">
+          ${renderInferenceXAllOptions(options.precisions, inferenceXSync.addPrecisionSelection)}
+        </select>
+      </label>
+      <label>
+        <span>GPU</span>
+        <select data-sync-add-field="hardware">
+          ${renderSimpleOptions(options.hardware, inferenceXSync.addDraft.hardware)}
+        </select>
+      </label>
+      <label>
+        <span>Framework</span>
+        <select data-sync-add-field="framework">
+          ${renderInferenceXAllOptions(options.frameworks, inferenceXSync.addFrameworkSelection)}
+        </select>
+      </label>
+      <label>
+        <span>MTP</span>
+        <select data-sync-add-field="specMethod">
+          ${renderInferenceXSpecMethodOptions(options.specMethods, inferenceXSync.addSpecMethodSelection)}
+        </select>
+      </label>
+      <label>
+        <span>Disagg</span>
+        <select data-sync-add-field="disagg">
+          ${options.disaggValues
+            .map((value) => {
+              const raw = value ? 'true' : 'false';
+              return `<option value="${raw}" ${inferenceXSync.addDraft.disagg === value ? 'selected' : ''}>${value ? 'true' : 'false'}</option>`;
+            })
+            .join('')}
+        </select>
+      </label>
+      <button type="button" class="primary action-button" data-sync-action="add-config">
+        ${renderIcon('plus')}
+        <span>Add Config</span>
+      </button>
+    </div>
+  `;
+}
+
+function renderSimpleOptions(values: string[], selected: string): string {
+  return values
+    .map(
+      (value) =>
+        `<option value="${escapeAttribute(value)}" ${selected === value ? 'selected' : ''}>${escapeHtml(value)}</option>`
+    )
+    .join('');
+}
+
+function renderInferenceXSpecMethodOptions(values: string[], selected: string): string {
+  return renderInferenceXAllOptions(values, selected, formatInferenceXSpecMethodLabel);
+}
+
+function renderInferenceXShapeOptions(shapes: { isl: number; osl: number }[], selected: string): string {
+  return [
+    `<option value="${ALL_VALUE}" ${selected === ALL_VALUE ? 'selected' : ''}>All</option>`,
+    ...shapes.map((shape) => {
+      const value = makeInferenceXShapeValue(shape);
+      return `<option value="${escapeAttribute(value)}" ${selected === value ? 'selected' : ''}>${escapeHtml(`${shape.isl} / ${shape.osl}`)}</option>`;
+    })
+  ].join('');
+}
+
+function renderInferenceXAllOptions(
+  values: string[],
+  selected: string,
+  formatLabel: (value: string) => string = (value) => value
+): string {
+  return [
+    `<option value="${ALL_VALUE}" ${selected === ALL_VALUE ? 'selected' : ''}>All</option>`,
+    ...values.map(
+      (value) =>
+        `<option value="${escapeAttribute(value)}" ${selected === value ? 'selected' : ''}>${escapeHtml(formatLabel(value))}</option>`
+    )
+  ].join('');
+}
+
+function formatInferenceXSpecMethodLabel(value: string): string {
+  if (value === MTP_VALUE) return 'MTP';
+  if (value === 'none') return 'Non-MTP';
+  return value;
+}
+
+function makeInferenceXShapeValue(shape: { isl: number; osl: number }): string {
+  return `${shape.isl}|${shape.osl}`;
+}
+
+function getInferenceXAddOptions(): {
+  models: string[];
+  shapes: { isl: number; osl: number }[];
+  precisions: string[];
+  hardware: string[];
+  frameworks: string[];
+  specMethods: string[];
+  disaggValues: boolean[];
+} {
+  const rows = getInferenceXOptionRows();
+  const modelRows = rows.filter((row) => row.modelDisplay === inferenceXSync.addDraft.model);
+  const modelScopedRows = modelRows.length ? modelRows : rows;
+  const hardwareRows = modelScopedRows.filter((row) => row.hardware === inferenceXSync.addDraft.hardware);
+  const hardwareScopedRows = hardwareRows.length ? hardwareRows : modelScopedRows;
+  const targetRows =
+    inferenceXSync.addFrameworkSelection === ALL_VALUE
+      ? hardwareScopedRows
+      : hardwareScopedRows.filter((row) => row.framework === inferenceXSync.addDraft.framework);
+  const targetScopedRows = targetRows.length ? targetRows : hardwareScopedRows;
+  const sequenceRows =
+    inferenceXSync.addShapeSelection === ALL_VALUE
+      ? targetScopedRows
+      : targetScopedRows.filter(
+          (row) => row.isl === inferenceXSync.addDraft.isl && row.osl === inferenceXSync.addDraft.osl
+        );
+  const sequenceScopedRows = sequenceRows.length ? sequenceRows : targetScopedRows;
+  const precisionRows =
+    inferenceXSync.addPrecisionSelection === ALL_VALUE
+      ? sequenceScopedRows
+      : sequenceScopedRows.filter((row) => row.precision === inferenceXSync.addDraft.precision);
+  const precisionScopedRows = precisionRows.length ? precisionRows : sequenceScopedRows;
+  const specRows =
+    inferenceXSync.addSpecMethodSelection === ALL_VALUE
+      ? precisionScopedRows
+      : precisionScopedRows.filter((row) => row.specMethod === inferenceXSync.addDraft.specMethod);
+  const specScopedRows = specRows.length ? specRows : precisionScopedRows;
+
+  return {
+    models: uniqueSorted(rows.map((row) => row.modelDisplay)),
+    shapes: uniqueShapes(targetScopedRows),
+    precisions: uniqueSorted(sequenceScopedRows.map((row) => row.precision)),
+    hardware: uniqueSorted(modelScopedRows.map((row) => row.hardware)),
+    frameworks: uniqueSorted(hardwareScopedRows.map((row) => row.framework)),
+    specMethods: uniqueSorted(precisionScopedRows.map((row) => row.specMethod)),
+    disaggValues: uniqueBooleans(specScopedRows.map((row) => row.disagg))
+  };
+}
+
+function getInferenceXOptionRows(): InferenceXAvailabilityRow[] {
+  if (inferenceXSync.availabilityRows.length > 0) return inferenceXSync.availabilityRows;
+  return inferenceXSync.configs.map((config) => ({
+    model: config.model,
+    modelDisplay: getInferenceXDisplayModel(config.model),
+    isl: config.isl,
+    osl: config.osl,
+    precision: config.precision,
+    hardware: config.hardware,
+    framework: config.framework,
+    specMethod: config.specMethod,
+    disagg: config.disagg,
+    date: ''
+  }));
+}
+
+function uniqueShapes(rows: InferenceXAvailabilityRow[]): { isl: number; osl: number }[] {
+  const seen = new Set<string>();
+  return rows
+    .filter((row) => {
+      const key = `${row.isl}|${row.osl}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => b.isl - a.isl || b.osl - a.osl);
+}
+
+function uniqueBooleans(values: boolean[]): boolean[] {
+  const result = Array.from(new Set(values));
+  return result.length ? result.sort((a, b) => Number(b) - Number(a)) : [true, false];
+}
+
+function formatInferenceXSyncStatus(): string {
+  if (inferenceXSync.status === 'checking') return 'Checking InferenceX for latest benchmark rows...';
+  if (inferenceXSync.status === 'updating') return 'Applying staged InferenceX data...';
+  if (inferenceXSync.status === 'updates-available') {
+    return `${inferenceXSync.availableUpdateCount} line update${inferenceXSync.availableUpdateCount === 1 ? '' : 's'} available. Click Update to apply.`;
+  }
+  if (inferenceXSync.status === 'up-to-date') return 'No updates available.';
+  if (inferenceXSync.status === 'error') return 'Fetch failed. Existing chart data was kept.';
+  return 'Ready. Check Updates will compare the enabled configs with the public InferenceX API.';
+}
+
+function formatDateTimeShort(value: string): string {
+  if (!value) return 'Never';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString(undefined, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+}
+
+function handleInferenceXSyncClick(event: MouseEvent): void {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-sync-action]');
+  if (!button) return;
+  const action = button.dataset.syncAction;
+
+  if (action === 'check') {
+    void checkInferenceXUpdates({ automatic: false });
+  } else if (action === 'update') {
+    applyStagedInferenceXSyncUpdate();
+  } else if (action === 'manage') {
+    inferenceXSync.manageOpen = !inferenceXSync.manageOpen;
+    renderInferenceXSyncPanel();
+    if (inferenceXSync.manageOpen) void ensureInferenceXAvailabilityLoaded();
+  } else if (action === 'reload-availability') {
+    void loadInferenceXAvailability();
+  } else if (action === 'reset-configs') {
+    resetInferenceXSyncConfigs();
+  } else if (action === 'add-config') {
+    addInferenceXSyncConfig();
+  } else if (action === 'remove-config') {
+    removeInferenceXSyncConfig(Number(button.dataset.syncConfigIndex));
+  }
+}
+
+function handleInferenceXSyncChange(event: Event): void {
+  const input = event.target as HTMLInputElement | HTMLSelectElement;
+  const configIndex = Number(input.dataset.syncConfigIndex);
+  const configField = input.dataset.syncConfigField;
+  if (Number.isInteger(configIndex) && configField === 'enabled') {
+    const config = inferenceXSync.configs[configIndex];
+    if (!config || !(input instanceof HTMLInputElement)) return;
+    config.enabled = input.checked;
+    clearInferenceXStagedUpdate();
+    renderInferenceXSyncPanel();
+    scheduleLocalSave();
+    return;
+  }
+
+  const addField = input.dataset.syncAddField;
+  if (addField) {
+    updateInferenceXAddDraft(addField, input.value);
+    renderInferenceXSyncPanel();
+  }
+}
+
+async function initializeInferenceXSync(): Promise<void> {
+  if (!initialData.loadedFromStorage) {
+    await loadInitialInferenceXSyncData();
+    return;
+  }
+  await checkInferenceXUpdates({ automatic: true });
+}
+
+async function loadInitialInferenceXSyncData(): Promise<void> {
+  inferenceXSync.status = 'checking';
+  inferenceXSync.lastError = '';
+  renderInferenceXSyncPanel();
+  try {
+    const result = await fetchInferenceXSyncSeries(inferenceXSync.configs);
+    if (result.series.length === 0) {
+      inferenceXSync.status = 'error';
+      inferenceXSync.lastError = 'No benchmark rows matched the default InferenceX sync configs.';
+      renderInferenceXSyncPanel();
+      setStatus('Using bundled example data; InferenceX sync returned no matching rows.', true);
+      scheduleLocalSave();
+      return;
+    }
+    applyInferenceXSyncResult(result, { initial: true });
+    setStatus(`Loaded ${result.series.length} lines from InferenceX public API`);
+  } catch (error) {
+    inferenceXSync.status = 'error';
+    inferenceXSync.lastError = error instanceof Error ? error.message : 'Could not fetch InferenceX data.';
+    inferenceXSync.availableUpdateCount = 0;
+    inferenceXSync.stagedResult = null;
+    renderInferenceXSyncPanel();
+    setStatus('Using bundled example data; InferenceX sync failed.', true);
+    scheduleLocalSave();
+  }
+}
+
+async function checkInferenceXUpdates({ automatic }: { automatic: boolean }): Promise<void> {
+  if (inferenceXSync.status === 'checking' || inferenceXSync.status === 'updating') return;
+  inferenceXSync.status = 'checking';
+  inferenceXSync.lastError = '';
+  renderInferenceXSyncPanel();
+
+  try {
+    const result = await fetchInferenceXSyncSeries(inferenceXSync.configs);
+    const changedConfigIds = getChangedInferenceXSyncConfigIds(result);
+    inferenceXSync.lastCheckedAt = result.checkedAt;
+    inferenceXSync.lineIdsByConfigKey = { ...inferenceXSync.lineIdsByConfigKey, ...result.lineIdsByConfigKey };
+    inferenceXSync.missingConfigIds = new Set(result.missingConfigIds);
+    inferenceXSync.changedConfigIds = new Set(changedConfigIds);
+    inferenceXSync.availableUpdateCount = changedConfigIds.length;
+    inferenceXSync.stagedResult = changedConfigIds.length > 0 ? result : null;
+    inferenceXSync.status = changedConfigIds.length > 0 ? 'updates-available' : 'up-to-date';
+    renderInferenceXSyncPanel();
+    if (!automatic) {
+      setStatus(
+        changedConfigIds.length > 0
+          ? `InferenceX check found ${changedConfigIds.length} line update${changedConfigIds.length === 1 ? '' : 's'}.`
+          : 'InferenceX data is up to date.'
+      );
+    }
+    scheduleLocalSave();
+  } catch (error) {
+    inferenceXSync.status = 'error';
+    inferenceXSync.lastError = error instanceof Error ? error.message : 'Could not fetch InferenceX data.';
+    inferenceXSync.availableUpdateCount = 0;
+    inferenceXSync.stagedResult = null;
+    inferenceXSync.changedConfigIds = new Set();
+    renderInferenceXSyncPanel();
+    if (!automatic) setStatus('InferenceX check failed. Existing chart data was kept.', true);
+    scheduleLocalSave();
+  }
+}
+
+function applyStagedInferenceXSyncUpdate(): void {
+  if (!inferenceXSync.stagedResult || inferenceXSync.availableUpdateCount === 0) {
+    setStatus('No staged InferenceX update to apply.', true);
+    return;
+  }
+
+  try {
+    inferenceXSync.status = 'updating';
+    renderInferenceXSyncPanel();
+    const updatedCount = inferenceXSync.availableUpdateCount;
+    applyInferenceXSyncResult(inferenceXSync.stagedResult, { initial: false });
+    setStatus(`Applied ${updatedCount} InferenceX line update${updatedCount === 1 ? '' : 's'}.`);
+  } catch (error) {
+    inferenceXSync.status = 'error';
+    inferenceXSync.lastError = error instanceof Error ? error.message : 'Could not apply InferenceX update.';
+    renderInferenceXSyncPanel();
+    setStatus(inferenceXSync.lastError, true);
+  }
+}
+
+function applyInferenceXSyncResult(result: InferenceXSyncResult, options: { initial: boolean }): void {
+  if (result.series.length === 0) throw new Error('No InferenceX lines to apply.');
+
+  clearAutoRenderTimer();
+  const appliedAt = new Date().toISOString();
+  const syncLineIds = new Set(result.series.map((line) => line.id));
+  const changedLineIds = new Set(getInferenceXChangedSummaryItems().map((item) => item.lineId));
+  const collapsedById = new Map(seriesDrafts.map((draft) => [draft.id, draft.collapsed]));
+
+  if (options.initial) {
+    currentSeries = result.series.map((line, index) => ({ ...line, renderOrder: result.series.length - index - 1 }));
+    seriesDrafts = seriesToDrafts(currentSeries);
+    state = createInitialState(currentSeries);
+  } else {
+    commitSeriesDom();
+    const existingSeries = draftsToSeriesAllowEmpty(seriesDrafts);
+    const existingDraftById = new Map(seriesDrafts.map((draft) => [draft.id, draft]));
+    const existingLineById = new Map(existingSeries.map((line) => [line.id, line]));
+    let nextRenderOrder = getNextDraftRenderOrder() + result.series.length;
+    const styledSyncSeries = result.series.map((line) => {
+      const existingDraft = existingDraftById.get(line.id);
+      const existingLine = existingLineById.get(line.id);
+      const styled = applyExistingSyncLineStyle(line, existingDraft, existingLine);
+      if (existingDraft || existingLine) return styled;
+      nextRenderOrder -= 1;
+      return { ...styled, renderOrder: nextRenderOrder };
+    });
+    currentSeries = [
+      ...existingSeries.filter((line) => !syncLineIds.has(line.id)),
+      ...styledSyncSeries
+    ];
+    seriesDrafts = seriesToDrafts(currentSeries);
+    seriesDrafts.forEach((draft) => {
+      const collapsed = collapsedById.get(draft.id);
+      if (collapsed !== undefined) draft.collapsed = collapsed;
+    });
+    const newSyncSeries = styledSyncSeries.filter((line) => !existingLineById.has(line.id));
+    activateSeriesForChart(newSyncSeries);
+    changedLineIds.forEach((id) => state.activeSeriesIds.add(id));
+  }
+
+  inferenceXSync.fingerprints = { ...inferenceXSync.fingerprints, ...result.fingerprints };
+  inferenceXSync.lineIdsByConfigKey = { ...inferenceXSync.lineIdsByConfigKey, ...result.lineIdsByConfigKey };
+  inferenceXSync.lastCheckedAt = result.checkedAt;
+  inferenceXSync.lastUpdatedAt = appliedAt;
+  inferenceXSync.availableUpdateCount = 0;
+  inferenceXSync.stagedResult = null;
+  inferenceXSync.changedConfigIds = new Set();
+  inferenceXSync.missingConfigIds = new Set(result.missingConfigIds);
+  inferenceXSync.status = 'up-to-date';
+  inferenceXSync.lastError = '';
+
+  sortSeriesDraftsByLayer();
+  normalizeDraftRenderOrderFromPanelOrder();
+  syncCurrentSeriesOrderFromDrafts();
+  reconcileFiltersForSeries(currentSeries);
+  reconcileActiveSeriesForChart();
+  saveActiveSeriesForCurrentView();
+  applyTheme();
+  renderFilterControls();
+  renderInferenceXSyncPanel();
+  renderSeriesEditor();
+  renderAll();
+  clearMergePreview();
+  scheduleLocalSave();
+}
+
+function applyExistingSyncLineStyle(
+  line: InferenceCurveSeries,
+  draft: SeriesDraft | undefined,
+  existingLine: InferenceCurveSeries | undefined
+): InferenceCurveSeries {
+  const styled: InferenceCurveSeries = { ...line };
+  const color = draft?.color ?? existingLine?.color ?? '';
+  const lineStyle = draft?.lineStyle ?? existingLine?.lineStyle ?? '';
+  const marker = draft?.marker ?? String(existingLine?.marker ?? '');
+  const renderOrder = draft
+    ? draft.renderOrder
+    : existingLine?.renderOrder;
+
+  if (color.trim()) styled.color = color.trim();
+  if (lineStyle.trim()) styled.lineStyle = lineStyle.trim();
+  if (marker.trim()) styled.marker = marker.trim();
+  if (typeof renderOrder === 'number' && Number.isFinite(renderOrder)) styled.renderOrder = renderOrder;
+  return styled;
+}
+
+function getChangedInferenceXSyncConfigIds(result: InferenceXSyncResult): string[] {
+  const currentLineById = new Map(getCurrentSeriesForFingerprint().map((line) => [line.id, line]));
+  return result.summary
+    .filter((item) => {
+      const latestFingerprint = result.fingerprints[item.configId];
+      if (!latestFingerprint) return false;
+      const storedFingerprint = inferenceXSync.fingerprints[item.configId];
+      if (storedFingerprint) return storedFingerprint !== latestFingerprint;
+      const currentLine = currentLineById.get(item.lineId);
+      return currentLine ? fingerprintInferenceCurveSeries(currentLine) !== latestFingerprint : true;
+    })
+    .map((item) => item.configId);
+}
+
+function getCurrentSeriesForFingerprint(): InferenceCurveSeries[] {
+  try {
+    return draftsToSeriesAllowEmpty(seriesDrafts);
+  } catch {
+    return currentSeries;
+  }
+}
+
+function getInferenceXChangedSummaryItems(): InferenceXSyncSummaryItem[] {
+  if (!inferenceXSync.stagedResult) return [];
+  return inferenceXSync.stagedResult.summary.filter((item) => inferenceXSync.changedConfigIds.has(item.configId));
+}
+
+async function ensureInferenceXAvailabilityLoaded(): Promise<void> {
+  if (inferenceXSync.availabilityLoaded || inferenceXSync.availabilityLoading) return;
+  await loadInferenceXAvailability();
+}
+
+async function loadInferenceXAvailability(): Promise<void> {
+  inferenceXSync.availabilityLoading = true;
+  inferenceXSync.lastError = '';
+  renderInferenceXSyncPanel();
+  try {
+    inferenceXSync.availabilityRows = await fetchInferenceXAvailability();
+    inferenceXSync.availabilityLoaded = true;
+    alignInferenceXAddDraft();
+  } catch (error) {
+    inferenceXSync.lastError = error instanceof Error ? error.message : 'Could not load InferenceX availability.';
+    inferenceXSync.status = 'error';
+  } finally {
+    inferenceXSync.availabilityLoading = false;
+    renderInferenceXSyncPanel();
+  }
+}
+
+function updateInferenceXAddDraft(field: string, value: string): void {
+  if (field === 'model') {
+    inferenceXSync.addDraft.model = value;
+  } else if (field === 'shape') {
+    inferenceXSync.addShapeSelection = value;
+    if (value !== ALL_VALUE) {
+      const [isl, osl] = value.split('|').map((part) => Number(part));
+      if (Number.isFinite(isl) && Number.isFinite(osl)) {
+        inferenceXSync.addDraft.isl = isl;
+        inferenceXSync.addDraft.osl = osl;
+      }
+    }
+  } else if (field === 'precision') {
+    inferenceXSync.addPrecisionSelection = value;
+    if (value !== ALL_VALUE) {
+      inferenceXSync.addDraft.precision = value;
+    }
+  } else if (field === 'hardware') {
+    inferenceXSync.addDraft.hardware = value;
+  } else if (field === 'framework') {
+    inferenceXSync.addFrameworkSelection = value;
+    if (value !== ALL_VALUE) {
+      inferenceXSync.addDraft.framework = value;
+    }
+  } else if (field === 'specMethod') {
+    inferenceXSync.addSpecMethodSelection = value;
+    if (value !== ALL_VALUE) {
+      inferenceXSync.addDraft.specMethod = value;
+    }
+  } else if (field === 'disagg') {
+    inferenceXSync.addDraft.disagg = value === 'true';
+  }
+  alignInferenceXAddDraft(field);
+}
+
+function alignInferenceXAddDraft(preferredField = ''): void {
+  const rows = getInferenceXOptionRows();
+  if (rows.length === 0) return;
+  const modelRows = rows.filter((row) => row.modelDisplay === inferenceXSync.addDraft.model);
+  const scopedRows = modelRows.length ? modelRows : rows;
+  const candidate = pickBestInferenceXAddRow(scopedRows, preferredField);
+  if (!candidate) return;
+  inferenceXSync.addDraft = {
+    model: candidate.modelDisplay,
+    isl: candidate.isl,
+    osl: candidate.osl,
+    precision: candidate.precision,
+    hardware: candidate.hardware,
+    framework: candidate.framework,
+    specMethod: candidate.specMethod,
+    disagg: candidate.disagg
+  };
+  if (inferenceXSync.addShapeSelection !== ALL_VALUE) {
+    inferenceXSync.addShapeSelection = makeInferenceXShapeValue(candidate);
+  }
+  if (inferenceXSync.addPrecisionSelection !== ALL_VALUE) {
+    inferenceXSync.addPrecisionSelection = candidate.precision;
+  }
+  if (inferenceXSync.addFrameworkSelection !== ALL_VALUE) {
+    inferenceXSync.addFrameworkSelection = candidate.framework;
+  }
+  if (inferenceXSync.addSpecMethodSelection !== ALL_VALUE) {
+    inferenceXSync.addSpecMethodSelection = candidate.specMethod;
+  }
+}
+
+function pickBestInferenceXAddRow(
+  rows: InferenceXAvailabilityRow[],
+  preferredField: string
+): InferenceXAvailabilityRow | undefined {
+  const desired = normalizeInferenceXSyncConfig({ ...inferenceXSync.addDraft, enabled: true });
+  const shouldScoreShape = inferenceXSync.addShapeSelection !== ALL_VALUE;
+  const shouldScorePrecision = inferenceXSync.addPrecisionSelection !== ALL_VALUE;
+  const shouldScoreFramework = inferenceXSync.addFrameworkSelection !== ALL_VALUE;
+  const shouldScoreSpecMethod = inferenceXSync.addSpecMethodSelection !== ALL_VALUE;
+  const rowScore = (row: InferenceXAvailabilityRow): number => {
+    let score = 0;
+    if (row.hardware === desired.hardware) score += preferredField === 'hardware' ? 1000 : 90;
+    if (shouldScoreFramework && row.framework === desired.framework) {
+      score += preferredField === 'framework' ? 1000 : 80;
+    }
+    if (shouldScoreShape && row.isl === desired.isl && row.osl === desired.osl) {
+      score += preferredField === 'shape' ? 1000 : 70;
+    }
+    if (shouldScorePrecision && row.precision === desired.precision) {
+      score += preferredField === 'precision' ? 1000 : 50;
+    }
+    if (shouldScoreSpecMethod && row.specMethod === desired.specMethod) {
+      score += preferredField === 'specMethod' ? 1000 : 30;
+    }
+    if (row.disagg === desired.disagg) score += preferredField === 'disagg' ? 1000 : 20;
+    return score;
+  };
+
+  return [...rows].sort((a, b) => rowScore(b) - rowScore(a) || compareInferenceXAvailabilityRows(a, b))[0];
+}
+
+function compareInferenceXAvailabilityRows(
+  a: InferenceXAvailabilityRow,
+  b: InferenceXAvailabilityRow
+): number {
+  return (
+    b.date.localeCompare(a.date) ||
+    a.hardware.localeCompare(b.hardware) ||
+    a.framework.localeCompare(b.framework) ||
+    b.isl - a.isl ||
+    b.osl - a.osl ||
+    a.precision.localeCompare(b.precision) ||
+    a.specMethod.localeCompare(b.specMethod) ||
+    Number(b.disagg) - Number(a.disagg)
+  );
+}
+
+function addInferenceXSyncConfig(): void {
+  const configs = createInferenceXConfigsFromAddDraft();
+  if (configs.length === 0) {
+    inferenceXSync.lastError = 'No matching InferenceX availability rows were found for that config.';
+    inferenceXSync.status = 'error';
+    renderInferenceXSyncPanel();
+    return;
+  }
+
+  const existingLineIds = new Set(inferenceXSync.configs.map((existing) => makeInferenceXSyncLineId(existing)));
+  const newConfigs = configs.filter((config) => !existingLineIds.has(makeInferenceXSyncLineId(config)));
+  if (newConfigs.length === 0) {
+    inferenceXSync.lastError =
+      configs.length === 1
+        ? 'That InferenceX sync config already exists.'
+        : 'All matching InferenceX sync configs already exist.';
+    inferenceXSync.status = 'error';
+    renderInferenceXSyncPanel();
+    return;
+  }
+
+  inferenceXSync.configs.push(...newConfigs);
+  clearInferenceXStagedUpdate();
+  inferenceXSync.status = 'idle';
+  inferenceXSync.lastError = '';
+  renderInferenceXSyncPanel();
+  scheduleLocalSave();
+  setStatus(
+    `Added ${newConfigs.length} InferenceX sync config${newConfigs.length === 1 ? '' : 's'}. Checking updates...`
+  );
+  void checkInferenceXUpdates({ automatic: false });
+}
+
+function createInferenceXConfigsFromAddDraft(): InferenceXSyncConfig[] {
+  if (
+    inferenceXSync.addShapeSelection !== ALL_VALUE &&
+    inferenceXSync.addPrecisionSelection !== ALL_VALUE &&
+    inferenceXSync.addFrameworkSelection !== ALL_VALUE &&
+    inferenceXSync.addSpecMethodSelection !== ALL_VALUE
+  ) {
+    return [
+      normalizeInferenceXSyncConfig({
+        ...inferenceXSync.addDraft,
+        framework: inferenceXSync.addFrameworkSelection,
+        specMethod: inferenceXSync.addSpecMethodSelection,
+        enabled: true
+      })
+    ];
+  }
+
+  const seenLineIds = new Set<string>();
+  return getInferenceXOptionRows()
+    .filter((row) => inferenceXAvailabilityRowMatchesAddDraft(row))
+    .map((row) =>
+      normalizeInferenceXSyncConfig({
+        ...inferenceXSync.addDraft,
+        isl: row.isl,
+        osl: row.osl,
+        precision: row.precision,
+        framework: row.framework,
+        specMethod: row.specMethod,
+        enabled: true
+      })
+    )
+    .filter((config) => {
+      const lineId = makeInferenceXSyncLineId(config);
+      if (seenLineIds.has(lineId)) return false;
+      seenLineIds.add(lineId);
+      return true;
+    });
+}
+
+function inferenceXAvailabilityRowMatchesAddDraft(row: InferenceXAvailabilityRow): boolean {
+  const draft = inferenceXSync.addDraft;
+  return (
+    row.modelDisplay === draft.model &&
+    (
+      inferenceXSync.addShapeSelection === ALL_VALUE ||
+      (row.isl === draft.isl && row.osl === draft.osl)
+    ) &&
+    (
+      inferenceXSync.addPrecisionSelection === ALL_VALUE ||
+      row.precision === inferenceXSync.addPrecisionSelection
+    ) &&
+    row.hardware === draft.hardware &&
+    (
+      inferenceXSync.addFrameworkSelection === ALL_VALUE ||
+      row.framework === inferenceXSync.addFrameworkSelection
+    ) &&
+    (inferenceXSync.addSpecMethodSelection === ALL_VALUE ||
+      row.specMethod === inferenceXSync.addSpecMethodSelection) &&
+    row.disagg === draft.disagg
+  );
+}
+
+function removeInferenceXSyncConfig(index: number): void {
+  if (!Number.isInteger(index)) return;
+  if (inferenceXSync.configs.length <= 1) {
+    inferenceXSync.lastError = 'At least one InferenceX sync config is required.';
+    inferenceXSync.status = 'error';
+    renderInferenceXSyncPanel();
+    return;
+  }
+  const [removed] = inferenceXSync.configs.splice(index, 1);
+  if (removed) {
+    delete inferenceXSync.fingerprints[removed.id];
+    delete inferenceXSync.lineIdsByConfigKey[removed.id];
+  }
+  clearInferenceXStagedUpdate();
+  inferenceXSync.status = 'idle';
+  inferenceXSync.lastError = '';
+  renderInferenceXSyncPanel();
+  scheduleLocalSave();
+}
+
+function resetInferenceXSyncConfigs(): void {
+  inferenceXSync.configs = createDefaultInferenceXSyncConfigs();
+  inferenceXSync.addDraft = createInferenceXSyncAddDraft(inferenceXSync.configs[0]!);
+  inferenceXSync.addShapeSelection = ALL_VALUE;
+  inferenceXSync.addPrecisionSelection = ALL_VALUE;
+  inferenceXSync.addFrameworkSelection = ALL_VALUE;
+  inferenceXSync.addSpecMethodSelection = ALL_VALUE;
+  clearInferenceXStagedUpdate();
+  inferenceXSync.status = 'idle';
+  inferenceXSync.lastError = '';
+  renderInferenceXSyncPanel();
+  scheduleLocalSave();
+}
+
+function clearInferenceXStagedUpdate(): void {
+  inferenceXSync.stagedResult = null;
+  inferenceXSync.changedConfigIds = new Set();
+  inferenceXSync.availableUpdateCount = 0;
+  inferenceXSync.missingConfigIds = new Set();
 }
 
 function renderFilterControls(): void {
