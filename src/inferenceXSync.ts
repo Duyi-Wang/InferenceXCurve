@@ -61,6 +61,19 @@ const INFERENCEX_API_BASE =
     ['localhost', '127.0.0.1'].includes(window.location.hostname))
     ? INFERENCEX_DEV_PROXY_API_BASE
     : INFERENCEX_REMOTE_API_BASE;
+// When the app talks to the remote API directly (i.e. not through the Vite dev
+// proxy), every request is cross-origin. The InferenceX API does not send an
+// Access-Control-Allow-Origin header, so the browser blocks the response and
+// fetch() rejects with an opaque TypeError ("Failed to fetch"). We use this
+// flag to surface a clear CORS message with workarounds instead.
+const INFERENCEX_API_IS_CROSS_ORIGIN = INFERENCEX_API_BASE === INFERENCEX_REMOTE_API_BASE;
+const INFERENCEX_CORS_HELP =
+  'InferenceX sync is blocked by CORS: the browser could not reach ' +
+  'https://inferencex.semianalysis.com directly because that API does not send an ' +
+  'Access-Control-Allow-Origin header for cross-origin requests. To work around it for now, ' +
+  'enable a CORS-unblocking browser extension (e.g. "Allow CORS" / "CORS Unblock") and retry, ' +
+  'or route the request through a CORS proxy. (Running the app locally with `npm run dev` is ' +
+  'unaffected because it uses the Vite dev proxy.)';
 const NON_MTP_SPEC = 'none';
 const MTP_SPEC = 'mtp';
 
@@ -342,12 +355,36 @@ async function fetchBenchmarkRecordsByModel(
 }
 
 async function fetchInferenceXJson(url: string, signal?: AbortSignal): Promise<unknown> {
-  const response = await fetch(url, { signal, headers: { Accept: 'application/json' } });
+  let response: Response;
+  try {
+    response = await fetch(url, { signal, headers: { Accept: 'application/json' } });
+  } catch (error) {
+    // A blocked CORS request and a genuine network failure both surface as a
+    // TypeError here; distinguish only when we know the call is cross-origin.
+    if (INFERENCEX_API_IS_CROSS_ORIGIN && isLikelyCorsError(error)) {
+      throw new InferenceXCorsError(INFERENCEX_CORS_HELP, { cause: error });
+    }
+    throw error;
+  }
   if (!response.ok) {
     const text = await response.text().catch(() => '');
     throw new Error(`${response.status} ${response.statusText}${text ? `: ${text.slice(0, 220)}` : ''}`);
   }
   return response.json() as Promise<unknown>;
+}
+
+export class InferenceXCorsError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = 'InferenceXCorsError';
+  }
+}
+
+function isLikelyCorsError(error: unknown): boolean {
+  if (error instanceof DOMException && error.name === 'AbortError') return false;
+  // Browsers report a blocked cross-origin fetch as a TypeError ("Failed to
+  // fetch" / "Load failed"), with no way to inspect the real cause from JS.
+  return error instanceof TypeError;
 }
 
 function benchmarkRecordMatchesConfig(

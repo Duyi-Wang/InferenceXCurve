@@ -91,6 +91,15 @@ The app now treats the public InferenceX API as the primary source for default b
 - Sync-generated line ids are stable and derived from model, ISL/OSL, precision, hardware, framework, MTP, and disagg. Updating a sync line should replace data/source fields while preserving user style fields such as `color`, `lineStyle`, `marker`, `renderOrder`, and `collapsed`.
 - Match hardware strictly. Do not alias `b200` to `gb200` or vice versa.
 
+### CORS: dev works, deployed GitHub Pages does not
+
+The InferenceX API does **not** send an `Access-Control-Allow-Origin` header (the official site is a same-origin Next.js app on Vercel, so it never needs one). Consequences for this app:
+
+- **`npm run dev` works** only because `vite.config.ts` proxies `/inferencex-api` → the API, keeping browser requests same-origin. `INFERENCEX_API_BASE` in `src/inferenceXSync.ts` selects this dev proxy on `localhost`/`127.0.0.1` and the Vite ports.
+- **The deployed site (`duyi-wang.github.io`) is cross-origin and will be blocked by the browser.** This is not a fixable client bug: the missing header is a *response* header owned by the API server; the frontend cannot add/fake it, and `Origin` is a forbidden request header. A pure static site directly hitting that API is architecturally impossible to make work in the browser.
+- The fix requires a server-side hop the app controls: a proxy (e.g. a free Cloudflare Worker that forwards to the API and adds CORS headers — set as the production `INFERENCEX_API_BASE`), or a CI/build snapshot (fetch the API in GitHub Actions, ship JSON same-origin). Server-to-server requests are not subject to CORS. None of these are deployed yet.
+- **Current handling:** when a cross-origin request fails, `fetchInferenceXJson` raises `InferenceXCorsError` (only when `INFERENCEX_API_IS_CROSS_ORIGIN` and the failure is a `TypeError`, i.e. a blocked fetch) carrying an explicit CORS message plus the browser-extension/proxy workarounds, instead of surfacing a bare "Failed to fetch". A blocked CORS request and a real network failure are indistinguishable from JS, so the message hedges with "blocked by CORS". Do not "fix" the deployed Sync by widening this to a generic error — keep the CORS guidance until a real proxy/snapshot is in place.
+
 ## Agent Notes: Refreshing InferenceX Example Data
 
 When updating `src/exampleData.ts`, query the public InferenceX API rather than scraping the rendered page:

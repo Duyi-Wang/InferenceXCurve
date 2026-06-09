@@ -156,6 +156,35 @@ the normal browser data payload under `localStorage` key
 `inferencex-curve:user-data:v1`. The GitHub token remains separate under
 `inferencex-curve:github-token:v1`.
 
+### CORS and the deployed site
+
+The InferenceX API serves the official site from the same origin
+(`inferencex.semianalysis.com`), so it never needs CORS headers and does not send
+an `Access-Control-Allow-Origin` header. This app is different:
+
+- **Local `npm run dev`** works because the Vite dev server proxies
+  `/inferencex-api` to the API (see `vite.config.ts`), so the browser only makes
+  same-origin requests.
+- **The deployed GitHub Pages site** (`duyi-wang.github.io`) is a static site on a
+  different origin. Its browser requests to the API are cross-origin, and because
+  the API sends no `Access-Control-Allow-Origin` header, the browser blocks the
+  response. This is a browser security mechanism: the missing header is a
+  *response* header controlled by the API server, so the frontend cannot add or
+  fake it, and the `Origin` request header cannot be overridden from JavaScript.
+
+When this happens, the Sync panel reports an explicit **CORS** error (rather than a
+generic "Failed to fetch") with these workarounds:
+
+- **Temporary, no infrastructure:** install and enable a CORS-unblocking browser
+  extension (e.g. "Allow CORS" / "CORS Unblock"), then retry. This relaxes the
+  check in your own browser only; it does not change anything for other visitors.
+- **Permanent:** route requests through a proxy you control. Server-to-server
+  requests are not subject to CORS, so a proxy (e.g. a free Cloudflare Worker that
+  forwards to the API and adds CORS headers) makes Sync work for everyone. A build
+  /CI snapshot approach (fetch the API in GitHub Actions and ship the JSON
+  same-origin with the site) is an alternative when live, on-click freshness is
+  not required.
+
 ## Import Data File
 
 `Import File` (next to `Import Action Data`) loads a local `.csv`, `.tsv`,
