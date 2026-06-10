@@ -196,6 +196,11 @@ columns (`Total GPUs`, `Included in Chart`, `Active Line`, `Point Index`,
 `Roofline Point`) are ignored on import. The same parser also accepts raw
 benchmark JSON/CSV exports.
 
+For external integrations or agent-generated files, use
+[`docs/import-csv.md`](docs/import-csv.md) as the CSV/TSV import contract. It
+lists the recommended headers, required fields, optional empty fields, aliases,
+and raw benchmark fallback format.
+
 ## Chart Logic
 
 Reusable chart logic lives in `src/inferenceCurveChart.ts`.
@@ -223,4 +228,5 @@ included.
 - `src/exampleData.ts`: offline fallback DeepSeek R1 0528 example series.
 - `src/styles.css`: application and chart styling.
 - `vite.config.ts`: Vite base path and dev proxy for `/inferencex-api`.
+- `docs/import-csv.md`: CSV/TSV import contract for external integrations.
 - `AGENTS.md`: contributor guidance for coding agents.

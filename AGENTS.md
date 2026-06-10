@@ -10,6 +10,7 @@ This is a Vite + TypeScript single-page app for recreating the InferenceX throug
 - `src/exampleData.ts`: offline fallback benchmark line data.
 - `src/styles.css`: global theme, chart layout, legend, and data editor styling.
 - `vite.config.ts`: Vite base path and `/inferencex-api` dev proxy.
+- `docs/import-csv.md`: public CSV/TSV import contract for external integrations and agent-generated files.
 - `index.html`: Vite entry HTML.
 - `dist/`: generated production output; do not edit by hand.
 
@@ -78,6 +79,18 @@ Downloading run artifacts (the `archive_download_url` / `.../artifacts/{id}/zip`
 - **Org-owned private repo:** the org must enable fine-grained token access; otherwise fall back to a classic PAT with `repo` scope.
 
 Suggest a long expiry stored in a password manager so the token is available when viewing from a different machine, since the "Remember token" option only covers the same browser.
+
+## Agent Notes: Generating Importable CSV
+
+Use `docs/import-csv.md` as the source of truth when generating CSV/TSV for `Import File` or when helping another project integrate with this app. Prefer the editor CSV format from that document, not raw benchmark CSV, unless the user explicitly asks for benchmark-style rows.
+
+Agent-specific rules:
+
+- Always include deterministic non-empty `Line ID`, `Line Name`, `Model`, `ISL/OSL`, and `Precision` values in generated editor CSV. Do not rely on app fallback defaults.
+- Always include numeric `Interactivity (tok/s/user)` and `Throughput/GPU (tok/s/gpu)` for every point row with data.
+- Prefer explicit `MTP` or `Non-MTP`; do not rely on name inference unless intentionally testing inference.
+- Optional style/metadata/parallelism columns may be empty as documented in `docs/import-csv.md`.
+- Keep generated CSV canonical: use the documented headers even though the importer accepts aliases.
 
 ## Agent Notes: InferenceX Data Sync
 
