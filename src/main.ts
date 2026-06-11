@@ -20,6 +20,7 @@ import {
   type InferenceXSyncSummaryItem
 } from './inferenceXSync';
 import {
+  DEFAULT_CHART_WATERMARK,
   getAvailablePrecisions,
   INFERENCE_CURVE_MARGIN,
   prepareInferenceCurveSeries,
@@ -63,6 +64,7 @@ interface AppState {
   highContrast: boolean;
   logY: boolean;
   search: string;
+  watermark: string;
 }
 
 interface TableColumn {
@@ -133,6 +135,7 @@ interface PersistedAppState {
   highContrast?: boolean;
   logY?: boolean;
   search?: string;
+  watermark?: string;
 }
 
 type InferenceXSyncStatus =
@@ -266,6 +269,7 @@ const LOCAL_STORAGE_KEY = 'inferencex-curve:user-data:v1';
 const TOKEN_STORAGE_KEY = 'inferencex-curve:github-token:v1';
 const LOCAL_SAVE_DEBOUNCE_MS = 350;
 const AUTO_RENDER_DEBOUNCE_MS = 400;
+const MAX_WATERMARK_LENGTH = 64;
 const EXPORT_PADDING = 32;
 const EXPORT_TITLE_HEIGHT = 62;
 const EXPORT_LAYOUT_GAP = 16;
@@ -584,7 +588,10 @@ function restorePersistedState(value: unknown): PersistedAppState {
     showLineLabels: readPersistedBoolean(value.showLineLabels),
     highContrast: readPersistedBoolean(value.highContrast),
     logY: readPersistedBoolean(value.logY),
-    search: readPersistedText(value, 'search')
+    search: readPersistedText(value, 'search'),
+    watermark: Object.prototype.hasOwnProperty.call(value, 'watermark')
+      ? normalizeWatermarkText(String(value.watermark ?? ''))
+      : undefined
   };
 }
 
@@ -623,7 +630,8 @@ function restoreAppState(defaults: AppState, saved: PersistedAppState, series: I
     showLineLabels: saved.showLineLabels ?? defaults.showLineLabels,
     highContrast: saved.highContrast ?? defaults.highContrast,
     logY: saved.logY ?? defaults.logY,
-    search: saved.search ?? defaults.search
+    search: saved.search ?? defaults.search,
+    watermark: saved.watermark ?? defaults.watermark
   };
 }
 
@@ -643,7 +651,8 @@ function serializeAppState(): PersistedAppState {
     showLineLabels: state.showLineLabels,
     highContrast: state.highContrast,
     logY: state.logY,
-    search: state.search
+    search: state.search,
+    watermark: state.watermark
   };
 }
 
@@ -779,6 +788,10 @@ function readPersistedText(record: Record<string, unknown>, key: string, fallbac
   return normalizeCellText(String(value));
 }
 
+function normalizeWatermarkText(value: string): string {
+  return value.replace(/\u00a0/g, ' ').slice(0, MAX_WATERMARK_LENGTH);
+}
+
 function readPersistedStringArray(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const values = value.map((item) => normalizeCellText(String(item))).filter(Boolean);
@@ -879,6 +892,38 @@ app.innerHTML = `
 
     <section class="chart-card">
       <div class="chart-card-toolbar no-export">
+        <div id="watermark-menu" class="watermark-menu">
+          <button
+            id="watermark-menu-toggle"
+            class="tool-button"
+            type="button"
+            title="Chart options"
+            aria-label="Chart options"
+            aria-expanded="false"
+            aria-controls="watermark-menu-panel"
+          >
+            ${renderIcon('sliders')}
+          </button>
+          <div id="watermark-menu-panel" class="watermark-menu-panel" hidden>
+            <label class="watermark-control">
+              <span>Watermark</span>
+              <input
+                id="chart-watermark"
+                type="text"
+                value="${escapeAttribute(state.watermark)}"
+                maxlength="${MAX_WATERMARK_LENGTH}"
+                placeholder="${escapeAttribute(DEFAULT_CHART_WATERMARK)}"
+                aria-label="Chart watermark text"
+              />
+            </label>
+            <div class="watermark-panel-actions">
+              <button id="reset-watermark" class="action-button watermark-reset-button" type="button">
+                ${renderIcon('refresh')}
+                <span>Reset</span>
+              </button>
+            </div>
+          </div>
+        </div>
         <button id="download-png" class="tool-button" type="button" title="Download PNG" aria-label="Download PNG">
           <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" d="M12 3v12m0 0 4-4m-4 4-4-4M4 21h16"/></svg>
         </button>
@@ -1029,6 +1074,10 @@ app.innerHTML = `
 const chartEl = document.querySelector<HTMLElement>('#chart')!;
 const legendEl = document.querySelector<HTMLElement>('#legend')!;
 const chartSubtitleEl = document.querySelector<HTMLParagraphElement>('#chart-subtitle')!;
+const watermarkMenuEl = document.querySelector<HTMLElement>('#watermark-menu')!;
+const watermarkMenuToggleEl = document.querySelector<HTMLButtonElement>('#watermark-menu-toggle')!;
+const watermarkMenuPanelEl = document.querySelector<HTMLElement>('#watermark-menu-panel')!;
+const chartWatermarkEl = document.querySelector<HTMLInputElement>('#chart-watermark')!;
 const modelFilterEl = document.querySelector<HTMLSelectElement>('#model-filter')!;
 const islOslFilterEl = document.querySelector<HTMLSelectElement>('#isl-osl-filter')!;
 const precisionFilterEl = document.querySelector<HTMLSelectElement>('#precision-filter')!;
@@ -1074,6 +1123,7 @@ document.querySelector('#reset-data')?.addEventListener('click', () => {
   syncCurrentSeriesOrderFromDrafts();
   state = createInitialState(currentSeries);
   applyTheme();
+  syncWatermarkControl();
   renderFilterControls();
   renderInferenceXSyncPanel();
   renderSeriesEditor();
@@ -1158,17 +1208,69 @@ mergePreviewEl.addEventListener('input', handleMergePreviewInput);
 mergePreviewEl.addEventListener('change', handleMergePreviewInput);
 mergePreviewEl.addEventListener('click', handleMergePreviewClick);
 
+watermarkMenuToggleEl.addEventListener('click', toggleWatermarkPanel);
+chartWatermarkEl.addEventListener('input', handleWatermarkInput);
+document.querySelector('#reset-watermark')?.addEventListener('click', resetWatermark);
 document.querySelector('#download-png')?.addEventListener('click', downloadPng);
 document.querySelector('#download-csv')?.addEventListener('click', downloadCsv);
 document.querySelector('#reset-zoom')?.addEventListener('click', resetInferenceCurveZoom);
 window.addEventListener('resize', renderAll);
 window.addEventListener('keydown', handleGlobalKeydown);
+document.addEventListener('click', handleDocumentClick);
+document.addEventListener('keydown', handleDocumentKeydown);
 window.addEventListener('beforeunload', () => {
   if (skipNextBeforeUnloadSave) return;
   commitSeriesDom();
   saveLocalDataNow();
 });
 void initializeInferenceXSync();
+
+function toggleWatermarkPanel(): void {
+  setWatermarkPanelOpen(watermarkMenuPanelEl.hidden);
+}
+
+function setWatermarkPanelOpen(open: boolean): void {
+  watermarkMenuPanelEl.hidden = !open;
+  watermarkMenuToggleEl.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (!open) return;
+  syncWatermarkControl();
+  window.setTimeout(() => chartWatermarkEl.select(), 0);
+}
+
+function handleDocumentClick(event: MouseEvent): void {
+  if (watermarkMenuPanelEl.hidden) return;
+  const target = event.target;
+  if (target instanceof Node && watermarkMenuEl.contains(target)) return;
+  setWatermarkPanelOpen(false);
+}
+
+function handleDocumentKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'Escape' || watermarkMenuPanelEl.hidden) return;
+  setWatermarkPanelOpen(false);
+  watermarkMenuToggleEl.focus();
+}
+
+function handleWatermarkInput(): void {
+  const nextWatermark = normalizeWatermarkText(chartWatermarkEl.value);
+  if (chartWatermarkEl.value !== nextWatermark) chartWatermarkEl.value = nextWatermark;
+  if (state.watermark === nextWatermark) return;
+  state.watermark = nextWatermark;
+  renderAll();
+  scheduleLocalSave();
+}
+
+function resetWatermark(): void {
+  if (state.watermark === DEFAULT_CHART_WATERMARK) return;
+  state.watermark = DEFAULT_CHART_WATERMARK;
+  syncWatermarkControl();
+  renderAll();
+  scheduleLocalSave();
+  setStatus('Watermark reset to default');
+}
+
+function syncWatermarkControl(): void {
+  chartWatermarkEl.value = state.watermark;
+}
 
 function renderDraftData(): void {
   clearAutoRenderTimer();
@@ -1240,7 +1342,8 @@ function getChartOptions(): InferenceCurveChartOptions {
     highContrast: state.highContrast,
     logY: state.logY,
     theme: state.theme,
-    subtitle: getChartSubtitle()
+    subtitle: getChartSubtitle(),
+    watermark: state.watermark
   };
 }
 
@@ -2572,6 +2675,7 @@ function renderIcon(name: string): string {
     'chevron-down': '<path d="m6 9 6 6 6-6"/>',
     target: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3"/><path d="M12 19v3"/><path d="M2 12h3"/><path d="M19 12h3"/>',
     help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 4.5 1.5c0 1.7-2.5 2-2.5 3.5"/><path d="M12 17h.01"/>',
+    sliders: '<path d="M4 7h16"/><path d="M4 17h16"/><circle cx="9" cy="7" r="2"/><circle cx="15" cy="17" r="2"/>',
     upload: '<path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>'
   };
   return `
@@ -3907,7 +4011,8 @@ function createInitialState(series: InferenceCurveSeries[]): AppState {
     showLineLabels: false,
     highContrast: false,
     logY: false,
-    search: ''
+    search: '',
+    watermark: DEFAULT_CHART_WATERMARK
   };
 }
 

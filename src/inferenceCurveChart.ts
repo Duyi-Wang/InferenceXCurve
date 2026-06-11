@@ -56,6 +56,7 @@ export interface InferenceCurveChartOptions {
   height?: number;
   title?: string;
   subtitle?: string;
+  watermark?: string;
   xLabel?: string;
   yLabel?: string;
 }
@@ -156,7 +157,7 @@ const CHART_MARGIN = { top: 18, right: 24, bottom: 48, left: 82 };
 // Exposed so the PNG export can align overlays (e.g. the legend) to the plot
 // area rather than the full chart SVG bounds.
 export const INFERENCE_CURVE_MARGIN = CHART_MARGIN;
-const WATERMARK_TEXT = 'MORI Internal';
+export const DEFAULT_CHART_WATERMARK = 'MORI Internal';
 
 type Vendor = 'nvidia' | 'amd' | 'unknown';
 
@@ -212,6 +213,7 @@ const defaultOptions: Required<
   height: 575,
   title: 'Token Throughput per GPU vs. Interactivity',
   subtitle: 'Custom data • Source: user supplied',
+  watermark: DEFAULT_CHART_WATERMARK,
   xLabel: 'Interactivity (tok/s/user)',
   yLabel: 'Token Throughput per GPU (tok/s/gpu)'
 };
@@ -538,7 +540,7 @@ export function renderInferenceCurveChart(
     .attr('class', 'chart-root')
     .attr('transform', `translate(${CHART_MARGIN.left},${CHART_MARGIN.top})`);
   const grid = plot.append('g').attr('class', 'grid');
-  drawChartWatermark(plot, innerWidth, innerHeight);
+  drawChartWatermark(plot, innerWidth, innerHeight, options.watermark);
   const xAxisGroup = plot
     .append('g')
     .attr('class', 'x-axis')
@@ -775,8 +777,12 @@ export function renderInferenceCurveChart(
 function drawChartWatermark(
   plot: d3.Selection<SVGGElement, unknown, null, undefined>,
   innerWidth: number,
-  innerHeight: number
+  innerHeight: number,
+  text: string
 ): void {
+  const watermarkText = text.trim();
+  if (!watermarkText) return;
+
   const centerX = innerWidth / 2;
   const centerY = innerHeight / 2;
   const fontSize = Math.max(84, Math.min(innerWidth * 0.18, innerHeight * 0.34));
@@ -798,7 +804,7 @@ function drawChartWatermark(
     .attr('text-anchor', 'middle')
     .attr('dominant-baseline', 'central')
     .attr('transform', `rotate(-18 ${centerX} ${centerY})`)
-    .text(WATERMARK_TEXT);
+    .text(watermarkText);
 }
 
 function drawRooflines(
