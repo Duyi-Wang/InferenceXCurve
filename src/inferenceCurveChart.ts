@@ -47,6 +47,7 @@ export interface InferenceCurveChartOptions {
   selectedPrecisions?: string[];
   showNonOptimalPoints?: boolean;
   hidePointLabels?: boolean;
+  showConcurrencyLabels?: boolean;
   useAdvancedLabels?: boolean;
   showGradientLabels?: boolean;
   showLineLabels?: boolean;
@@ -204,6 +205,7 @@ const defaultOptions: Required<
 > = {
   showNonOptimalPoints: false,
   hidePointLabels: true,
+  showConcurrencyLabels: false,
   useAdvancedLabels: false,
   showGradientLabels: false,
   showLineLabels: false,
@@ -1249,11 +1251,17 @@ function getPointLabelText(
   options: Required<Omit<InferenceCurveChartOptions, 'activeSeriesIds' | 'selectedPrecisions'>>
 ): string {
   if (options.hidePointLabels || options.showGradientLabels) return '';
+  if (options.showConcurrencyLabels) return getConcurrencyPointLabel(point);
   if (options.useAdvancedLabels) return getAdvancedPointLabel(point);
   const referenceTp = getReferenceTp(point);
   if (referenceTp !== undefined) return formatPointLabelNumber(referenceTp);
   if (point.concurrency !== undefined) return String(point.concurrency);
   return point.strategy ?? '';
+}
+
+function getConcurrencyPointLabel(point: ChartPoint): string {
+  const concurrency = readFiniteNumber(point.concurrency);
+  return concurrency === undefined ? '' : formatPointLabelNumber(concurrency);
 }
 
 function getReferenceTp(point: ChartPoint): number | undefined {

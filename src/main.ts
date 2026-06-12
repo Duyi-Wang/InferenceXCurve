@@ -58,6 +58,7 @@ interface AppState {
   mtpFilter: string;
   showNonOptimalPoints: boolean;
   hidePointLabels: boolean;
+  showConcurrencyLabels: boolean;
   useAdvancedLabels: boolean;
   showGradientLabels: boolean;
   showLineLabels: boolean;
@@ -129,6 +130,7 @@ interface PersistedAppState {
   mtpFilter?: string;
   showNonOptimalPoints?: boolean;
   hidePointLabels?: boolean;
+  showConcurrencyLabels?: boolean;
   useAdvancedLabels?: boolean;
   showGradientLabels?: boolean;
   showLineLabels?: boolean;
@@ -583,6 +585,7 @@ function restorePersistedState(value: unknown): PersistedAppState {
     mtpFilter: readPersistedText(value, 'mtpFilter') || undefined,
     showNonOptimalPoints: readPersistedBoolean(value.showNonOptimalPoints),
     hidePointLabels: readPersistedBoolean(value.hidePointLabels),
+    showConcurrencyLabels: readPersistedBoolean(value.showConcurrencyLabels),
     useAdvancedLabels: readPersistedBoolean(value.useAdvancedLabels),
     showGradientLabels: readPersistedBoolean(value.showGradientLabels),
     showLineLabels: readPersistedBoolean(value.showLineLabels),
@@ -625,6 +628,7 @@ function restoreAppState(defaults: AppState, saved: PersistedAppState, series: I
     mtpFilter: saved.mtpFilter ?? defaults.mtpFilter,
     showNonOptimalPoints: saved.showNonOptimalPoints ?? defaults.showNonOptimalPoints,
     hidePointLabels: saved.hidePointLabels ?? defaults.hidePointLabels,
+    showConcurrencyLabels: saved.showConcurrencyLabels ?? defaults.showConcurrencyLabels,
     useAdvancedLabels: saved.useAdvancedLabels ?? defaults.useAdvancedLabels,
     showGradientLabels: saved.showGradientLabels ?? defaults.showGradientLabels,
     showLineLabels: saved.showLineLabels ?? defaults.showLineLabels,
@@ -646,6 +650,7 @@ function serializeAppState(): PersistedAppState {
     mtpFilter: state.mtpFilter,
     showNonOptimalPoints: state.showNonOptimalPoints,
     hidePointLabels: state.hidePointLabels,
+    showConcurrencyLabels: state.showConcurrencyLabels,
     useAdvancedLabels: state.useAdvancedLabels,
     showGradientLabels: state.showGradientLabels,
     showLineLabels: state.showLineLabels,
@@ -1336,6 +1341,7 @@ function getChartOptions(): InferenceCurveChartOptions {
     selectedPrecisions: Array.from(state.selectedPrecisions),
     showNonOptimalPoints: state.showNonOptimalPoints,
     hidePointLabels: state.hidePointLabels,
+    showConcurrencyLabels: state.showConcurrencyLabels,
     useAdvancedLabels: state.useAdvancedLabels,
     showGradientLabels: state.showGradientLabels,
     showLineLabels: state.showLineLabels,
@@ -3229,6 +3235,7 @@ function renderLegend(): void {
         ${renderSwitch('showNonOptimalPoints', 'Optimal Only', !state.showNonOptimalPoints)}
         ${renderSwitch('hidePointLabels', 'Hide Labels', state.hidePointLabels)}
         ${renderSwitch('highContrast', 'High Contrast', state.highContrast)}
+        ${renderSwitch('showConcurrencyLabels', 'Concurrency Labels', state.showConcurrencyLabels)}
         ${renderSwitch('useAdvancedLabels', 'Parallelism Labels', state.useAdvancedLabels)}
         ${renderSwitch('showGradientLabels', 'Gradient Labels', state.showGradientLabels)}
         ${renderSwitch('showLineLabels', 'Line Labels', state.showLineLabels)}
@@ -3283,6 +3290,18 @@ function renderLegend(): void {
       const key = input.dataset.switch as keyof AppState;
       if (key === 'showNonOptimalPoints') {
         state.showNonOptimalPoints = !input.checked;
+      } else if (key === 'showConcurrencyLabels') {
+        state.showConcurrencyLabels = input.checked;
+        if (input.checked) {
+          state.hidePointLabels = false;
+          state.useAdvancedLabels = false;
+        }
+      } else if (key === 'useAdvancedLabels') {
+        state.useAdvancedLabels = input.checked;
+        if (input.checked) {
+          state.hidePointLabels = false;
+          state.showConcurrencyLabels = false;
+        }
       } else if (typeof state[key] === 'boolean') {
         (state[key] as boolean) = input.checked;
       }
@@ -4006,6 +4025,7 @@ function createInitialState(series: InferenceCurveSeries[]): AppState {
     mtpFilter,
     showNonOptimalPoints: false,
     hidePointLabels: true,
+    showConcurrencyLabels: false,
     useAdvancedLabels: false,
     showGradientLabels: false,
     showLineLabels: false,
