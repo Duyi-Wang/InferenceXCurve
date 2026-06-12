@@ -143,6 +143,11 @@ rows are returned, it falls back to the bundled `exampleSeries`. On later opens,
 the app checks for updates once and stages the result, but it does not overwrite
 the current chart until you click `Update`.
 
+For each enabled sync config, the API may return historical rows across many
+dates. Sync mirrors the upstream chart behavior by keeping only the newest
+available `date` for that exact model / ISL / OSL / precision / hardware /
+framework / MTP / disagg combination.
+
 The panel actions are:
 
 - `Check Updates`: fetch enabled sync configs and stage any new or changed lines.

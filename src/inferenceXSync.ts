@@ -221,16 +221,17 @@ export async function fetchInferenceXSyncSeries(
     const normalized = normalizeInferenceXSyncConfig(config);
     const records = recordsByModel.get(resolveModelKey(normalized.model)) ?? [];
     const matched = records.filter((record) => benchmarkRecordMatchesConfig(record, normalized));
+    const latestMatched = filterLatestBenchmarkRecords(matched);
     const lineId = makeInferenceXSyncLineId(normalized);
     lineIdsByConfigKey[normalized.id] = lineId;
-    matchedCounts[normalized.id] = matched.length;
+    matchedCounts[normalized.id] = latestMatched.length;
 
-    if (matched.length === 0) {
+    if (latestMatched.length === 0) {
       missingConfigIds.push(normalized.id);
       return;
     }
 
-    const line = benchmarkRecordsToSeries(normalized, matched);
+    const line = benchmarkRecordsToSeries(normalized, latestMatched);
     if (!line) {
       missingConfigIds.push(normalized.id);
       return;
@@ -415,6 +416,22 @@ function benchmarkRecordMatchesConfig(
     interactivity !== null &&
     throughput !== null
   );
+}
+
+function filterLatestBenchmarkRecords(records: InferenceXBenchmarkRecord[]): InferenceXBenchmarkRecord[] {
+  if (records.length <= 1) return records;
+  const latestDate = records
+    .map((record) => readBenchmarkDate(record))
+    .filter(Boolean)
+    .sort((a, b) => b.localeCompare(a))[0];
+  if (!latestDate) return records;
+  return records.filter((record) => readBenchmarkDate(record) === latestDate);
+}
+
+function readBenchmarkDate(record: InferenceXBenchmarkRecord): string {
+  const value = readString(record, 'date');
+  const match = value.match(/\d{4}-\d{2}-\d{2}/u);
+  return match?.[0] ?? '';
 }
 
 function benchmarkRecordsToSeries(
