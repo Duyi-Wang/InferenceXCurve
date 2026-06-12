@@ -5069,14 +5069,14 @@ async function loadGitHubActionSeries(
   const artifacts = await fetchGitHubArtifacts(run, headers);
   const scoredCandidates = artifacts
     .filter((artifact) => !artifact.expired)
+    .filter((artifact) => isBenchmarkArtifactCandidate(artifact.name))
     .map((artifact) => ({ artifact, score: scoreArtifactName(artifact.name) }));
-  const likelyBenchmarkCandidates = scoredCandidates.filter((item) => item.score > 0);
-  const candidates = (likelyBenchmarkCandidates.length > 0 ? likelyBenchmarkCandidates : scoredCandidates)
+  const candidates = scoredCandidates
     .sort((a, b) => b.score - a.score)
     .slice(0, 20);
 
   if (candidates.length === 0) {
-    throw new Error('No downloadable artifacts found for that GitHub Actions run.');
+    throw new Error('No benchmark artifacts found for that GitHub Actions run.');
   }
 
   const imported: InferenceCurveSeries[] = [];
@@ -5100,6 +5100,7 @@ async function loadGitHubActionSeries(
         message: error instanceof Error ? error.message : 'failed',
         isDownloadFailure: isGitHubArtifactFetchError(error)
       });
+      if (isGitHubArtifactFetchError(error) && imported.length === 0) break;
     }
     onProgress?.((index + 1) / candidates.length);
   }
@@ -5650,11 +5651,17 @@ function formatImportSummary(
 function scoreArtifactName(name: string): number {
   const value = name.toLowerCase();
   let score = 0;
-  if (/benchmark|bench|bmk|inference|result|metric|data|summary|agg/u.test(value)) score += 10;
-  if (/results?[-_]?bmk|bmk[-_]/u.test(value)) score += 8;
-  if (/eval/u.test(value)) score -= 2;
-  if (/run[-_]?stats|samples?|log|trace|profile/u.test(value)) score -= 8;
+  if (/^results?[-_]?bmk$/u.test(value)) score += 30;
+  if (/(^|[-_])bmk($|[-_])/u.test(value)) score += 24;
+  if (/benchmark|bench/u.test(value)) score += 16;
+  if (/metric|summary/u.test(value)) score += 8;
   return score;
+}
+
+function isBenchmarkArtifactCandidate(name: string): boolean {
+  const value = name.toLowerCase();
+  if (/eval|run[-_]?stats|samples?|log|trace|profile/u.test(value)) return false;
+  return /^results?[-_]?bmk$/u.test(value) || /(^|[-_])bmk($|[-_])/u.test(value) || /benchmark|bench/u.test(value);
 }
 
 function parseDelimitedText(text: string, delimiter: ',' | '\t'): string[][] {
