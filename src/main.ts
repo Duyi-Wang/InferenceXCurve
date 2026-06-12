@@ -279,7 +279,7 @@ const LOCAL_SAVE_DEBOUNCE_MS = 350;
 const AUTO_RENDER_DEBOUNCE_MS = 400;
 const MAX_WATERMARK_LENGTH = 64;
 const GITHUB_ARTIFACT_FETCH_HELP =
-  'Failed to fetch artifact zip. GitHub artifact downloads redirect to signed blob storage; if this happens in the browser, confirm the token has Actions read access and make sure any CORS-unblock extension also covers GitHub artifact blob URLs. You can also download the artifact zip from GitHub and use Import File.';
+  'Failed to fetch artifact zip. The importer retried both current and legacy GitHub artifact request headers. If this only fails with a CORS-unblock extension enabled, exclude github.com, api.github.com, and GitHub blob storage from that extension. You can also download the artifact zip from GitHub and use Import File.';
 const EXPORT_PADDING = 32;
 const EXPORT_TITLE_HEIGHT = 62;
 const EXPORT_LAYOUT_GAP = 16;
@@ -1041,6 +1041,10 @@ app.innerHTML = `
                 </span>
                 <span class="help-tip-note">
                   &ldquo;Remember&rdquo; saves it in plain text, in this browser only.
+                </span>
+                <span class="help-tip-note">
+                  If a CORS-unblock extension affects GitHub import, exclude GitHub
+                  and its artifact blob storage.
                 </span>
               </span>
             </span>
@@ -5164,13 +5168,7 @@ async function fetchArtifactArchive(
   headers: Headers,
   onProgress?: (fraction: number) => void
 ): Promise<Uint8Array> {
-  let response: Response;
-  try {
-    response = await fetch(url, { headers });
-  } catch (error) {
-    if (isLikelyFetchFailure(error)) throw new GitHubArtifactFetchError(GITHUB_ARTIFACT_FETCH_HELP);
-    throw error;
-  }
+  const response = await fetchArtifactArchiveResponse(url, headers);
   if (!response.ok) throw new Error(await formatFetchError(response));
   const total = Number(response.headers.get('Content-Length'));
   // Fall back to a buffered read when the stream or length is unavailable;
@@ -5199,9 +5197,29 @@ async function fetchArtifactArchive(
   return out;
 }
 
+async function fetchArtifactArchiveResponse(url: string, headers: Headers): Promise<Response> {
+  const attempts = [headers, makeLegacyGitHubDownloadHeaders(headers)];
+  let lastFetchFailure: unknown = null;
+  for (const attemptHeaders of attempts) {
+    try {
+      return await fetch(url, { headers: attemptHeaders });
+    } catch (error) {
+      if (!isLikelyFetchFailure(error)) throw error;
+      lastFetchFailure = error;
+    }
+  }
+  throw new GitHubArtifactFetchError(GITHUB_ARTIFACT_FETCH_HELP, { cause: lastFetchFailure });
+}
+
+function makeLegacyGitHubDownloadHeaders(headers: Headers): Headers {
+  const legacyHeaders = new Headers(headers);
+  legacyHeaders.set('X-GitHub-Api-Version', '2022-11-28');
+  return legacyHeaders;
+}
+
 class GitHubArtifactFetchError extends Error {
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
     this.name = 'GitHubArtifactFetchError';
   }
 }
