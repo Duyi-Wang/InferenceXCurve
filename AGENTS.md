@@ -80,7 +80,7 @@ Downloading run artifacts (the `archive_download_url` / `.../artifacts/{id}/zip`
 
 Suggest a long expiry stored in a password manager so the token is available when viewing from a different machine, since the "Remember token" option only covers the same browser.
 
-Artifact zip downloads redirect from `api.github.com` to signed GitHub blob storage. The importer first uses minimal archive request headers, then retries with the legacy `X-GitHub-Api-Version` header on browser fetch failures because some CORS-unblock extension setups handled the older request shape better. If import still fails only with the extension enabled, tell users to exclude `github.com`, `api.github.com`, and GitHub blob storage from the extension. Users can also download the artifact `.zip` from GitHub and load it with `Import File`.
+Artifact zip downloads redirect from `api.github.com` to signed GitHub blob storage. The importer first uses the legacy `X-GitHub-Api-Version` header because some CORS-unblock extension setups handled the older request shape better, then retries with minimal archive request headers on browser fetch failures. If import still fails only with the extension enabled, tell users to exclude `github.com`, `api.github.com`, and GitHub blob storage from the extension. Users can also download the artifact `.zip` from GitHub and load it with `Import File`.
 
 ## Agent Notes: Generating Importable CSV
 

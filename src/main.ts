@@ -279,7 +279,7 @@ const LOCAL_SAVE_DEBOUNCE_MS = 350;
 const AUTO_RENDER_DEBOUNCE_MS = 400;
 const MAX_WATERMARK_LENGTH = 64;
 const GITHUB_ARTIFACT_FETCH_HELP =
-  'Failed to fetch artifact zip. The importer retried both current and legacy GitHub artifact request headers. If this only fails with a CORS-unblock extension enabled, exclude github.com, api.github.com, and GitHub blob storage from that extension. You can also download the artifact zip from GitHub and use Import File.';
+  'Failed to fetch artifact zip. The importer retried both legacy and current GitHub artifact request headers. If this only fails with a CORS-unblock extension enabled, exclude github.com, api.github.com, and GitHub blob storage from that extension. You can also download the artifact zip from GitHub and use Import File.';
 const EXPORT_PADDING = 32;
 const EXPORT_TITLE_HEIGHT = 62;
 const EXPORT_LAYOUT_GAP = 16;
@@ -5198,7 +5198,7 @@ async function fetchArtifactArchive(
 }
 
 async function fetchArtifactArchiveResponse(url: string, headers: Headers): Promise<Response> {
-  const attempts = [headers, makeLegacyGitHubDownloadHeaders(headers)];
+  const attempts = [makeLegacyGitHubDownloadHeaders(headers), headers];
   let lastFetchFailure: unknown = null;
   for (const attemptHeaders of attempts) {
     try {

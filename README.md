@@ -116,13 +116,13 @@ text, and never included in exported data). A progress bar shows artifact
 download status while importing.
 
 Artifact zip downloads redirect from `api.github.com` to signed GitHub blob
-storage. The importer first uses minimal archive request headers, then retries
-with the legacy GitHub API version header if the browser reports `Failed to
-fetch`. Some CORS-unblocking browser extensions can still interfere by rewriting
-GitHub or blob-storage requests; if artifact import fails only while such an
-extension is enabled, exclude `github.com`, `api.github.com`, and GitHub blob
-storage from that extension. As a fallback, download the artifact `.zip` from
-GitHub and load it with `Import File`.
+storage. The importer first uses the legacy GitHub API version header shape,
+then retries with minimal archive request headers if the browser reports `Failed
+to fetch`. Some CORS-unblocking browser extensions can still interfere by
+rewriting GitHub or blob-storage requests; if artifact import fails only while
+such an extension is enabled, exclude `github.com`, `api.github.com`, and GitHub
+blob storage from that extension. As a fallback, download the artifact `.zip`
+from GitHub and load it with `Import File`.
 
 Imported artifacts are staged in a review panel before they are added. You can
 edit line fields, change `MTP` or `Marker`, select/deselect lines, discard the
