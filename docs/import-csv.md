@@ -3,10 +3,10 @@
 This document is the integration contract for projects that generate CSV/TSV
 files for InferenceX Curve's `Import File` workflow.
 
-The app accepts `.csv`, `.tsv`, `.json`, `.jsonl`, and `.ndjson`. For external
-CSV/TSV integrations, prefer the **editor CSV** format below. It is the same
-shape produced by `Download CSV`, round-trips through the app, and is more
-deterministic than raw benchmark CSV.
+The app accepts `.csv`, `.tsv`, `.json`, `.jsonl`, `.ndjson`, and artifact
+`.zip` files. For external CSV/TSV integrations, prefer the **editor CSV**
+format below. It is the same shape produced by `Download CSV`, round-trips
+through the app, and is more deterministic than raw benchmark CSV.
 
 ## Recommended Editor CSV
 

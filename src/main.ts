@@ -258,6 +258,12 @@ interface ImportedPointRow {
   point: InferenceCurveSeries['points'][number];
 }
 
+interface GitHubArtifactFailure {
+  artifactName: string;
+  message: string;
+  isDownloadFailure: boolean;
+}
+
 const ALL_VALUE = '__all__';
 const CUSTOM_VALUE = '__custom__';
 const CUSTOM_LINE_STYLE = '__custom_line_style__';
@@ -272,6 +278,8 @@ const TOKEN_STORAGE_KEY = 'inferencex-curve:github-token:v1';
 const LOCAL_SAVE_DEBOUNCE_MS = 350;
 const AUTO_RENDER_DEBOUNCE_MS = 400;
 const MAX_WATERMARK_LENGTH = 64;
+const GITHUB_ARTIFACT_FETCH_HELP =
+  'Failed to fetch artifact zip. GitHub artifact downloads redirect to signed blob storage; if this happens in the browser, confirm the token has Actions read access and make sure any CORS-unblock extension also covers GitHub artifact blob URLs. You can also download the artifact zip from GitHub and use Import File.';
 const EXPORT_PADDING = 32;
 const EXPORT_TITLE_HEIGHT = 62;
 const EXPORT_LAYOUT_GAP = 16;
@@ -971,7 +979,7 @@ app.innerHTML = `
                 ${renderIcon('plus')}
                 <span>Add Line</span>
               </button>
-              <button id="import-data-file" class="action-button" type="button" title="Import a CSV/JSON file (e.g. one exported with Download CSV)">
+              <button id="import-data-file" class="action-button" type="button" title="Import a CSV/JSON/ZIP file (e.g. one exported with Download CSV)">
                 ${renderIcon('upload')}
                 <span>Import File</span>
               </button>
@@ -983,7 +991,7 @@ app.innerHTML = `
             <input
               id="import-data-file-input"
               type="file"
-              accept=".csv,.tsv,.json,.jsonl,.ndjson"
+              accept=".csv,.tsv,.json,.jsonl,.ndjson,.zip"
               multiple
               hidden
             />
@@ -5055,9 +5063,12 @@ async function loadGitHubActionSeries(
   const headers = makeGitHubHeaders(token);
   const downloadHeaders = makeGitHubDownloadHeaders(token);
   const artifacts = await fetchGitHubArtifacts(run, headers);
-  const candidates = artifacts
+  const scoredCandidates = artifacts
     .filter((artifact) => !artifact.expired)
-    .sort((a, b) => scoreArtifactName(b.name) - scoreArtifactName(a.name))
+    .map((artifact) => ({ artifact, score: scoreArtifactName(artifact.name) }));
+  const likelyBenchmarkCandidates = scoredCandidates.filter((item) => item.score > 0);
+  const candidates = (likelyBenchmarkCandidates.length > 0 ? likelyBenchmarkCandidates : scoredCandidates)
+    .sort((a, b) => b.score - a.score)
     .slice(0, 20);
 
   if (candidates.length === 0) {
@@ -5065,9 +5076,9 @@ async function loadGitHubActionSeries(
   }
 
   const imported: InferenceCurveSeries[] = [];
-  const failures: string[] = [];
+  const failures: GitHubArtifactFailure[] = [];
   onProgress?.(0);
-  for (const [index, artifact] of candidates.entries()) {
+  for (const [index, { artifact }] of candidates.entries()) {
     try {
       setImportStatus(
         candidates.length > 1
@@ -5080,14 +5091,21 @@ async function loadGitHubActionSeries(
         ))
       );
     } catch (error) {
-      failures.push(`${artifact.name}: ${error instanceof Error ? error.message : 'failed'}`);
+      failures.push({
+        artifactName: artifact.name,
+        message: error instanceof Error ? error.message : 'failed',
+        isDownloadFailure: isGitHubArtifactFetchError(error)
+      });
     }
     onProgress?.((index + 1) / candidates.length);
   }
 
   const merged = mergeImportedSeries(imported);
   if (merged.length === 0) {
-    const suffix = failures.length ? ` Last error: ${failures.at(-1)}` : '';
+    if (failures.length === candidates.length && failures.every((failure) => failure.isDownloadFailure)) {
+      throw new Error(`Could not download GitHub Actions artifact zips. ${GITHUB_ARTIFACT_FETCH_HELP}`);
+    }
+    const suffix = formatGitHubArtifactFailureSuffix(failures);
     throw new Error(`No benchmark CSV/JSON data found in the action artifacts.${suffix}`);
   }
   return merged;
@@ -5113,9 +5131,11 @@ function makeGitHubHeaders(token: string): Headers {
 
 function makeGitHubDownloadHeaders(token: string): Headers {
   const headers = new Headers({
-    Accept: 'application/vnd.github+json',
-    'X-GitHub-Api-Version': '2022-11-28'
+    Accept: 'application/vnd.github+json'
   });
+  // Keep artifact archive requests to CORS-safe headers except Authorization.
+  // GitHub redirects archive_download_url to signed blob storage; extra custom
+  // headers can force the browser to preflight the redirected blob URL.
   if (token) headers.set('Authorization', `Bearer ${token}`);
   return headers;
 }
@@ -5144,7 +5164,13 @@ async function fetchArtifactArchive(
   headers: Headers,
   onProgress?: (fraction: number) => void
 ): Promise<Uint8Array> {
-  const response = await fetch(url, { headers });
+  let response: Response;
+  try {
+    response = await fetch(url, { headers });
+  } catch (error) {
+    if (isLikelyFetchFailure(error)) throw new GitHubArtifactFetchError(GITHUB_ARTIFACT_FETCH_HELP);
+    throw error;
+  }
   if (!response.ok) throw new Error(await formatFetchError(response));
   const total = Number(response.headers.get('Content-Length'));
   // Fall back to a buffered read when the stream or length is unavailable;
@@ -5173,6 +5199,29 @@ async function fetchArtifactArchive(
   return out;
 }
 
+class GitHubArtifactFetchError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'GitHubArtifactFetchError';
+  }
+}
+
+function isGitHubArtifactFetchError(error: unknown): error is GitHubArtifactFetchError {
+  return error instanceof GitHubArtifactFetchError;
+}
+
+function isLikelyFetchFailure(error: unknown): boolean {
+  return (
+    error instanceof TypeError &&
+    /failed to fetch|load failed|networkerror|network request failed|fetch/u.test(error.message.toLowerCase())
+  );
+}
+
+function formatGitHubArtifactFailureSuffix(failures: GitHubArtifactFailure[]): string {
+  const last = failures.at(-1);
+  return last ? ` Last error: ${last.artifactName}: ${last.message}` : '';
+}
+
 async function loadGitHubArtifactSeries(
   artifact: GitHubArtifact,
   headers: Headers,
@@ -5196,7 +5245,9 @@ function parseImportedArtifactFile(
   artifactName: string
 ): InferenceCurveSeries[] {
   const lower = filename.toLowerCase();
+  if (lower.endsWith('.zip')) return parseImportedZipFile(filename, bytes, artifactName);
   if (!/\.(json|jsonl|ndjson|csv|tsv)$/u.test(lower)) return [];
+  if (/\.(jsonl|ndjson)$/u.test(lower) && /(^|[/\\])samples?[-_]/u.test(lower)) return [];
 
   const text = strFromU8(bytes);
   const sourceName = `${artifactName}/${filename}`;
@@ -5207,6 +5258,20 @@ function parseImportedArtifactFile(
   } catch {
     return [];
   }
+}
+
+function parseImportedZipFile(
+  filename: string,
+  bytes: Uint8Array,
+  artifactName: string
+): InferenceCurveSeries[] {
+  const archive = unzipSync(bytes);
+  const imported: InferenceCurveSeries[] = [];
+  Object.entries(archive).forEach(([innerFilename, innerBytes]) => {
+    if (innerFilename === filename) return;
+    imported.push(...parseImportedArtifactFile(innerFilename, innerBytes, artifactName));
+  });
+  return mergeImportedSeries(imported);
 }
 
 function parseJsonImport(text: string, sourceName: string): InferenceCurveSeries[] {
@@ -5291,7 +5356,13 @@ function extractBenchmarkRecords(value: unknown): Record<string, unknown>[] {
       node.slice(0, 20).forEach((child) => walk(child, depth + 1));
       return;
     }
-    if (isRecord(node)) Object.values(node).forEach((child) => walk(child, depth + 1));
+    if (isRecord(node)) {
+      if (looksLikeBenchmarkRecord(node)) {
+        records.push(node);
+        return;
+      }
+      Object.values(node).forEach((child) => walk(child, depth + 1));
+    }
   };
   walk(value, 0);
   return records.filter(looksLikeBenchmarkRecord);
@@ -5529,8 +5600,7 @@ function mergeImportedSeries(series: InferenceCurveSeries[]): InferenceCurveSeri
         point.interactivity,
         point.throughput,
         point.precision,
-        point.concurrency,
-        point.label
+        point.concurrency
       ]);
       if (seen.has(key)) return false;
       seen.add(key);
@@ -5562,8 +5632,10 @@ function formatImportSummary(
 function scoreArtifactName(name: string): number {
   const value = name.toLowerCase();
   let score = 0;
-  if (/benchmark|inference|result|metric|data|summary|agg/u.test(value)) score += 10;
-  if (/log|trace|profile/u.test(value)) score -= 4;
+  if (/benchmark|bench|bmk|inference|result|metric|data|summary|agg/u.test(value)) score += 10;
+  if (/results?[-_]?bmk|bmk[-_]/u.test(value)) score += 8;
+  if (/eval/u.test(value)) score -= 2;
+  if (/run[-_]?stats|samples?|log|trace|profile/u.test(value)) score -= 8;
   return score;
 }
 

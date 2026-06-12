@@ -115,6 +115,12 @@ the `inferencex-curve:github-token:v1` key (this browser only, stored in plain
 text, and never included in exported data). A progress bar shows artifact
 download status while importing.
 
+Artifact zip downloads redirect from `api.github.com` to signed GitHub blob
+storage. If the browser reports `Failed to fetch` while downloading artifacts,
+check the token first. If you are using a CORS-unblocking browser extension, make
+sure it also covers GitHub artifact blob URLs, not only the InferenceX API. As a
+fallback, download the artifact `.zip` from GitHub and load it with `Import File`.
+
 Imported artifacts are staged in a review panel before they are added. You can
 edit line fields, change `MTP` or `Marker`, select/deselect lines, discard the
 preview, or append selected lines to the current data.
@@ -188,7 +194,7 @@ generic "Failed to fetch") with these workarounds:
 ## Import Data File
 
 `Import File` (next to `Import Action Data`) loads a local `.csv`, `.tsv`,
-`.json`, `.jsonl`, or `.ndjson` file through the same review panel. This round-
+`.json`, `.jsonl`, `.ndjson`, or artifact `.zip` file through the same review panel. This round-
 trips a file produced by `Download CSV`: line fields, point `Interactivity` /
 `Throughput/GPU`, markers, custom colors (from the `Color Mode` / `Resolved
 Color` columns), concurrency, parallelism, and notes are restored. Derived
