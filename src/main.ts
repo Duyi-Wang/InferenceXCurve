@@ -5140,12 +5140,33 @@ async function fetchGitHubJson<T>(url: string, headers: Headers): Promise<T> {
   return (await response.json()) as T;
 }
 
+// GitHub's API and its artifact blob storage already send a valid
+// Access-Control-Allow-Origin header, so this download works with no CORS
+// extension. A CORS-unblock extension breaks it by appending a second
+// Access-Control-Allow-Origin, which the browser rejects ("multiple values")
+// and surfaces as an opaque TypeError. We can detect the TypeError but cannot
+// undo the duplicated response header, so point the user at the real cause.
+const GITHUB_ARTIFACT_FETCH_HELP =
+  'Could not download the artifact zip. GitHub already sends valid CORS headers here, ' +
+  'so this usually means a CORS-unblock browser extension is duplicating the ' +
+  'Access-Control-Allow-Origin header and the browser rejected the response. Scope that ' +
+  'extension to only inferencex.semianalysis.com (so it leaves GitHub alone), or disable it ' +
+  'for this import. You can also download the zip from GitHub and use Import File.';
+
 async function fetchArtifactArchive(
   url: string,
   headers: Headers,
   onProgress?: (fraction: number) => void
 ): Promise<Uint8Array> {
-  const response = await fetch(url, { headers });
+  let response: Response;
+  try {
+    response = await fetch(url, { headers });
+  } catch (error) {
+    // A blocked/duplicated-CORS response and a real network failure both surface
+    // as a TypeError here, with no way to tell them apart from JS.
+    if (error instanceof TypeError) throw new Error(GITHUB_ARTIFACT_FETCH_HELP, { cause: error });
+    throw error;
+  }
   if (!response.ok) throw new Error(await formatFetchError(response));
   const total = Number(response.headers.get('Content-Length'));
   // Fall back to a buffered read when the stream or length is unavailable;
