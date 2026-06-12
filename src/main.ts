@@ -258,12 +258,6 @@ interface ImportedPointRow {
   point: InferenceCurveSeries['points'][number];
 }
 
-interface GitHubArtifactFailure {
-  artifactName: string;
-  message: string;
-  isDownloadFailure: boolean;
-}
-
 const ALL_VALUE = '__all__';
 const CUSTOM_VALUE = '__custom__';
 const CUSTOM_LINE_STYLE = '__custom_line_style__';
@@ -278,8 +272,6 @@ const TOKEN_STORAGE_KEY = 'inferencex-curve:github-token:v1';
 const LOCAL_SAVE_DEBOUNCE_MS = 350;
 const AUTO_RENDER_DEBOUNCE_MS = 400;
 const MAX_WATERMARK_LENGTH = 64;
-const GITHUB_ARTIFACT_FETCH_HELP =
-  'Failed to fetch artifact zip. The importer retried both legacy and current GitHub artifact request headers. If this only fails with a CORS-unblock extension enabled, exclude github.com, api.github.com, and GitHub blob storage from that extension. You can also download the artifact zip from GitHub and use Import File.';
 const EXPORT_PADDING = 32;
 const EXPORT_TITLE_HEIGHT = 62;
 const EXPORT_LAYOUT_GAP = 16;
@@ -979,7 +971,7 @@ app.innerHTML = `
                 ${renderIcon('plus')}
                 <span>Add Line</span>
               </button>
-              <button id="import-data-file" class="action-button" type="button" title="Import a CSV/JSON/ZIP file (e.g. one exported with Download CSV)">
+              <button id="import-data-file" class="action-button" type="button" title="Import a CSV/JSON file (e.g. one exported with Download CSV)">
                 ${renderIcon('upload')}
                 <span>Import File</span>
               </button>
@@ -991,7 +983,7 @@ app.innerHTML = `
             <input
               id="import-data-file-input"
               type="file"
-              accept=".csv,.tsv,.json,.jsonl,.ndjson,.zip"
+              accept=".csv,.tsv,.json,.jsonl,.ndjson"
               multiple
               hidden
             />
@@ -1041,10 +1033,6 @@ app.innerHTML = `
                 </span>
                 <span class="help-tip-note">
                   &ldquo;Remember&rdquo; saves it in plain text, in this browser only.
-                </span>
-                <span class="help-tip-note">
-                  If a CORS-unblock extension affects GitHub import, exclude GitHub
-                  and its artifact blob storage.
                 </span>
               </span>
             </span>
@@ -5067,22 +5055,19 @@ async function loadGitHubActionSeries(
   const headers = makeGitHubHeaders(token);
   const downloadHeaders = makeGitHubDownloadHeaders(token);
   const artifacts = await fetchGitHubArtifacts(run, headers);
-  const scoredCandidates = artifacts
+  const candidates = artifacts
     .filter((artifact) => !artifact.expired)
-    .filter((artifact) => isBenchmarkArtifactCandidate(artifact.name))
-    .map((artifact) => ({ artifact, score: scoreArtifactName(artifact.name) }));
-  const candidates = scoredCandidates
-    .sort((a, b) => b.score - a.score)
+    .sort((a, b) => scoreArtifactName(b.name) - scoreArtifactName(a.name))
     .slice(0, 20);
 
   if (candidates.length === 0) {
-    throw new Error('No benchmark artifacts found for that GitHub Actions run.');
+    throw new Error('No downloadable artifacts found for that GitHub Actions run.');
   }
 
   const imported: InferenceCurveSeries[] = [];
-  const failures: GitHubArtifactFailure[] = [];
+  const failures: string[] = [];
   onProgress?.(0);
-  for (const [index, { artifact }] of candidates.entries()) {
+  for (const [index, artifact] of candidates.entries()) {
     try {
       setImportStatus(
         candidates.length > 1
@@ -5095,22 +5080,14 @@ async function loadGitHubActionSeries(
         ))
       );
     } catch (error) {
-      failures.push({
-        artifactName: artifact.name,
-        message: error instanceof Error ? error.message : 'failed',
-        isDownloadFailure: isGitHubArtifactFetchError(error)
-      });
-      if (isGitHubArtifactFetchError(error) && imported.length === 0) break;
+      failures.push(`${artifact.name}: ${error instanceof Error ? error.message : 'failed'}`);
     }
     onProgress?.((index + 1) / candidates.length);
   }
 
   const merged = mergeImportedSeries(imported);
   if (merged.length === 0) {
-    if (failures.length === candidates.length && failures.every((failure) => failure.isDownloadFailure)) {
-      throw new Error(`Could not download GitHub Actions artifact zips. ${GITHUB_ARTIFACT_FETCH_HELP}`);
-    }
-    const suffix = formatGitHubArtifactFailureSuffix(failures);
+    const suffix = failures.length ? ` Last error: ${failures.at(-1)}` : '';
     throw new Error(`No benchmark CSV/JSON data found in the action artifacts.${suffix}`);
   }
   return merged;
@@ -5136,11 +5113,9 @@ function makeGitHubHeaders(token: string): Headers {
 
 function makeGitHubDownloadHeaders(token: string): Headers {
   const headers = new Headers({
-    Accept: 'application/vnd.github+json'
+    Accept: 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28'
   });
-  // Keep artifact archive requests to CORS-safe headers except Authorization.
-  // GitHub redirects archive_download_url to signed blob storage; extra custom
-  // headers can force the browser to preflight the redirected blob URL.
   if (token) headers.set('Authorization', `Bearer ${token}`);
   return headers;
 }
@@ -5169,7 +5144,7 @@ async function fetchArtifactArchive(
   headers: Headers,
   onProgress?: (fraction: number) => void
 ): Promise<Uint8Array> {
-  const response = await fetchArtifactArchiveResponse(url, headers);
+  const response = await fetch(url, { headers });
   if (!response.ok) throw new Error(await formatFetchError(response));
   const total = Number(response.headers.get('Content-Length'));
   // Fall back to a buffered read when the stream or length is unavailable;
@@ -5198,49 +5173,6 @@ async function fetchArtifactArchive(
   return out;
 }
 
-async function fetchArtifactArchiveResponse(url: string, headers: Headers): Promise<Response> {
-  const attempts = [makeLegacyGitHubDownloadHeaders(headers), headers];
-  let lastFetchFailure: unknown = null;
-  for (const attemptHeaders of attempts) {
-    try {
-      return await fetch(url, { headers: attemptHeaders });
-    } catch (error) {
-      if (!isLikelyFetchFailure(error)) throw error;
-      lastFetchFailure = error;
-    }
-  }
-  throw new GitHubArtifactFetchError(GITHUB_ARTIFACT_FETCH_HELP, { cause: lastFetchFailure });
-}
-
-function makeLegacyGitHubDownloadHeaders(headers: Headers): Headers {
-  const legacyHeaders = new Headers(headers);
-  legacyHeaders.set('X-GitHub-Api-Version', '2022-11-28');
-  return legacyHeaders;
-}
-
-class GitHubArtifactFetchError extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options);
-    this.name = 'GitHubArtifactFetchError';
-  }
-}
-
-function isGitHubArtifactFetchError(error: unknown): error is GitHubArtifactFetchError {
-  return error instanceof GitHubArtifactFetchError;
-}
-
-function isLikelyFetchFailure(error: unknown): boolean {
-  return (
-    error instanceof TypeError &&
-    /failed to fetch|load failed|networkerror|network request failed|fetch/u.test(error.message.toLowerCase())
-  );
-}
-
-function formatGitHubArtifactFailureSuffix(failures: GitHubArtifactFailure[]): string {
-  const last = failures.at(-1);
-  return last ? ` Last error: ${last.artifactName}: ${last.message}` : '';
-}
-
 async function loadGitHubArtifactSeries(
   artifact: GitHubArtifact,
   headers: Headers,
@@ -5264,9 +5196,7 @@ function parseImportedArtifactFile(
   artifactName: string
 ): InferenceCurveSeries[] {
   const lower = filename.toLowerCase();
-  if (lower.endsWith('.zip')) return parseImportedZipFile(filename, bytes, artifactName);
   if (!/\.(json|jsonl|ndjson|csv|tsv)$/u.test(lower)) return [];
-  if (/\.(jsonl|ndjson)$/u.test(lower) && /(^|[/\\])samples?[-_]/u.test(lower)) return [];
 
   const text = strFromU8(bytes);
   const sourceName = `${artifactName}/${filename}`;
@@ -5277,20 +5207,6 @@ function parseImportedArtifactFile(
   } catch {
     return [];
   }
-}
-
-function parseImportedZipFile(
-  filename: string,
-  bytes: Uint8Array,
-  artifactName: string
-): InferenceCurveSeries[] {
-  const archive = unzipSync(bytes);
-  const imported: InferenceCurveSeries[] = [];
-  Object.entries(archive).forEach(([innerFilename, innerBytes]) => {
-    if (innerFilename === filename) return;
-    imported.push(...parseImportedArtifactFile(innerFilename, innerBytes, artifactName));
-  });
-  return mergeImportedSeries(imported);
 }
 
 function parseJsonImport(text: string, sourceName: string): InferenceCurveSeries[] {
@@ -5375,13 +5291,7 @@ function extractBenchmarkRecords(value: unknown): Record<string, unknown>[] {
       node.slice(0, 20).forEach((child) => walk(child, depth + 1));
       return;
     }
-    if (isRecord(node)) {
-      if (looksLikeBenchmarkRecord(node)) {
-        records.push(node);
-        return;
-      }
-      Object.values(node).forEach((child) => walk(child, depth + 1));
-    }
+    if (isRecord(node)) Object.values(node).forEach((child) => walk(child, depth + 1));
   };
   walk(value, 0);
   return records.filter(looksLikeBenchmarkRecord);
@@ -5619,7 +5529,8 @@ function mergeImportedSeries(series: InferenceCurveSeries[]): InferenceCurveSeri
         point.interactivity,
         point.throughput,
         point.precision,
-        point.concurrency
+        point.concurrency,
+        point.label
       ]);
       if (seen.has(key)) return false;
       seen.add(key);
@@ -5651,17 +5562,9 @@ function formatImportSummary(
 function scoreArtifactName(name: string): number {
   const value = name.toLowerCase();
   let score = 0;
-  if (/^results?[-_]?bmk$/u.test(value)) score += 30;
-  if (/(^|[-_])bmk($|[-_])/u.test(value)) score += 24;
-  if (/benchmark|bench/u.test(value)) score += 16;
-  if (/metric|summary/u.test(value)) score += 8;
+  if (/benchmark|inference|result|metric|data|summary|agg/u.test(value)) score += 10;
+  if (/log|trace|profile/u.test(value)) score -= 4;
   return score;
-}
-
-function isBenchmarkArtifactCandidate(name: string): boolean {
-  const value = name.toLowerCase();
-  if (/eval|run[-_]?stats|samples?|log|trace|profile/u.test(value)) return false;
-  return /^results?[-_]?bmk$/u.test(value) || /(^|[-_])bmk($|[-_])/u.test(value) || /benchmark|bench/u.test(value);
 }
 
 function parseDelimitedText(text: string, delimiter: ',' | '\t'): string[][] {
