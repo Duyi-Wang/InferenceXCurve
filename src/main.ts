@@ -5057,11 +5057,12 @@ async function loadGitHubActionSeries(
   const artifacts = await fetchGitHubArtifacts(run, headers);
   const candidates = artifacts
     .filter((artifact) => !artifact.expired)
+    .filter((artifact) => isBenchmarkArtifactCandidate(artifact.name))
     .sort((a, b) => scoreArtifactName(b.name) - scoreArtifactName(a.name))
     .slice(0, 20);
 
   if (candidates.length === 0) {
-    throw new Error('No downloadable artifacts found for that GitHub Actions run.');
+    throw new Error('No benchmark artifacts found for that GitHub Actions run.');
   }
 
   const imported: InferenceCurveSeries[] = [];
@@ -5562,9 +5563,17 @@ function formatImportSummary(
 function scoreArtifactName(name: string): number {
   const value = name.toLowerCase();
   let score = 0;
-  if (/benchmark|inference|result|metric|data|summary|agg/u.test(value)) score += 10;
-  if (/log|trace|profile/u.test(value)) score -= 4;
+  if (/^results?[-_]?bmk$/u.test(value)) score += 30;
+  if (/(^|[-_])bmk($|[-_])/u.test(value)) score += 24;
+  if (/benchmark|bench/u.test(value)) score += 16;
+  if (/metric|summary/u.test(value)) score += 8;
   return score;
+}
+
+function isBenchmarkArtifactCandidate(name: string): boolean {
+  const value = name.toLowerCase();
+  if (/eval|run[-_]?stats|samples?|log|trace|profile/u.test(value)) return false;
+  return /^results?[-_]?bmk$/u.test(value) || /(^|[-_])bmk($|[-_])/u.test(value) || /benchmark|bench/u.test(value);
 }
 
 function parseDelimitedText(text: string, delimiter: ',' | '\t'): string[][] {
