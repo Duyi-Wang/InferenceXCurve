@@ -296,6 +296,7 @@ const DB_MODEL_TO_DISPLAY: Record<string, string> = {
   'minimaxm2.7': 'MiniMax-M2.5',
   glm5: 'GLM-5',
   'glm5.1': 'GLM-5',
+  minimaxm3: 'MiniMax-M3',
   dsv4: 'DeepSeek-V4-Pro'
 };
 
@@ -330,6 +331,7 @@ const MODEL_PATH_TO_DB_KEY: Record<string, string> = {
   'qwen/qwen3.5-397b-a17b-fp8': 'qwen3.5',
   'moonshotai/kimi-k2.5': 'kimik2.5',
   'minimaxai/minimax-m2.5': 'minimaxm2.5',
+  'minimaxai/minimax-m3': 'minimaxm3',
   'zai-org/glm-5-fp8': 'glm5',
   'amd/glm-5.1-mxfp4': 'glm5.1',
   'deepseek-ai/deepseek-v4-pro': 'dsv4'

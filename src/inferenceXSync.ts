@@ -88,7 +88,13 @@ const MODEL_DISPLAY_NAMES: Record<string, string> = {
   'minimaxm2.7': 'MiniMax-M2.5',
   glm5: 'GLM-5',
   'glm5.1': 'GLM-5',
+  minimaxm3: 'MiniMax-M3',
   dsv4: 'DeepSeek-V4-Pro'
+};
+
+const MODEL_API_PARAMS: Record<string, string> = {
+  // Some benchmark endpoints reject the internal availability key.
+  minimaxm3: 'MiniMax-M3'
 };
 
 const DEFAULT_SYNC_MATRIX = {
@@ -559,7 +565,7 @@ function resolveModelKey(model: string): string {
 }
 
 function modelKeyToApiParam(modelKey: string): string {
-  return MODEL_DISPLAY_NAMES[modelKey] ?? modelKey;
+  return MODEL_API_PARAMS[modelKey] ?? MODEL_DISPLAY_NAMES[modelKey] ?? modelKey;
 }
 
 function hardwareMatches(recordHardware: string, configHardware: string): boolean {
