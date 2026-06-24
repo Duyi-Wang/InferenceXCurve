@@ -35,6 +35,7 @@ const app = document.querySelector<HTMLDivElement>('#app');
 if (!app) throw new Error('Missing #app root');
 
 type Theme = 'dark' | 'light';
+type CsvExportMode = 'all' | 'visible';
 type SeriesField =
   | 'id'
   | 'name'
@@ -937,6 +938,9 @@ app.innerHTML = `
         <button id="download-csv" class="tool-button" type="button" title="Download CSV" aria-label="Download CSV">
           <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" d="M4 4h16v16H4zM8 4v16m8-16v16M4 10h16M4 16h16"/></svg>
         </button>
+        <button id="download-visible-csv" class="tool-button" type="button" title="Download Visible CSV" aria-label="Download Visible CSV">
+          ${renderIcon('filter')}
+        </button>
         <button id="reset-zoom" class="tool-button" type="button" title="Reset zoom" aria-label="Reset zoom">
           <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5"/></svg>
         </button>
@@ -1219,7 +1223,8 @@ watermarkMenuToggleEl.addEventListener('click', toggleWatermarkPanel);
 chartWatermarkEl.addEventListener('input', handleWatermarkInput);
 document.querySelector('#reset-watermark')?.addEventListener('click', resetWatermark);
 document.querySelector('#download-png')?.addEventListener('click', downloadPng);
-document.querySelector('#download-csv')?.addEventListener('click', downloadCsv);
+document.querySelector('#download-csv')?.addEventListener('click', () => downloadCsv('all'));
+document.querySelector('#download-visible-csv')?.addEventListener('click', () => downloadCsv('visible'));
 document.querySelector('#reset-zoom')?.addEventListener('click', resetInferenceCurveZoom);
 window.addEventListener('resize', renderAll);
 window.addEventListener('keydown', handleGlobalKeydown);
@@ -2674,6 +2679,7 @@ function renderIcon(name: string): string {
     trash: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m6 6 1 15h10l1-15"/><path d="M10 11v6"/><path d="M14 11v6"/>',
     merge: '<path d="M8 7h3a5 5 0 0 1 5 5v5"/><path d="m13 14 3 3 3-3"/><path d="M8 17h3a5 5 0 0 0 5-5V7"/><path d="m13 10 3-3 3 3"/><path d="M4 7h4"/><path d="M4 17h4"/>',
     'download-cloud': '<path d="M12 13v8"/><path d="m8 17 4 4 4-4"/><path d="M20 16.6A5 5 0 0 0 18 7h-1.3A8 8 0 1 0 4 15.3"/>',
+    filter: '<path d="M3 5h18"/><path d="M6 12h12"/><path d="M10 19h4"/>',
     redraw: '<path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/>',
     'arrow-up': '<path d="M12 19V5"/><path d="m5 12 7-7 7 7"/>',
     check: '<path d="M20 6 9 17l-5-5"/>',
@@ -4320,6 +4326,9 @@ function buildPendingMergeGroups(): PendingMergeGroup[] {
 }
 
 function renderMergePreview(): void {
+  const previousListScrollTop =
+    mergePreviewEl.querySelector<HTMLElement>('.merge-preview-list')?.scrollTop ?? 0;
+
   if (pendingMergeGroups.length === 0) {
     mergePreviewEl.innerHTML = '';
     return;
@@ -4359,6 +4368,9 @@ function renderMergePreview(): void {
         .join('')}
     </div>
   `;
+
+  const nextList = mergePreviewEl.querySelector<HTMLElement>('.merge-preview-list');
+  if (nextList) nextList.scrollTop = previousListScrollTop;
 }
 
 function renderMergePreviewGroup(
@@ -4597,6 +4609,9 @@ function createImportBatchSettings(runId = ''): ImportBatchSettings {
 }
 
 function renderImportPreview(): void {
+  const previousListScrollTop =
+    githubImportPreviewEl.querySelector<HTMLElement>('.import-preview-list')?.scrollTop ?? 0;
+
   if (pendingImportDrafts.length === 0) {
     githubImportPreviewEl.innerHTML = '';
     return;
@@ -4637,6 +4652,9 @@ function renderImportPreview(): void {
       ${pendingImportDrafts.map((entry, index) => renderImportPreviewItem(entry, index)).join('')}
     </div>
   `;
+
+  const nextList = githubImportPreviewEl.querySelector<HTMLElement>('.import-preview-list');
+  if (nextList) nextList.scrollTop = previousListScrollTop;
 }
 
 function renderImportBatchControls(): string {
@@ -5910,12 +5928,25 @@ function formatRateLimitReset(value: string | null): string {
   return new Date(timestamp * 1000).toLocaleString();
 }
 
-function downloadCsv(): void {
+function downloadCsv(mode: CsvExportMode): void {
   commitSeriesDom();
   scheduleLocalSave();
-  const rows = buildChartCsvRows();
+  const rows = buildChartCsvRows(mode);
+  if (mode === 'visible' && rows.length <= 1) {
+    setStatus('No visible chart data to export.', true);
+    return;
+  }
   const csv = rows.map((row) => row.map(csvCell).join(',')).join('\n');
-  downloadBlob(makeExportFilename('csv'), `\uFEFF${csv}`, 'text/csv;charset=utf-8');
+  downloadBlob(
+    makeExportFilename('csv', mode === 'visible' ? 'visible' : ''),
+    `\uFEFF${csv}`,
+    'text/csv;charset=utf-8'
+  );
+  setStatus(
+    mode === 'visible'
+      ? `Exported ${rows.length - 1} visible point rows`
+      : `Exported ${rows.length - 1} point rows`
+  );
 }
 
 function downloadPng(): void {
@@ -5985,7 +6016,7 @@ function downloadPng(): void {
   image.src = url;
 }
 
-function buildChartCsvRows(): string[][] {
+function buildChartCsvRows(mode: CsvExportMode): string[][] {
   const sourceSeries = getSeriesForPersistence();
   const lineById = new Map(sourceSeries.map((line) => [line.id, line]));
   const chartSeries = filterSeriesByMtp(
@@ -6052,6 +6083,8 @@ function buildChartCsvRows(): string[][] {
         activeLine &&
         state.selectedPrecisions.has(point.precision) &&
         (state.showNonOptimalPoints || point.roof);
+
+      if (mode === 'visible' && !includedInChart) return;
 
       rows.push([
         line.id,
@@ -6316,14 +6349,15 @@ function buildExportLegendSvg(layout: ExportLegendLayout, x: number, y: number):
   `;
 }
 
-function makeExportFilename(extension: 'csv' | 'png'): string {
+function makeExportFilename(extension: 'csv' | 'png', suffix = ''): string {
   const label = getChartSubtitle()
     .toLowerCase()
     .replace(/[^a-z0-9]+/gu, '-')
     .replace(/^-+|-+$/gu, '')
     .slice(0, 96);
   const date = new Date().toISOString().slice(0, 10);
-  return `${label || 'inferencex-curve'}-${date}.${extension}`;
+  const scopedLabel = [label || 'inferencex-curve', suffix].filter(Boolean).join('-');
+  return `${scopedLabel}-${date}.${extension}`;
 }
 
 function getColorPicker(seriesIndex: number): HTMLInputElement | null {
