@@ -977,7 +977,7 @@ app.innerHTML = `
                 ${renderIcon('plus')}
                 <span>Add Line</span>
               </button>
-              <button id="import-data-file" class="action-button" type="button" title="Import a CSV/JSON file (e.g. one exported with Download CSV)">
+              <button id="import-data-file" class="action-button" type="button" title="Import a CSV/JSON file or artifact zip (e.g. one exported with Download CSV)">
                 ${renderIcon('upload')}
                 <span>Import File</span>
               </button>
@@ -989,7 +989,7 @@ app.innerHTML = `
             <input
               id="import-data-file-input"
               type="file"
-              accept=".csv,.tsv,.json,.jsonl,.ndjson"
+              accept=".csv,.tsv,.json,.jsonl,.ndjson,.zip"
               multiple
               hidden
             />
@@ -5043,7 +5043,7 @@ async function importDataFiles(files: FileList | null): Promise<void> {
     for (const file of Array.from(files)) {
       try {
         const bytes = new Uint8Array(await file.arrayBuffer());
-        imported.push(...parseImportedArtifactFile(file.name, bytes, file.name));
+        imported.push(...parseImportedDataFile(file.name, bytes));
       } catch (error) {
         failures.push(`${file.name}: ${error instanceof Error ? error.message : 'failed'}`);
       }
@@ -5221,11 +5221,20 @@ async function loadGitHubArtifactSeries(
   onProgress?: (fraction: number) => void
 ): Promise<InferenceCurveSeries[]> {
   const bytes = await fetchArtifactArchive(artifact.archive_download_url, headers, onProgress);
+  return parseImportedZipFile(artifact.name, bytes);
+}
+
+function parseImportedDataFile(filename: string, bytes: Uint8Array): InferenceCurveSeries[] {
+  if (filename.toLowerCase().endsWith('.zip')) return parseImportedZipFile(filename, bytes);
+  return parseImportedArtifactFile(filename, bytes, filename);
+}
+
+function parseImportedZipFile(archiveName: string, bytes: Uint8Array): InferenceCurveSeries[] {
   const archive = unzipSync(bytes);
   const imported: InferenceCurveSeries[] = [];
 
   Object.entries(archive).forEach(([filename, bytes]) => {
-    const series = parseImportedArtifactFile(filename, bytes, artifact.name);
+    const series = parseImportedArtifactFile(filename, bytes, archiveName);
     imported.push(...series);
   });
 
@@ -5241,7 +5250,7 @@ function parseImportedArtifactFile(
   if (!/\.(json|jsonl|ndjson|csv|tsv)$/u.test(lower)) return [];
 
   const text = strFromU8(bytes);
-  const sourceName = `${artifactName}/${filename}`;
+  const sourceName = artifactName === filename ? filename : `${artifactName}/${filename}`;
   try {
     if (lower.endsWith('.json')) return parseJsonImport(text, sourceName);
     if (lower.endsWith('.jsonl') || lower.endsWith('.ndjson')) return parseJsonLinesImport(text, sourceName);
