@@ -234,6 +234,28 @@ export function getAvailablePrecisions(series: InferenceCurveSeries[]): string[]
   return Array.from(values);
 }
 
+export function getInferenceCurveColorSourceSeries(
+  series: InferenceCurveSeries[],
+  activeSeriesIds?: Set<string>,
+  selectedPrecisions?: string[]
+): InferenceCurveSeries[] {
+  const activeIds = activeSeriesIds ?? new Set(series.map((line) => line.id));
+  const precisionSet = new Set(
+    selectedPrecisions?.length ? selectedPrecisions : getAvailablePrecisions(series)
+  );
+
+  return series.filter(
+    (line) =>
+      activeIds.has(line.id) &&
+      line.points.some(
+        (point) =>
+          precisionSet.has(String(point.precision ?? 'default')) &&
+          Number.isFinite(point.interactivity) &&
+          Number.isFinite(point.throughput)
+      )
+  );
+}
+
 export function paretoFrontUpperLeft<T extends { x: number; y: number }>(input: T[]): T[] {
   const sorted = [...input].sort((a, b) => {
     if (a.x === b.x) return b.y - a.y;
@@ -260,9 +282,10 @@ export function paretoFrontUpperLeft<T extends { x: number; y: number }>(input: 
 export function prepareInferenceCurveSeries(
   series: InferenceCurveSeries[],
   highContrast = false,
-  theme: 'dark' | 'light' = 'dark'
+  theme: 'dark' | 'light' = 'dark',
+  colorSeries: InferenceCurveSeries[] = series
 ): PreparedSeries[] {
-  const colors = resolveInferenceCurveColors(series, highContrast, theme);
+  const colors = resolveInferenceCurveColors(series, highContrast, theme, colorSeries);
   return series.map((line, seriesIndex) => {
     const palette = highContrast ? HIGH_CONTRAST : TABLEAU_10;
     const color = colors.get(line.id) ?? palette[seriesIndex % palette.length]!;
@@ -305,22 +328,48 @@ export function prepareInferenceCurveSeries(
 export function resolveInferenceCurveColors(
   series: InferenceCurveSeries[],
   highContrast = false,
-  theme: 'dark' | 'light' = 'dark'
+  theme: 'dark' | 'light' = 'dark',
+  colorSeries: InferenceCurveSeries[] = series
 ): Map<string, string> {
+  const colorIndexById = new Map<string, number>();
+  colorSeries.forEach((line, index) => {
+    if (!colorIndexById.has(line.id)) colorIndexById.set(line.id, index);
+  });
+
   if (highContrast) {
-    return new Map(series.map((line, index) => [line.id, HIGH_CONTRAST[index % HIGH_CONTRAST.length]!]));
+    return new Map(
+      series.map((line, index) => {
+        const colorIndex = colorIndexById.get(line.id) ?? index;
+        return [line.id, HIGH_CONTRAST[colorIndex % HIGH_CONTRAST.length]!];
+      })
+    );
   }
 
   const dynamicColors = generateVendorColors(
-    series.filter((line) => !line.color?.trim()),
+    colorSeries.filter((line) => !line.color?.trim()),
     theme
   );
+  const fallbackDynamicColors =
+    colorSeries === series
+      ? dynamicColors
+      : generateVendorColors(
+          series.filter((line) => !line.color?.trim()),
+          theme
+        );
 
   return new Map(
     series.map((line, index) => {
       const customColor = line.color?.trim();
-      const fallback = TABLEAU_10[index % TABLEAU_10.length]!;
-      return [line.id, customColor || dynamicColors.get(getHardwareKey(line)) || fallback];
+      const hardwareKey = getHardwareKey(line);
+      const colorIndex = colorIndexById.get(line.id) ?? index;
+      const fallback = TABLEAU_10[colorIndex % TABLEAU_10.length]!;
+      return [
+        line.id,
+        customColor ||
+          dynamicColors.get(hardwareKey) ||
+          fallbackDynamicColors.get(hardwareKey) ||
+          fallback
+      ];
     })
   );
 }
@@ -360,7 +409,7 @@ function generateVendorColors(
 
 function pickLightness(index: number, count: number, theme: 'dark' | 'light'): number {
   const { min, max } = LIGHTNESS[theme];
-  if (count <= 1) return (min + max) / 2;
+  if (count <= 1) return min;
   return max - (index / (count - 1)) * (max - min);
 }
 
@@ -462,7 +511,17 @@ export function renderInferenceCurveChart(
   const activeSeriesIds =
     userOptions.activeSeriesIds ?? new Set(rawSeries.map((series) => series.id));
 
-  const prepared = prepareInferenceCurveSeries(rawSeries, options.highContrast, options.theme);
+  const colorSeries = getInferenceCurveColorSourceSeries(
+    rawSeries,
+    activeSeriesIds,
+    selectedPrecisions
+  );
+  const prepared = prepareInferenceCurveSeries(
+    rawSeries,
+    options.highContrast,
+    options.theme,
+    colorSeries
+  );
   const visibleSeries = sortPreparedSeriesForRender(
     prepared.map((series) => ({
       ...series,

@@ -22,6 +22,7 @@ import {
 import {
   DEFAULT_CHART_WATERMARK,
   getAvailablePrecisions,
+  getInferenceCurveColorSourceSeries,
   INFERENCE_CURVE_MARGIN,
   prepareInferenceCurveSeries,
   renderInferenceCurveChart,
@@ -3165,7 +3166,13 @@ function commitSeriesDom(): void {
 function renderLegend(): void {
   const previousListScrollTop = legendEl.querySelector<HTMLElement>('.legend-list')?.scrollTop ?? 0;
   const filteredSeries = getFilteredSeriesForChart();
-  const prepared = prepareInferenceCurveSeries(filteredSeries, state.highContrast, state.theme);
+  const colorSeries = getChartColorSourceSeries(filteredSeries);
+  const prepared = prepareInferenceCurveSeries(
+    filteredSeries,
+    state.highContrast,
+    state.theme,
+    colorSeries
+  );
   const query = state.search.trim().toLowerCase();
   const visibleItems = prepared.filter(
     (series) =>
@@ -4096,6 +4103,14 @@ function getModelSequenceMtpFilteredSeries(): InferenceCurveSeries[] {
 function getFilteredSeriesForChart(): InferenceCurveSeries[] {
   return getModelSequenceMtpFilteredSeries().filter((series) =>
     state.selectedPrecisions.has(getSeriesPrecision(series))
+  );
+}
+
+function getChartColorSourceSeries(series: InferenceCurveSeries[]): InferenceCurveSeries[] {
+  return getInferenceCurveColorSourceSeries(
+    series,
+    state.activeSeriesIds,
+    Array.from(state.selectedPrecisions)
   );
 }
 
@@ -6033,7 +6048,12 @@ function buildChartCsvRows(mode: CsvExportMode): string[][] {
     state.mtpFilter
   ).filter((series) => state.selectedPrecisions.has(getSeriesPrecision(series)));
   const chartSeriesIds = new Set(chartSeries.map((series) => series.id));
-  const prepared = prepareInferenceCurveSeries(sourceSeries, state.highContrast, state.theme);
+  const prepared = prepareInferenceCurveSeries(
+    sourceSeries,
+    state.highContrast,
+    state.theme,
+    getChartColorSourceSeries(chartSeries)
+  );
   const rows: string[][] = [
     [
       'Line ID',
@@ -6276,7 +6296,12 @@ function buildExportTitleSvg(x: number, y: number, width: number, palette: Expor
 
 function getExportLegendItems(): ExportLegendItem[] {
   const filteredSeries = getFilteredSeriesForChart();
-  const prepared = prepareInferenceCurveSeries(filteredSeries, state.highContrast, state.theme);
+  const prepared = prepareInferenceCurveSeries(
+    filteredSeries,
+    state.highContrast,
+    state.theme,
+    getChartColorSourceSeries(filteredSeries)
+  );
   const query = state.search.trim().toLowerCase();
 
   return prepared
