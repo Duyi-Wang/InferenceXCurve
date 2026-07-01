@@ -359,6 +359,17 @@ const pointColumns: TableColumn[] = [
 
 const hiddenPointKeys = ['strategy', 'tp', 'dp_attention'] as const;
 const knownPointKeys = new Set([...pointColumns.map((column) => column.key), ...hiddenPointKeys]);
+const pointConfigSplitKeys = [
+  'num_prefill_gpu',
+  'num_decode_gpu',
+  'prefill_tp',
+  'prefill_ep',
+  'prefill_dp_attention',
+  'decode_tp',
+  'decode_ep',
+  'decode_dp_attention',
+  ...hiddenPointKeys
+] as const;
 // Point columns whose data-panel display is normalized to two decimal places.
 const DECIMAL_DISPLAY_KEYS = new Set(['interactivity', 'throughput']);
 
@@ -978,9 +989,26 @@ app.innerHTML = `
                 ${renderIcon('plus')}
                 <span>Add Line</span>
               </button>
-              <button id="import-data-file" class="action-button" type="button" title="Import a CSV/JSON file or artifact zip (e.g. one exported with Download CSV)">
+              <button
+                id="import-data-file"
+                class="action-button has-help-tip"
+                type="button"
+                aria-label="Import CSV downloaded from this app, or JSON and ZIP artifacts from GitHub CI"
+              >
                 ${renderIcon('upload')}
                 <span>Import File</span>
+                <span class="help-tip-bubble" aria-hidden="true">
+                  <strong class="help-tip-title">Import local benchmark files.</strong>
+                  <span class="help-tip-row">
+                    Use <code>.csv</code> / <code>.tsv</code> files exported from this app with Download CSV.
+                  </span>
+                  <span class="help-tip-row">
+                    Use <code>.json</code>, <code>.jsonl</code>, <code>.ndjson</code>, or <code>.zip</code> files downloaded from GitHub Actions CI artifacts.
+                  </span>
+                  <span class="help-tip-note">
+                    Imports open in a review step first; current chart data changes only after Add Selected.
+                  </span>
+                </span>
               </button>
               <button id="merge-lines" class="action-button" type="button">
                 ${renderIcon('merge')}
@@ -2390,6 +2418,28 @@ function renderSeriesCard(series: SeriesDraft, seriesIndex: number, autoColor: s
             ${renderIcon('copy')}
             <span>Copy</span>
           </button>
+          <button
+            class="series-action-button has-help-tip"
+            type="button"
+            data-series-action="copy-split-series"
+            data-series-index="${seriesIndex}"
+            aria-label="Copy this line and split points by matching config fields"
+          >
+            ${renderIcon('split')}
+            <span>Copy & Split</span>
+            <span class="help-tip-bubble" aria-hidden="true">
+              <strong class="help-tip-title">Copy and split by config.</strong>
+              <span class="help-tip-row">
+                Groups points by Prefill/Decode GPUs, TP, EP, DPA, and hidden strategy fields.
+              </span>
+              <span class="help-tip-row">
+                Ignores concurrency, interactivity, throughput, point marker, and note.
+              </span>
+              <span class="help-tip-note">
+                Missing config values are grouped as blank, so rows missing the same fields stay together.
+              </span>
+            </span>
+          </button>
           <button class="series-action-button" type="button" data-series-action="add-row" data-series-index="${seriesIndex}">
             ${renderIcon('table-plus')}
             <span>Add Row</span>
@@ -2675,6 +2725,7 @@ function renderIcon(name: string): string {
     refresh: '<path d="M20 6v5h-5"/><path d="M4 18v-5h5"/><path d="M18.5 9A7 7 0 0 0 6.4 6.6L4 9"/><path d="M5.5 15A7 7 0 0 0 17.6 17.4L20 15"/>',
     play: '<path d="m8 5 11 7-11 7z"/>',
     copy: '<rect x="8" y="8" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"/>',
+    split: '<path d="M4 7h4a4 4 0 0 1 4 4v6"/><path d="M4 17h4a4 4 0 0 0 4-4V7"/><path d="M16 7h4"/><path d="M16 17h4"/><path d="m17 4 3 3-3 3"/><path d="m17 14 3 3-3 3"/>',
     'table-plus': '<path d="M4 5h10"/><path d="M4 11h10"/><path d="M4 17h7"/><path d="M8 5v12"/><path d="M16 15h6"/><path d="M19 12v6"/>',
     eraser: '<path d="m7 21-4-4 10-10 6 6-8 8z"/><path d="m13 7 4-4 4 4-4 4"/><path d="M3 21h18"/>',
     trash: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m6 6 1 15h10l1-15"/><path d="M10 11v6"/><path d="M14 11v6"/>',
@@ -2900,6 +2951,18 @@ function attachSeriesEditorEvents(): void {
         seriesDrafts.push(copy);
         queueSeriesActiveByDraft(copy, seriesDrafts.length - 1);
         setStatus(`Copied ${draft.name || `Line ${seriesIndex + 1}`}`);
+      } else if (action === 'copy-split-series') {
+        const splitDrafts = splitSeriesDraftByPointConfig(draft);
+        if (splitDrafts.length === 0) {
+          setStatus(`No point rows to split in ${draft.name || `Line ${seriesIndex + 1}`}.`, true);
+          return;
+        }
+        placeDraftsOnTop(splitDrafts);
+        splitDrafts.forEach((splitDraft) => {
+          seriesDrafts.push(splitDraft);
+          queueSeriesActiveByDraft(splitDraft, seriesDrafts.length - 1);
+        });
+        setStatus(`Copied and split ${draft.name || `Line ${seriesIndex + 1}`} into ${splitDrafts.length} lines.`);
       } else if (action === 'add-row') {
         draft.points.push(makeEmptyPointRow());
         draft.collapsed = false;
@@ -3811,6 +3874,49 @@ function copySeriesDraft(source: SeriesDraft): SeriesDraft {
   copy.renderOrder = getNextDraftRenderOrder();
   copy.collapsed = true;
   return copy;
+}
+
+function splitSeriesDraftByPointConfig(source: SeriesDraft): SeriesDraft[] {
+  const pointGroups = new Map<string, PointRow[]>();
+  source.points
+    .filter((row) => !isEmptyPointRow(row))
+    .forEach((row) => {
+      const key = getPointConfigSplitKey(row);
+      const group = pointGroups.get(key) ?? [];
+      group.push(structuredClone(row));
+      pointGroups.set(key, group);
+    });
+
+  const baseId = source.id.trim() || 'line';
+  const baseName = source.name.trim() || 'Line';
+  return Array.from(pointGroups.values()).map((points, index) => {
+    const splitDraft = structuredClone(source);
+    splitDraft.id = makeUniqueLineId(`${baseId}-${index + 1}`);
+    splitDraft.name = `${baseName} ${index + 1}`;
+    splitDraft.collapsed = true;
+    splitDraft.points = points.sort(comparePointRowsForMerge);
+    return splitDraft;
+  });
+}
+
+function getPointConfigSplitKey(row: PointRow): string {
+  return JSON.stringify(
+    pointConfigSplitKeys.map((key) => [key, normalizePointConfigSplitValue(key, row[key])])
+  );
+}
+
+function normalizePointConfigSplitValue(key: string, value: string | undefined): string {
+  if (key === 'prefill_dp_attention' || key === 'decode_dp_attention' || key === 'dp_attention') {
+    const parsedBoolean = parseBoolean(value);
+    if (parsedBoolean !== null) return String(parsedBoolean);
+  }
+
+  if (key !== 'strategy') {
+    const parsedNumber = parseNumber(value);
+    if (parsedNumber !== null) return String(parsedNumber);
+  }
+
+  return normalizeMergeKeyPart(value ?? '');
 }
 
 function makeUniqueLineId(baseId: string): string {
