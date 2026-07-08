@@ -3,6 +3,8 @@ import * as d3 from 'd3';
 export interface InferenceCurvePoint {
   interactivity: number;
   throughput: number;
+  ttft?: number;
+  endToEnd?: number;
   strategy?: string;
   precision?: string;
   tp?: number;
@@ -45,6 +47,7 @@ export interface InferenceCurveSeries {
 export interface InferenceCurveChartOptions {
   activeSeriesIds?: Set<string>;
   selectedPrecisions?: string[];
+  xMetric?: InferenceCurveXAxisMetric;
   showNonOptimalPoints?: boolean;
   hidePointLabels?: boolean;
   showConcurrencyLabels?: boolean;
@@ -61,6 +64,8 @@ export interface InferenceCurveChartOptions {
   xLabel?: string;
   yLabel?: string;
 }
+
+export type InferenceCurveXAxisMetric = 'interactivity' | 'endToEnd' | 'ttft';
 
 interface ChartPoint extends InferenceCurvePoint {
   seriesId: string;
@@ -200,9 +205,34 @@ const LIGHTNESS = {
   dark: { min: 0.5, max: 0.78 }
 } as const;
 
+const X_AXIS_METRICS: Record<
+  InferenceCurveXAxisMetric,
+  { label: string; tooltipLabel: string; unit: string; title: string }
+> = {
+  interactivity: {
+    label: 'Interactivity (tok/s/user)',
+    tooltipLabel: 'Interactivity',
+    unit: 'tok/s/user',
+    title: 'Token Throughput per GPU vs. Interactivity'
+  },
+  endToEnd: {
+    label: 'End-to-end (s)',
+    tooltipLabel: 'End-to-end',
+    unit: 's',
+    title: 'Token Throughput per GPU vs. End-to-end'
+  },
+  ttft: {
+    label: 'TTFT (s)',
+    tooltipLabel: 'TTFT',
+    unit: 's',
+    title: 'Token Throughput per GPU vs. TTFT'
+  }
+};
+
 const defaultOptions: Required<
   Omit<InferenceCurveChartOptions, 'activeSeriesIds' | 'selectedPrecisions'>
 > = {
+  xMetric: 'interactivity',
   showNonOptimalPoints: false,
   hidePointLabels: true,
   showConcurrencyLabels: false,
@@ -226,6 +256,14 @@ export function resetInferenceCurveZoom(): void {
   resetZoom?.();
 }
 
+export function getInferenceCurveXAxisLabel(metric: InferenceCurveXAxisMetric): string {
+  return X_AXIS_METRICS[metric]?.label ?? X_AXIS_METRICS.interactivity.label;
+}
+
+export function getInferenceCurveTitle(metric: InferenceCurveXAxisMetric): string {
+  return X_AXIS_METRICS[metric]?.title ?? X_AXIS_METRICS.interactivity.title;
+}
+
 export function getAvailablePrecisions(series: InferenceCurveSeries[]): string[] {
   const values = new Set<string>();
   series.forEach((line) => {
@@ -237,7 +275,8 @@ export function getAvailablePrecisions(series: InferenceCurveSeries[]): string[]
 export function getInferenceCurveColorSourceSeries(
   series: InferenceCurveSeries[],
   activeSeriesIds?: Set<string>,
-  selectedPrecisions?: string[]
+  selectedPrecisions?: string[],
+  xMetric: InferenceCurveXAxisMetric = 'interactivity'
 ): InferenceCurveSeries[] {
   const activeIds = activeSeriesIds ?? new Set(series.map((line) => line.id));
   const precisionSet = new Set(
@@ -250,13 +289,30 @@ export function getInferenceCurveColorSourceSeries(
       line.points.some(
         (point) =>
           precisionSet.has(String(point.precision ?? 'default')) &&
-          Number.isFinite(point.interactivity) &&
+          Number.isFinite(getPointXValue(point, xMetric)) &&
           Number.isFinite(point.throughput)
       )
   );
 }
 
 export function paretoFrontUpperLeft<T extends { x: number; y: number }>(input: T[]): T[] {
+  const sorted = [...input].sort((a, b) => {
+    if (a.x === b.x) return b.y - a.y;
+    return a.x - b.x;
+  });
+
+  const front: T[] = [];
+  let bestY = -Infinity;
+  for (const point of sorted) {
+    if (point.y <= bestY) continue;
+    front.push(point);
+    bestY = point.y;
+  }
+
+  return front;
+}
+
+export function paretoFrontUpperRight<T extends { x: number; y: number }>(input: T[]): T[] {
   const sorted = [...input].sort((a, b) => {
     if (a.x === b.x) return b.y - a.y;
     return a.x - b.x;
@@ -283,16 +339,20 @@ export function prepareInferenceCurveSeries(
   series: InferenceCurveSeries[],
   highContrast = false,
   theme: 'dark' | 'light' = 'dark',
-  colorSeries: InferenceCurveSeries[] = series
+  colorSeries: InferenceCurveSeries[] = series,
+  xMetric: InferenceCurveXAxisMetric = 'interactivity'
 ): PreparedSeries[] {
   const colors = resolveInferenceCurveColors(series, highContrast, theme, colorSeries);
   return series.map((line, seriesIndex) => {
     const palette = highContrast ? HIGH_CONTRAST : TABLEAU_10;
     const color = colors.get(line.id) ?? palette[seriesIndex % palette.length]!;
     const lineDasharray = resolveLineDasharray(line.lineStyle);
-    const points = line.points
-      .filter((point) => Number.isFinite(point.interactivity) && Number.isFinite(point.throughput))
-      .map((point, pointIndex) => ({
+    const points: ChartPoint[] = [];
+    line.points.forEach((point, pointIndex) => {
+      const x = getPointXValue(point, xMetric);
+      const y = point.throughput;
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+      points.push({
         ...point,
         seriesId: line.id,
         seriesName: line.name,
@@ -301,12 +361,13 @@ export function prepareInferenceCurveSeries(
         color,
         precision: String(point.precision ?? 'default'),
         shape: point.shape || line.marker,
-        x: point.interactivity,
-        y: point.throughput,
+        x,
+        y,
         roof: false
-      }));
+      });
+    });
 
-    const roofline = paretoFrontUpperLeft(points);
+    const roofline = getParetoFront(points, xMetric);
     const roofKeys = new Set(roofline.map((point) => `${point.x}|${point.y}|${point.precision}`));
     points.forEach((point) => {
       point.roof = roofKeys.has(`${point.x}|${point.y}|${point.precision}`);
@@ -323,6 +384,13 @@ export function prepareInferenceCurveSeries(
       roofline
     };
   });
+}
+
+function getParetoFront<T extends { x: number; y: number }>(
+  points: T[],
+  metric: InferenceCurveXAxisMetric
+): T[] {
+  return metric === 'interactivity' ? paretoFrontUpperRight(points) : paretoFrontUpperLeft(points);
 }
 
 export function resolveInferenceCurveColors(
@@ -498,6 +566,12 @@ function sortPreparedSeriesForRender(series: PreparedSeries[]): PreparedSeries[]
     .map(({ line }) => line);
 }
 
+function getPointXValue(point: InferenceCurvePoint, metric: InferenceCurveXAxisMetric): number {
+  if (metric === 'ttft') return readFiniteNumber(point.ttft) ?? Number.NaN;
+  if (metric === 'endToEnd') return readFiniteNumber(point.endToEnd) ?? Number.NaN;
+  return point.interactivity;
+}
+
 export function renderInferenceCurveChart(
   container: HTMLElement,
   rawSeries: InferenceCurveSeries[],
@@ -514,13 +588,15 @@ export function renderInferenceCurveChart(
   const colorSeries = getInferenceCurveColorSourceSeries(
     rawSeries,
     activeSeriesIds,
-    selectedPrecisions
+    selectedPrecisions,
+    options.xMetric
   );
   const prepared = prepareInferenceCurveSeries(
     rawSeries,
     options.highContrast,
     options.theme,
-    colorSeries
+    colorSeries,
+    options.xMetric
   );
   const visibleSeries = sortPreparedSeriesForRender(
     prepared.map((series) => ({
@@ -707,7 +783,7 @@ export function renderInferenceCurveChart(
       rulerGroup.style('display', 'block');
       verticalRuler.attr('x1', current.xScale(point.x)).attr('x2', current.xScale(point.x));
       horizontalRuler.attr('y1', current.yScale(point.y)).attr('y2', current.yScale(point.y));
-      tooltip.style('opacity', 1).style('display', 'block').html(formatTooltip(point));
+      tooltip.style('opacity', 1).style('display', 'block').html(formatTooltip(point, options.xMetric));
       moveTooltip(event, tooltip, container);
       return;
     }
@@ -1022,7 +1098,7 @@ function drawScatterPoints(
       rulerGroup.style('display', 'block');
       verticalRuler.attr('x1', xScale(point.x)).attr('x2', xScale(point.x));
       horizontalRuler.attr('y1', yScale(point.y)).attr('y2', yScale(point.y));
-      tooltip.style('opacity', 1).style('display', 'block').html(formatTooltip(point));
+      tooltip.style('opacity', 1).style('display', 'block').html(formatTooltip(point, options.xMetric));
       moveTooltip(event, tooltip, container);
     })
     .on('pointermove', (event) => {
@@ -1635,13 +1711,25 @@ function computeGradientStops(
   return stops.sort((a, b) => a.offset - b.offset);
 }
 
-function formatTooltip(point: ChartPoint): string {
+function formatTooltip(point: ChartPoint, metric: InferenceCurveXAxisMetric): string {
+  const metricConfig = X_AXIS_METRICS[metric] ?? X_AXIS_METRICS.interactivity;
+  const ttft = readFiniteNumber(point.ttft);
+  const endToEnd = readFiniteNumber(point.endToEnd);
   const fields = [
     `<strong>${escapeHtml(point.seriesName)}</strong>`,
-    `Interactivity: ${formatTooltipMetric(point.x)} tok/s/user`,
+    `${metricConfig.tooltipLabel}: ${formatTooltipMetric(point.x)} ${metricConfig.unit}`,
     `Throughput: ${formatTooltipMetric(point.y)} tok/s/gpu`,
     `Precision: ${escapeHtml(formatPrecision(point.precision))}`
   ];
+  if (metric !== 'interactivity' && Number.isFinite(point.interactivity)) {
+    fields.push(`Interactivity: ${formatTooltipMetric(point.interactivity)} tok/s/user`);
+  }
+  if (metric !== 'ttft' && ttft !== undefined) {
+    fields.push(`TTFT: ${formatTooltipMetric(ttft)} s`);
+  }
+  if (metric !== 'endToEnd' && endToEnd !== undefined) {
+    fields.push(`End-to-end: ${formatTooltipMetric(endToEnd)} s`);
+  }
   if (point.strategy) fields.push(`Parallelism: ${escapeHtml(point.strategy)}`);
   const prefillGpu = readFiniteNumber(point.num_prefill_gpu) ?? parseGpuCountFromLabel(point.label, 'prefill');
   const decodeGpu = readFiniteNumber(point.num_decode_gpu) ?? parseGpuCountFromLabel(point.label, 'decode');

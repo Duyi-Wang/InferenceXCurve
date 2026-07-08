@@ -13,7 +13,7 @@ round-trips through the app, and is more deterministic than raw benchmark CSV.
 Use this header order for generated CSV:
 
 ```csv
-Line ID,Line Name,Title,Model,ISL/OSL,Precision,MTP,Color Mode,Resolved Color,Line Type,Line Marker,Layer,Point Marker,Interactivity (tok/s/user),Throughput/GPU (tok/s/gpu),Prefill GPUs,Decode GPUs,Prefill TP,Prefill EP,Prefill DPA,Decode TP,Decode EP,Decode DPA,Concurrency,Strategy,Note
+Line ID,Line Name,Title,Model,ISL/OSL,Precision,MTP,Color Mode,Resolved Color,Line Type,Line Marker,Layer,Point Marker,Interactivity (tok/s/user),Throughput/GPU (tok/s/gpu),TTFT (s),End-to-end (s),Prefill GPUs,Decode GPUs,Prefill TP,Prefill EP,Prefill DPA,Decode TP,Decode EP,Decode DPA,Concurrency,Strategy,Note
 ```
 
 The importer uses the editor parser when at least one row has a non-empty
@@ -57,6 +57,8 @@ These fields are optional in editor CSV:
 - `Layer`: empty falls back to row order.
 - `Point Marker`: same marker values as `Line Marker`; empty inherits the line
   marker.
+- `TTFT (s)`: optional numeric time-to-first-token latency in seconds.
+- `End-to-end (s)`: optional numeric end-to-end latency in seconds.
 - `Prefill GPUs`, `Decode GPUs`, `Prefill TP`, `Prefill EP`, `Decode TP`,
   `Decode EP`, `Concurrency`: numeric when present.
 - `Prefill DPA`, `Decode DPA`: boolean when present. Accepted values are
@@ -98,17 +100,19 @@ Accepted editor CSV aliases include:
   `lineStyle`, `Line Type`, `line_marker`, `Line Marker`, `renderOrder`,
   `Layer`
 - Point fields: `Interactivity`, `Interactivity (tok/s/user)`, `tok/s/user`;
-  `Throughput/GPU`, `Throughput/GPU (tok/s/gpu)`, `tok/s/gpu`; `shape`,
-  `Marker`, `Point Marker`; snake_case point keys such as `num_prefill_gpu`,
-  `decode_tp`, and `prefill_dp_attention`; display labels such as
-  `Prefill GPUs`, `Decode TP`, and `Prefill DPA`
+  `Throughput/GPU`, `Throughput/GPU (tok/s/gpu)`, `tok/s/gpu`; `TTFT`,
+  `TTFT (s)`, `median_ttft`, `metrics.median_ttft`; `End-to-end`,
+  `End-to-end (s)`, `endToEnd`, `end_to_end`, `E2E`, `e2el`, `median_e2el`,
+  `metrics.median_e2el`; `shape`, `Marker`, `Point Marker`; snake_case point
+  keys such as `num_prefill_gpu`, `decode_tp`, and `prefill_dp_attention`;
+  display labels such as `Prefill GPUs`, `Decode TP`, and `Prefill DPA`
 
 ## Example
 
 ```csv
-Line ID,Line Name,Title,Model,ISL/OSL,Precision,MTP,Color Mode,Resolved Color,Line Type,Line Marker,Layer,Point Marker,Interactivity (tok/s/user),Throughput/GPU (tok/s/gpu),Prefill GPUs,Decode GPUs,Prefill TP,Prefill EP,Prefill DPA,Decode TP,Decode EP,Decode DPA,Concurrency,Strategy,Note
-dsr1-8192-fp8-b200-trt,B200 TRT,DeepSeek R1 B200 TRT,DeepSeek-R1-0528,ISL 8192 / OSL 1024,fp8,Non-MTP,Auto,,solid,precision,1,,8.42,5220.5,4,8,4,4,true,8,8,true,1024,,run 123
-dsr1-8192-fp8-b200-trt,B200 TRT,DeepSeek R1 B200 TRT,DeepSeek-R1-0528,ISL 8192 / OSL 1024,fp8,Non-MTP,Auto,,solid,precision,1,star,12.37,4188.1,4,8,4,4,true,8,8,true,2048,,highlighted point
+Line ID,Line Name,Title,Model,ISL/OSL,Precision,MTP,Color Mode,Resolved Color,Line Type,Line Marker,Layer,Point Marker,Interactivity (tok/s/user),Throughput/GPU (tok/s/gpu),TTFT (s),End-to-end (s),Prefill GPUs,Decode GPUs,Prefill TP,Prefill EP,Prefill DPA,Decode TP,Decode EP,Decode DPA,Concurrency,Strategy,Note
+dsr1-8192-fp8-b200-trt,B200 TRT,DeepSeek R1 B200 TRT,DeepSeek-R1-0528,ISL 8192 / OSL 1024,fp8,Non-MTP,Auto,,solid,precision,1,,8.42,5220.5,0.12,9.04,4,8,4,4,true,8,8,true,1024,,run 123
+dsr1-8192-fp8-b200-trt,B200 TRT,DeepSeek R1 B200 TRT,DeepSeek-R1-0528,ISL 8192 / OSL 1024,fp8,Non-MTP,Auto,,solid,precision,1,star,12.37,4188.1,,,4,8,4,4,true,8,8,true,2048,,highlighted point
 ```
 
 ## Raw Benchmark CSV Fallback
@@ -124,6 +128,9 @@ column. Accepted aliases include:
   `median_intvty`, `median_interactivity`, `interactivity`, `tok/s/user`, `x`
 - Throughput: `metrics.tput_per_gpu`, `tput_per_gpu`, `throughput_per_gpu`,
   `token throughput per gpu`, `throughput`, `tok/s/gpu`, `y`
+- TTFT: `metrics.median_ttft`, `median_ttft`, `ttft`, `TTFT`, `TTFT (s)`
+- End-to-end: `metrics.median_e2el`, `median_e2el`, `endToEnd`,
+  `end_to_end`, `end-to-end`, `End-to-end (s)`, `E2E`, `e2el`
 
 Optional raw benchmark aliases include:
 

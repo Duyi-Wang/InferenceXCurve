@@ -282,6 +282,41 @@ p {
   background: color-mix(in srgb, var(--background) 86%, transparent);
 }
 
+.metric-switch {
+  grid-column: 1 / -1;
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid color-mix(in srgb, var(--border) 44%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--background) 70%, transparent);
+}
+
+.metric-switch-button {
+  min-height: 30px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.metric-switch-button:hover,
+.metric-switch-button:focus-visible {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--accent) 72%, transparent);
+}
+
+.metric-switch-button.active {
+  color: var(--foreground);
+  background: var(--accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border) 48%, transparent);
+}
+
 .chart-card-toolbar {
   position: absolute;
   top: 24px;
@@ -2280,7 +2315,7 @@ p {
 }
 
 .point-table {
-  width: max(100%, 1400px);
+  width: max(100%, 1600px);
 }
 
 .point-table th {
@@ -2313,8 +2348,17 @@ p {
   width: 130px;
 }
 
+.point-table th.point-cell-ttft,
+.point-table td.point-cell-ttft,
+.point-table th.point-cell-endToEnd,
+.point-table td.point-cell-endToEnd {
+  width: 110px;
+}
+
 .point-table td.point-cell-interactivity,
-.point-table td.point-cell-throughput {
+.point-table td.point-cell-throughput,
+.point-table td.point-cell-ttft,
+.point-table td.point-cell-endToEnd {
   text-align: right;
 }
 
@@ -2507,6 +2551,14 @@ p {
 
   .filter-card {
     grid-template-columns: 1fr;
+  }
+
+  .metric-switch {
+    width: 100%;
+  }
+
+  .metric-switch-button {
+    flex: 1 1 0;
   }
 
   .chart-card-toolbar {

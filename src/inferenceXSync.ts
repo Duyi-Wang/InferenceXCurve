@@ -262,6 +262,8 @@ export function fingerprintInferenceCurveSeries(line: InferenceCurveSeries): str
     points: line.points.map((point) => ({
       interactivity: point.interactivity,
       throughput: point.throughput,
+      ttft: point.ttft ?? '',
+      endToEnd: point.endToEnd ?? '',
       strategy: point.strategy ?? '',
       precision: point.precision ?? '',
       tp: point.tp ?? '',
@@ -480,6 +482,8 @@ function benchmarkRecordToPoint(
   const metrics = readMetrics(record);
   const interactivity = readNumber(metrics, 'median_intvty');
   const throughput = readNumber(metrics, 'tput_per_gpu');
+  const ttft = readNumber(metrics, 'median_ttft');
+  const endToEnd = readNumber(metrics, 'median_e2el');
   if (interactivity === null || throughput === null) return null;
 
   const prefillTp = readNumber(record, 'prefill_tp');
@@ -502,6 +506,8 @@ function benchmarkRecordToPoint(
     label: makePointLabel(readString(record, 'date'), readString(record, 'run_url'))
   };
 
+  if (ttft !== null) point.ttft = ttft;
+  if (endToEnd !== null) point.endToEnd = endToEnd;
   if (prefillTp !== null) point.prefill_tp = prefillTp;
   if (prefillEp !== null) point.prefill_ep = prefillEp;
   if (decodeTp !== null) point.decode_tp = decodeTp;

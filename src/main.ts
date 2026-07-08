@@ -23,13 +23,16 @@ import {
   DEFAULT_CHART_WATERMARK,
   getAvailablePrecisions,
   getInferenceCurveColorSourceSeries,
+  getInferenceCurveTitle,
+  getInferenceCurveXAxisLabel,
   INFERENCE_CURVE_MARGIN,
   prepareInferenceCurveSeries,
   renderInferenceCurveChart,
   resetInferenceCurveZoom,
   resolveInferenceCurveColors,
   type InferenceCurveChartOptions,
-  type InferenceCurveSeries
+  type InferenceCurveSeries,
+  type InferenceCurveXAxisMetric
 } from './inferenceCurveChart';
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -52,6 +55,7 @@ type PointRow = Record<string, string>;
 
 interface AppState {
   theme: Theme;
+  chartMetric: InferenceCurveXAxisMetric;
   activeSeriesIds: Set<string>;
   activeSeriesIdsByView: Map<string, Set<string>>;
   selectedPrecisions: Set<string>;
@@ -124,6 +128,7 @@ interface PendingMergeGroup {
 
 interface PersistedAppState {
   theme?: Theme;
+  chartMetric?: InferenceCurveXAxisMetric;
   activeSeriesIds?: string[];
   activeSeriesIdsByView?: Record<string, string[]>;
   selectedPrecisions?: string[];
@@ -345,6 +350,8 @@ const pointColumns: TableColumn[] = [
   { key: 'shape', label: 'Marker' },
   { key: 'interactivity', label: 'Interactivity', required: true, numeric: true },
   { key: 'throughput', label: 'Throughput/GPU', required: true, numeric: true },
+  { key: 'ttft', label: 'TTFT (s)', numeric: true },
+  { key: 'endToEnd', label: 'End-to-end (s)', numeric: true },
   { key: 'num_prefill_gpu', label: 'Prefill GPUs', numeric: true },
   { key: 'num_decode_gpu', label: 'Decode GPUs', numeric: true },
   { key: 'prefill_tp', label: 'Prefill TP', numeric: true },
@@ -421,6 +428,12 @@ const lineStyleOptions: LineStyleOption[] = [
   { value: 'dotted', label: 'Dotted', dasharray: '2 5' },
   { value: 'dashdot', label: 'Dash Dot', dasharray: '8 4 2 4' },
   { value: 'long-dash', label: 'Long Dash', dasharray: '12 5' }
+];
+
+const chartMetricOptions: { value: InferenceCurveXAxisMetric; label: string }[] = [
+  { value: 'interactivity', label: 'Interactivity' },
+  { value: 'endToEnd', label: 'End-to-end' },
+  { value: 'ttft', label: 'TTFT' }
 ];
 
 function createInitialDataState(): InitialDataState {
@@ -592,6 +605,7 @@ function restorePersistedState(value: unknown): PersistedAppState {
   if (!isRecord(value)) return {};
   return {
     theme: value.theme === 'light' || value.theme === 'dark' ? value.theme : undefined,
+    chartMetric: normalizeChartMetric(value.chartMetric),
     activeSeriesIds: readPersistedStringArray(value.activeSeriesIds),
     activeSeriesIdsByView: readPersistedActiveSeriesByView(value.activeSeriesIdsByView),
     selectedPrecisions: readPersistedStringArray(value.selectedPrecisions),
@@ -629,6 +643,7 @@ function restoreAppState(defaults: AppState, saved: PersistedAppState, series: I
 
   return {
     theme: saved.theme ?? defaults.theme,
+    chartMetric: saved.chartMetric ?? defaults.chartMetric,
     activeSeriesIds:
       activeSeriesIds.length > 0 || series.length === 0
         ? new Set(activeSeriesIds)
@@ -657,6 +672,7 @@ function restoreAppState(defaults: AppState, saved: PersistedAppState, series: I
 function serializeAppState(): PersistedAppState {
   return {
     theme: state.theme,
+    chartMetric: state.chartMetric,
     activeSeriesIds: Array.from(state.activeSeriesIds),
     activeSeriesIdsByView: serializeActiveSeriesByView(),
     selectedPrecisions: Array.from(state.selectedPrecisions),
@@ -908,6 +924,7 @@ app.innerHTML = `
         <span>MTP</span>
         <select id="mtp-filter"></select>
       </label>
+      <div id="metric-switch" class="metric-switch" role="group" aria-label="Chart metric"></div>
     </section>
 
     <section class="chart-card">
@@ -959,7 +976,7 @@ app.innerHTML = `
       </div>
 
       <figcaption class="chart-caption">
-        <h2>Token Throughput per GPU vs. Interactivity</h2>
+        <h2 id="chart-title">Token Throughput per GPU vs. Interactivity</h2>
         <p id="chart-subtitle"></p>
       </figcaption>
 
@@ -1122,6 +1139,8 @@ const modelFilterEl = document.querySelector<HTMLSelectElement>('#model-filter')
 const islOslFilterEl = document.querySelector<HTMLSelectElement>('#isl-osl-filter')!;
 const precisionFilterEl = document.querySelector<HTMLSelectElement>('#precision-filter')!;
 const mtpFilterEl = document.querySelector<HTMLSelectElement>('#mtp-filter')!;
+const metricSwitchEl = document.querySelector<HTMLElement>('#metric-switch')!;
+const chartTitleEl = document.querySelector<HTMLHeadingElement>('#chart-title')!;
 const seriesEditorEl = document.querySelector<HTMLElement>('#series-editor')!;
 const statusEl = document.querySelector<HTMLParagraphElement>('#status')!;
 const githubActionUrlEl = document.querySelector<HTMLInputElement>('#github-action-url')!;
@@ -1247,6 +1266,7 @@ inferenceXSyncEl.addEventListener('change', handleInferenceXSyncChange);
 mergePreviewEl.addEventListener('input', handleMergePreviewInput);
 mergePreviewEl.addEventListener('change', handleMergePreviewInput);
 mergePreviewEl.addEventListener('click', handleMergePreviewClick);
+metricSwitchEl.addEventListener('click', handleMetricSwitchClick);
 
 watermarkMenuToggleEl.addEventListener('click', toggleWatermarkPanel);
 chartWatermarkEl.addEventListener('input', handleWatermarkInput);
@@ -1371,8 +1391,20 @@ function handleGlobalKeydown(event: KeyboardEvent): void {
   renderDraftData();
 }
 
+function handleMetricSwitchClick(event: MouseEvent): void {
+  const button = (event.target as Element | null)?.closest<HTMLButtonElement>('button[data-chart-metric]');
+  if (!button || !metricSwitchEl.contains(button)) return;
+  const metric = normalizeChartMetric(button.dataset.chartMetric);
+  if (!metric || metric === state.chartMetric) return;
+  state.chartMetric = metric;
+  renderFilterControls();
+  renderAll();
+  scheduleLocalSave();
+}
+
 function getChartOptions(): InferenceCurveChartOptions {
   return {
+    xMetric: state.chartMetric,
     activeSeriesIds: state.activeSeriesIds,
     selectedPrecisions: Array.from(state.selectedPrecisions),
     showNonOptimalPoints: state.showNonOptimalPoints,
@@ -1384,12 +1416,15 @@ function getChartOptions(): InferenceCurveChartOptions {
     highContrast: state.highContrast,
     logY: state.logY,
     theme: state.theme,
+    title: getChartTitle(),
     subtitle: getChartSubtitle(),
-    watermark: state.watermark
+    watermark: state.watermark,
+    xLabel: getInferenceCurveXAxisLabel(state.chartMetric)
   };
 }
 
 function renderAll(): void {
+  chartTitleEl.textContent = getChartTitle();
   chartSubtitleEl.textContent = getChartSubtitle();
   renderInferenceCurveChart(chartEl, getFilteredSeriesForChart(), getChartOptions());
   renderLegend();
@@ -2282,6 +2317,7 @@ function renderFilterControls(): void {
   islOslFilterEl.innerHTML = renderSelectOptions(islOslValues, state.islOslFilter, 'All ISL/OSL');
   precisionFilterEl.innerHTML = renderPrecisionFilterOptions(precisions);
   mtpFilterEl.innerHTML = renderMtpFilterOptions(mtpValues);
+  metricSwitchEl.innerHTML = renderMetricSwitchOptions();
 
   modelFilterEl.onchange = () => {
     saveActiveSeriesForCurrentView();
@@ -2367,6 +2403,21 @@ function renderMtpFilterOptions(values: string[]): string {
         `<option value="${escapeAttribute(value)}" ${state.mtpFilter === value ? 'selected' : ''}>${escapeHtml(formatMtpFilterLabel(value))}</option>`
     )
   ].join('');
+}
+
+function renderMetricSwitchOptions(): string {
+  return chartMetricOptions
+    .map(
+      (option) => `
+        <button
+          type="button"
+          class="metric-switch-button${state.chartMetric === option.value ? ' active' : ''}"
+          data-chart-metric="${option.value}"
+          aria-pressed="${state.chartMetric === option.value ? 'true' : 'false'}"
+        >${escapeHtml(option.label)}</button>
+      `
+    )
+    .join('');
 }
 
 function renderSeriesEditor(): void {
@@ -3631,6 +3682,8 @@ function seriesToDrafts(series: InferenceCurveSeries[]): SeriesDraft[] {
       return {
         interactivity: String(point.interactivity),
         throughput: String(point.throughput),
+        ttft: formatPointFieldValue(point.ttft),
+        endToEnd: formatPointFieldValue(point.endToEnd),
         shape: normalizePointShapeValue(formatPointFieldValue(point.shape)),
         strategy: point.strategy ?? '',
         tp: formatPointFieldValue(point.tp),
@@ -3689,6 +3742,8 @@ function draftsToSeriesInternal(drafts: SeriesDraft[]): InferenceCurveSeries[] {
         };
         const pointShape = normalizePointShapeValue(row.shape);
         if (pointShape) point.shape = pointShape;
+        const ttft = parseNumber(row.ttft);
+        const endToEnd = parseNumber(row.endToEnd);
         const numPrefillGpu = parseNumber(row.num_prefill_gpu);
         const numDecodeGpu = parseNumber(row.num_decode_gpu);
         const prefillTp = parseNumber(row.prefill_tp);
@@ -3699,6 +3754,8 @@ function draftsToSeriesInternal(drafts: SeriesDraft[]): InferenceCurveSeries[] {
         const decodeDpAttention = parseBoolean(row.decode_dp_attention) ?? parseBoolean(row.dp_attention);
         const totalGpu =
           numPrefillGpu !== null && numDecodeGpu !== null ? numPrefillGpu + numDecodeGpu : null;
+        if (ttft !== null) point.ttft = ttft;
+        if (endToEnd !== null) point.endToEnd = endToEnd;
         if (numPrefillGpu !== null) point.num_prefill_gpu = numPrefillGpu;
         if (numDecodeGpu !== null) point.num_decode_gpu = numDecodeGpu;
         if (prefillTp !== null) point.prefill_tp = prefillTp;
@@ -3779,6 +3836,18 @@ function detectPointHeaderMap(headerRow: string[]): Map<number, string> | null {
     ['y', 'throughput'],
     ['吞吐量', 'throughput'],
     ['gpu吞吐量', 'throughput'],
+    ['ttft', 'ttft'],
+    ['ttft (s)', 'ttft'],
+    ['median_ttft', 'ttft'],
+    ['metrics.median_ttft', 'ttft'],
+    ['end-to-end', 'endToEnd'],
+    ['end-to-end (s)', 'endToEnd'],
+    ['endtoend', 'endToEnd'],
+    ['end_to_end', 'endToEnd'],
+    ['median_e2el', 'endToEnd'],
+    ['metrics.median_e2el', 'endToEnd'],
+    ['e2e', 'endToEnd'],
+    ['e2el', 'endToEnd'],
     ['marker', 'shape'],
     ['point marker', 'shape'],
     ['point shape', 'shape'],
@@ -4031,6 +4100,11 @@ function normalizePointShapeValue(value: string | undefined): string {
   return '';
 }
 
+function normalizeChartMetric(value: unknown): InferenceCurveXAxisMetric | undefined {
+  if (value === 'interactivity' || value === 'endToEnd' || value === 'ttft') return value;
+  return undefined;
+}
+
 function resetSelectionsForSeries(series: InferenceCurveSeries[]): void {
   state.selectedPrecisions = firstPrecisionSelection(series);
 }
@@ -4138,6 +4212,7 @@ function createInitialState(series: InferenceCurveSeries[]): AppState {
 
   return {
     theme: 'dark',
+    chartMetric: 'interactivity',
     activeSeriesIds: new Set(visibleSeries.map((line) => line.id)),
     activeSeriesIdsByView: new Map(),
     selectedPrecisions: firstPrecisionSelection(visibleSeries),
@@ -4162,6 +4237,7 @@ function setDefaultFiltersForSeries(series: InferenceCurveSeries[]): void {
   state.modelFilter = defaults.modelFilter;
   state.islOslFilter = defaults.islOslFilter;
   state.mtpFilter = defaults.mtpFilter;
+  state.chartMetric = defaults.chartMetric;
   state.activeSeriesIds = defaults.activeSeriesIds;
   state.activeSeriesIdsByView = defaults.activeSeriesIdsByView;
   state.selectedPrecisions = defaults.selectedPrecisions;
@@ -4216,7 +4292,8 @@ function getChartColorSourceSeries(series: InferenceCurveSeries[]): InferenceCur
   return getInferenceCurveColorSourceSeries(
     series,
     state.activeSeriesIds,
-    Array.from(state.selectedPrecisions)
+    Array.from(state.selectedPrecisions),
+    state.chartMetric
   );
 }
 
@@ -4345,6 +4422,10 @@ function formatMtpFilterLabel(value: string): string {
   if (value === MTP_VALUE) return 'MTP';
   if (value === NON_MTP_VALUE) return 'Non-MTP';
   return value;
+}
+
+function getChartTitle(): string {
+  return getInferenceCurveTitle(state.chartMetric);
 }
 
 function getChartSubtitle(): string {
@@ -4675,7 +4756,9 @@ function validateMergeGroup(group: PendingMergeGroup, lines: PendingMergeLine[])
 
 function comparePointRowsForMerge(a: PointRow, b: PointRow): number {
   return compareNullableNumbers(parseNumber(a.interactivity), parseNumber(b.interactivity)) ||
-    compareNullableNumbers(parseNumber(a.throughput), parseNumber(b.throughput));
+    compareNullableNumbers(parseNumber(a.throughput), parseNumber(b.throughput)) ||
+    compareNullableNumbers(parseNumber(a.ttft), parseNumber(b.ttft)) ||
+    compareNullableNumbers(parseNumber(a.endToEnd), parseNumber(b.endToEnd));
 }
 
 function compareNullableNumbers(a: number | null, b: number | null): number {
@@ -5444,7 +5527,9 @@ function readNativeSeries(value: unknown): InferenceCurveSeries[] {
       .map((point) => ({
         ...point,
         interactivity: Number(point.interactivity),
-        throughput: Number(point.throughput)
+        throughput: Number(point.throughput),
+        ttft: asOptionalNumber(point.ttft ?? point.median_ttft),
+        endToEnd: asOptionalNumber(point.endToEnd ?? point.end_to_end ?? point.e2el ?? point.median_e2el)
       }))
       .filter((point) => Number.isFinite(point.interactivity) && Number.isFinite(point.throughput))
   }));
@@ -5479,6 +5564,17 @@ function looksLikeBenchmarkRecord(record: Record<string, unknown>): boolean {
 const POINT_IMPORT_ALIASES: Record<string, string[]> = {
   interactivity: ['interactivity', 'Interactivity (tok/s/user)', 'tok/s/user'],
   throughput: ['throughput', 'Throughput/GPU', 'Throughput/GPU (tok/s/gpu)', 'tok/s/gpu'],
+  ttft: ['ttft', 'TTFT', 'TTFT (s)', 'median_ttft', 'metrics.median_ttft'],
+  endToEnd: [
+    'endToEnd',
+    'end_to_end',
+    'End-to-end',
+    'End-to-end (s)',
+    'E2E',
+    'e2el',
+    'median_e2el',
+    'metrics.median_e2el'
+  ],
   shape: ['shape', 'Marker', 'Point Marker']
 };
 
@@ -5600,6 +5696,23 @@ function importedPointFromBenchmarkRecord(
     'y'
   ]);
   if (interactivity === null || throughput === null) return null;
+  const ttft = readMetricNumber(record, [
+    'metrics.median_ttft',
+    'median_ttft',
+    'ttft',
+    'TTFT',
+    'TTFT (s)'
+  ]);
+  const endToEnd = readMetricNumber(record, [
+    'metrics.median_e2el',
+    'median_e2el',
+    'endToEnd',
+    'end_to_end',
+    'end-to-end',
+    'End-to-end (s)',
+    'E2E',
+    'e2el'
+  ]);
 
   const hardware =
     normalizeImportedHardware(readMetricString(record, ['hardware', 'hw_key', 'hwKey', 'hw', 'gpu', 'accelerator'])) ||
@@ -5642,6 +5755,8 @@ function importedPointFromBenchmarkRecord(
     concurrency: concurrency ?? undefined,
     label: makeImportedPointLabel(date, prefillTp, prefillEp, prefillGpu, decodeGpu, prefillDpa, decodeDpa, sourceName)
   };
+  if (ttft !== null) point.ttft = ttft;
+  if (endToEnd !== null) point.endToEnd = endToEnd;
   if (prefillGpu !== null) point.num_prefill_gpu = prefillGpu;
   if (decodeGpu !== null) point.num_decode_gpu = decodeGpu;
   if (prefillTp !== null) point.prefill_tp = prefillTp;
@@ -5700,6 +5815,8 @@ function mergeImportedSeries(series: InferenceCurveSeries[]): InferenceCurveSeri
       const key = JSON.stringify([
         point.interactivity,
         point.throughput,
+        point.ttft,
+        point.endToEnd,
         point.precision,
         point.concurrency,
         point.label
@@ -6154,12 +6271,38 @@ function buildChartCsvRows(mode: CsvExportMode): string[][] {
     state.mtpFilter
   ).filter((series) => state.selectedPrecisions.has(getSeriesPrecision(series)));
   const chartSeriesIds = new Set(chartSeries.map((series) => series.id));
-  const prepared = prepareInferenceCurveSeries(
+  const currentPrepared = prepareInferenceCurveSeries(
     sourceSeries,
     state.highContrast,
     state.theme,
-    getChartColorSourceSeries(chartSeries)
+    getChartColorSourceSeries(chartSeries),
+    state.chartMetric
   );
+  const currentPointByKey = new Map<string, { roof: boolean }>();
+  currentPrepared.forEach((series) => {
+    series.points.forEach((point) => {
+      currentPointByKey.set(`${series.id}|${point.pointIndex}`, point);
+    });
+  });
+  const prepared =
+    mode === 'visible'
+      ? currentPrepared
+      : prepareInferenceCurveSeries(
+          sourceSeries,
+          state.highContrast,
+          state.theme,
+          getInferenceCurveColorSourceSeries(
+            chartSeries,
+            state.activeSeriesIds,
+            Array.from(state.selectedPrecisions),
+            'interactivity'
+          ),
+          'interactivity'
+        );
+  const colorBySeriesId = new Map(currentPrepared.map((series) => [series.id, series.color]));
+  prepared.forEach((series) => {
+    if (!colorBySeriesId.has(series.id)) colorBySeriesId.set(series.id, series.color);
+  });
   const rows: string[][] = [
     [
       'Line ID',
@@ -6182,6 +6325,8 @@ function buildChartCsvRows(mode: CsvExportMode): string[][] {
       'Point Marker',
       'Interactivity (tok/s/user)',
       'Throughput/GPU (tok/s/gpu)',
+      'TTFT (s)',
+      'End-to-end (s)',
       'Prefill GPUs',
       'Decode GPUs',
       'Total GPUs',
@@ -6209,6 +6354,7 @@ function buildChartCsvRows(mode: CsvExportMode): string[][] {
     const filteredLine = chartSeriesIds.has(series.id);
 
     series.points.forEach((point) => {
+      const currentPoint = currentPointByKey.get(`${series.id}|${point.pointIndex}`);
       const prefillGpus = readExportNumber(point.num_prefill_gpu);
       const decodeGpus = readExportNumber(point.num_decode_gpu);
       const totalGpus =
@@ -6217,7 +6363,8 @@ function buildChartCsvRows(mode: CsvExportMode): string[][] {
         filteredLine &&
         activeLine &&
         state.selectedPrecisions.has(point.precision) &&
-        (state.showNonOptimalPoints || point.roof);
+        Boolean(currentPoint) &&
+        (state.showNonOptimalPoints || currentPoint!.roof);
 
       if (mode === 'visible' && !includedInChart) return;
 
@@ -6231,17 +6378,19 @@ function buildChartCsvRows(mode: CsvExportMode): string[][] {
         getSeriesMtpFilter(line),
         String(line.hwKey ?? ''),
         line.color?.trim() ? 'Custom' : 'Auto',
-        series.color,
+        colorBySeriesId.get(series.id) ?? series.color,
         line.lineStyle ?? DEFAULT_LINE_STYLE,
         normalizePointShapeValue(String(line.marker ?? '')) || 'precision',
         String(line.renderOrder ?? series.renderOrder),
         formatExportValue(includedInChart),
         formatExportValue(activeLine),
         String(point.pointIndex + 1),
-        formatExportValue(point.roof),
+        formatExportValue(currentPoint?.roof ?? false),
         normalizePointShapeValue(String(point.shape ?? '')) || '',
-        formatExportValue(point.x),
-        formatExportValue(point.y),
+        formatExportValue(point.interactivity),
+        formatExportValue(point.throughput),
+        formatExportValue(point.ttft),
+        formatExportValue(point.endToEnd),
         formatExportValue(point.num_prefill_gpu),
         formatExportValue(point.num_decode_gpu),
         formatExportValue(totalGpus),

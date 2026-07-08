@@ -88,6 +88,7 @@ Agent-specific rules:
 
 - Always include deterministic non-empty `Line ID`, `Line Name`, `Model`, `ISL/OSL`, and `Precision` values in generated editor CSV. Do not rely on app fallback defaults.
 - Always include numeric `Interactivity (tok/s/user)` and `Throughput/GPU (tok/s/gpu)` for every point row with data.
+- Include `TTFT (s)` and `End-to-end (s)` columns when generating editor CSV; leave them empty when the source data does not provide those metrics.
 - Prefer explicit `MTP` or `Non-MTP`; do not rely on name inference unless intentionally testing inference.
 - Optional style/metadata/parallelism columns may be empty as documented in `docs/import-csv.md`.
 - Keep generated CSV canonical: use the documented headers even though the importer accepts aliases.
