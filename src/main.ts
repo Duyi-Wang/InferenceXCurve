@@ -364,7 +364,15 @@ const pointColumns: TableColumn[] = [
   { key: 'label', label: 'Note' }
 ];
 
-const hiddenPointKeys = ['strategy', 'tp', 'dp_attention'] as const;
+const hiddenPointKeys = [
+  'strategy',
+  'tp',
+  'dp_attention',
+  'prefill_num_workers',
+  'decode_num_workers',
+  'disagg',
+  'is_multinode'
+] as const;
 const knownPointKeys = new Set([...pointColumns.map((column) => column.key), ...hiddenPointKeys]);
 const pointConfigSplitKeys = [
   'num_prefill_gpu',
@@ -3700,6 +3708,10 @@ function seriesToDrafts(series: InferenceCurveSeries[]): SeriesDraft[] {
           point.decode_dp_attention ?? point.dp_attention ?? labelMetadata.decode_dp_attention
         ),
         dp_attention: formatPointFieldValue(point.dp_attention),
+        prefill_num_workers: formatPointFieldValue(point.prefill_num_workers),
+        decode_num_workers: formatPointFieldValue(point.decode_num_workers),
+        disagg: formatPointFieldValue(point.disagg),
+        is_multinode: formatPointFieldValue(point.is_multinode),
         concurrency: formatPointFieldValue(point.concurrency),
         label: point.label ?? ''
       };
@@ -3752,6 +3764,10 @@ function draftsToSeriesInternal(drafts: SeriesDraft[]): InferenceCurveSeries[] {
         const decodeTp = parseNumber(row.decode_tp);
         const decodeEp = parseNumber(row.decode_ep);
         const decodeDpAttention = parseBoolean(row.decode_dp_attention) ?? parseBoolean(row.dp_attention);
+        const prefillNumWorkers = parseNumber(row.prefill_num_workers);
+        const decodeNumWorkers = parseNumber(row.decode_num_workers);
+        const disagg = parseBoolean(row.disagg);
+        const isMultinode = parseBoolean(row.is_multinode);
         const totalGpu =
           numPrefillGpu !== null && numDecodeGpu !== null ? numPrefillGpu + numDecodeGpu : null;
         if (ttft !== null) point.ttft = ttft;
@@ -3764,6 +3780,8 @@ function draftsToSeriesInternal(drafts: SeriesDraft[]): InferenceCurveSeries[] {
         if (decodeTp !== null) point.decode_tp = decodeTp;
         if (decodeEp !== null) point.decode_ep = decodeEp;
         if (decodeDpAttention !== null) point.decode_dp_attention = decodeDpAttention;
+        if (prefillNumWorkers !== null) point.prefill_num_workers = prefillNumWorkers;
+        if (decodeNumWorkers !== null) point.decode_num_workers = decodeNumWorkers;
         if (
           prefillDpAttention !== null &&
           decodeDpAttention !== null &&
@@ -3773,7 +3791,9 @@ function draftsToSeriesInternal(drafts: SeriesDraft[]): InferenceCurveSeries[] {
         }
         point.tp = totalGpu ?? parseNumber(row.tp) ?? decodeTp ?? undefined;
         point.strategy = (row.strategy ?? '').trim() || makeStrategyLabel(decodeTp, decodeEp);
-        if (numPrefillGpu !== null && numDecodeGpu !== null) point.disagg = true;
+        if (disagg !== null) point.disagg = disagg;
+        else if (numPrefillGpu !== null && numDecodeGpu !== null) point.disagg = true;
+        if (isMultinode !== null) point.is_multinode = isMultinode;
         return point;
       })
       .filter((point): point is NonNullable<typeof point> => point !== null);
@@ -3897,6 +3917,19 @@ function detectPointHeaderMap(headerRow: string[]): Map<number, string> | null {
     ['dpa', 'dp_attention'],
     ['dp attention', 'dp_attention'],
     ['dp_attention', 'dp_attention'],
+    ['prefill workers', 'prefill_num_workers'],
+    ['prefill worker', 'prefill_num_workers'],
+    ['prefill_num_workers', 'prefill_num_workers'],
+    ['decode workers', 'decode_num_workers'],
+    ['decode worker', 'decode_num_workers'],
+    ['decode_num_workers', 'decode_num_workers'],
+    ['disagg', 'disagg'],
+    ['disaggregated', 'disagg'],
+    ['multi-node', 'is_multinode'],
+    ['multi node', 'is_multinode'],
+    ['multinode', 'is_multinode'],
+    ['is_multinode', 'is_multinode'],
+    ['multi_node', 'is_multinode'],
     ['concurrency', 'concurrency'],
     ['conc', 'concurrency'],
     ['并发', 'concurrency'],
@@ -5575,7 +5608,12 @@ const POINT_IMPORT_ALIASES: Record<string, string[]> = {
     'median_e2el',
     'metrics.median_e2el'
   ],
-  shape: ['shape', 'Marker', 'Point Marker']
+  shape: ['shape', 'Marker', 'Point Marker'],
+  dp_attention: ['dp_attention', 'DPA', 'DP Attention'],
+  prefill_num_workers: ['prefill_num_workers', 'Prefill Workers', 'Prefill Worker', 'prefill workers'],
+  decode_num_workers: ['decode_num_workers', 'Decode Workers', 'Decode Worker', 'decode workers'],
+  disagg: ['disagg', 'Disagg', 'disaggregated'],
+  is_multinode: ['is_multinode', 'multi_node', 'multinode', 'Multi-node', 'Multi node']
 };
 
 function readEditorColor(record: Record<string, unknown>): string {

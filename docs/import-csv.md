@@ -59,10 +59,12 @@ These fields are optional in editor CSV:
   marker.
 - `TTFT (s)`: optional numeric time-to-first-token latency in seconds.
 - `End-to-end (s)`: optional numeric end-to-end latency in seconds.
-- `Prefill GPUs`, `Decode GPUs`, `Prefill TP`, `Prefill EP`, `Decode TP`,
-  `Decode EP`, `Concurrency`: numeric when present.
-- `Prefill DPA`, `Decode DPA`: boolean when present. Accepted values are
-  `true`, `false`, `1`, `0`, `yes`, `no`, `y`, and `n`.
+- `Prefill GPUs`, `Decode GPUs`, `Prefill TP`, `Prefill EP`,
+  `Prefill Workers`, `Decode TP`, `Decode EP`, `Decode Workers`, and
+  `Concurrency`: numeric when present.
+- `Prefill DPA`, `Decode DPA`, `DPA`, `Disagg`, and `Multi-node`: boolean when
+  present. Accepted values are `true`, `false`, `1`, `0`, `yes`, `no`, `y`,
+  and `n`.
 - `Strategy`: optional display/tooltip text. If empty, the app derives a
   strategy label from decode TP/EP when possible.
 - `Note`: optional tooltip/source text.
@@ -81,11 +83,6 @@ when round-tripping, but they are ignored on import:
 - `Point Index`
 - `Roofline Point`
 - `Total GPUs`
-- `Prefill Workers`
-- `Decode Workers`
-- `DPA`
-- `Disagg`
-- `Multi-node`
 
 ### Header Aliases
 
@@ -105,7 +102,8 @@ Accepted editor CSV aliases include:
   `End-to-end (s)`, `endToEnd`, `end_to_end`, `E2E`, `e2el`, `median_e2el`,
   `metrics.median_e2el`; `shape`, `Marker`, `Point Marker`; snake_case point
   keys such as `num_prefill_gpu`, `decode_tp`, and `prefill_dp_attention`;
-  display labels such as `Prefill GPUs`, `Decode TP`, and `Prefill DPA`
+  display labels such as `Prefill GPUs`, `Decode TP`, `Prefill Workers`,
+  `DPA`, `Disagg`, and `Multi-node`
 
 ## Example
 
@@ -143,8 +141,10 @@ Optional raw benchmark aliases include:
 - Lengths: `isl`, `input_len`, `input_length`, `input_tokens`; `osl`,
   `output_len`, `output_length`, `output_tokens`
 - Parallelism/source: `num_prefill_gpu`, `num_decode_gpu`, `prefill_tp`,
-  `prefill_ep`, `decode_tp`, `decode_ep`, `dp_attention`,
-  `prefill_dp_attention`, `decode_dp_attention`, `conc`, `concurrency`, `date`
+  `prefill_ep`, `prefill_num_workers`, `decode_tp`, `decode_ep`,
+  `decode_num_workers`, `dp_attention`, `prefill_dp_attention`,
+  `decode_dp_attention`, `disagg`, `is_multinode`, `multi_node`, `multinode`,
+  `conc`, `concurrency`, `date`
 
 In raw benchmark CSV, optional metadata may be empty. Missing
 hardware/framework becomes `unknown`, missing precision becomes `default`,
