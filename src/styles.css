@@ -2351,14 +2351,23 @@ p {
 .point-table th.point-cell-ttft,
 .point-table td.point-cell-ttft,
 .point-table th.point-cell-endToEnd,
-.point-table td.point-cell-endToEnd {
+.point-table td.point-cell-endToEnd,
+.point-table th.point-cell-normalizedEndToEnd,
+.point-table td.point-cell-normalizedEndToEnd,
+.point-table th.point-cell-sessionTime,
+.point-table td.point-cell-sessionTime,
+.point-table th.point-cell-prefillTpsPerUser,
+.point-table td.point-cell-prefillTpsPerUser {
   width: 110px;
 }
 
 .point-table td.point-cell-interactivity,
 .point-table td.point-cell-throughput,
 .point-table td.point-cell-ttft,
-.point-table td.point-cell-endToEnd {
+.point-table td.point-cell-endToEnd,
+.point-table td.point-cell-normalizedEndToEnd,
+.point-table td.point-cell-sessionTime,
+.point-table td.point-cell-prefillTpsPerUser {
   text-align: right;
 }
 

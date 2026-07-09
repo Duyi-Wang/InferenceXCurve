@@ -251,7 +251,7 @@ interface GitHubArtifactsResponse {
 }
 
 interface ImportedPointRow {
-  interactivity: number;
+  interactivity?: number;
   throughput: number;
   model: string;
   islOsl: string;
@@ -279,6 +279,9 @@ const TOKEN_STORAGE_KEY = 'inferencex-curve:github-token:v1';
 const LOCAL_SAVE_DEBOUNCE_MS = 350;
 const AUTO_RENDER_DEBOUNCE_MS = 400;
 const MAX_WATERMARK_LENGTH = 64;
+const INFERENCEX_UNOFFICIAL_RUN_REMOTE_API_BASE = 'https://inferencex.semianalysis.com/api';
+const INFERENCEX_UNOFFICIAL_RUN_DEV_PROXY_API_BASE = '/inferencex-api';
+const VITE_DEV_PORTS = new Set(['5173', '5174']);
 const EXPORT_PADDING = 32;
 const EXPORT_TITLE_HEIGHT = 62;
 const EXPORT_LAYOUT_GAP = 16;
@@ -348,10 +351,13 @@ const MODEL_KEY_PRECISION_SUFFIX = /-(?:fp4|fp8|mxfp4|nvfp4)(?:-.*)?$/iu;
 
 const pointColumns: TableColumn[] = [
   { key: 'shape', label: 'Marker' },
-  { key: 'interactivity', label: 'Interactivity', required: true, numeric: true },
+  { key: 'interactivity', label: 'Interactivity', numeric: true },
   { key: 'throughput', label: 'Throughput/GPU', required: true, numeric: true },
   { key: 'ttft', label: 'TTFT (s)', numeric: true },
   { key: 'endToEnd', label: 'End-to-end (s)', numeric: true },
+  { key: 'normalizedEndToEnd', label: 'P90 Normalized E2E (s)', numeric: true },
+  { key: 'sessionTime', label: 'Session Time (min)', numeric: true },
+  { key: 'prefillTpsPerUser', label: 'P90 Prefill TPS/user', numeric: true },
   { key: 'num_prefill_gpu', label: 'Prefill GPUs', numeric: true },
   { key: 'num_decode_gpu', label: 'Decode GPUs', numeric: true },
   { key: 'prefill_tp', label: 'Prefill TP', numeric: true },
@@ -371,9 +377,18 @@ const hiddenPointKeys = [
   'prefill_num_workers',
   'decode_num_workers',
   'disagg',
-  'is_multinode'
+  'is_multinode',
+  'kv_offload'
 ] as const;
 const knownPointKeys = new Set([...pointColumns.map((column) => column.key), ...hiddenPointKeys]);
+const xMetricPointKeys: InferenceCurveXAxisMetric[] = [
+  'interactivity',
+  'endToEnd',
+  'ttft',
+  'normalizedEndToEnd',
+  'sessionTime',
+  'prefillTpsPerUser'
+];
 const pointConfigSplitKeys = [
   'num_prefill_gpu',
   'num_decode_gpu',
@@ -386,7 +401,69 @@ const pointConfigSplitKeys = [
   ...hiddenPointKeys
 ] as const;
 // Point columns whose data-panel display is normalized to two decimal places.
-const DECIMAL_DISPLAY_KEYS = new Set(['interactivity', 'throughput']);
+const DECIMAL_DISPLAY_KEYS = new Set([
+  'interactivity',
+  'throughput',
+  'ttft',
+  'endToEnd',
+  'normalizedEndToEnd',
+  'sessionTime',
+  'prefillTpsPerUser'
+]);
+
+const SESSION_TIME_MINUTE_IMPORT_ALIASES = [
+  'sessionTime',
+  'session_time',
+  'session_time_min',
+  'session_time_minutes',
+  'Session Time',
+  'Session Time (min)',
+  'Session Time (minutes)',
+  'normalized_session_time',
+  'normalized_session_time_min',
+  'normalized_session_time_minutes',
+  'Normalized Session Time',
+  'Normalized Session Time (min)',
+  'Normalized Session Time (minutes)',
+  'mean_normalized_session_time',
+  'mean_normalized_session_time_min',
+  'mean_normalized_session_time_minutes',
+  'Mean Normalized Session Time',
+  'Mean Normalized Session Time (min)',
+  'Mean Normalized Session Time (minutes)',
+  'stime',
+  'metrics.session_time',
+  'metrics.session_time_min',
+  'metrics.session_time_minutes',
+  'metrics.normalized_session_time',
+  'metrics.normalized_session_time_min',
+  'metrics.normalized_session_time_minutes',
+  'metrics.mean_normalized_session_time',
+  'metrics.mean_normalized_session_time_min',
+  'metrics.mean_normalized_session_time_minutes'
+];
+
+const SESSION_TIME_SECOND_IMPORT_ALIASES = [
+  'session_time_s',
+  'session_time_seconds',
+  'Session Time (s)',
+  'Session Time (seconds)',
+  'normalized_session_time_s',
+  'normalized_session_time_seconds',
+  'Normalized Session Time (s)',
+  'Normalized Session Time (seconds)',
+  'mean_normalized_session_time_s',
+  'mean_normalized_session_time_seconds',
+  'Mean Normalized Session Time (s)',
+  'Mean Normalized Session Time (seconds)',
+  'stime_s',
+  'metrics.session_time_s',
+  'metrics.session_time_seconds',
+  'metrics.normalized_session_time_s',
+  'metrics.normalized_session_time_seconds',
+  'metrics.mean_normalized_session_time_s',
+  'metrics.mean_normalized_session_time_seconds'
+];
 
 const pointShapeOptions = [
   { value: '', label: 'Default', symbol: '●' },
@@ -441,8 +518,16 @@ const lineStyleOptions: LineStyleOption[] = [
 const chartMetricOptions: { value: InferenceCurveXAxisMetric; label: string }[] = [
   { value: 'interactivity', label: 'Interactivity' },
   { value: 'endToEnd', label: 'End-to-end' },
-  { value: 'ttft', label: 'TTFT' }
+  { value: 'ttft', label: 'TTFT' },
+  { value: 'normalizedEndToEnd', label: 'Normalized E2E' },
+  { value: 'sessionTime', label: 'Session Time' },
+  { value: 'prefillTpsPerUser', label: 'Prefill TPS / user' }
 ];
+const fixedLengthChartMetrics = new Set<InferenceCurveXAxisMetric>([
+  'interactivity',
+  'endToEnd',
+  'ttft'
+]);
 
 function createInitialDataState(): InitialDataState {
   const defaultSeries = structuredClone(exampleSeries);
@@ -545,6 +630,7 @@ function restorePersistedInferenceXSyncState(value: unknown): PersistedInference
 function createInferenceXSyncAddDraft(config: InferenceXSyncConfig): InferenceXSyncAddDraft {
   return {
     model: config.model,
+    scenario: config.scenario,
     isl: config.isl,
     osl: config.osl,
     precision: config.precision,
@@ -1403,7 +1489,7 @@ function handleMetricSwitchClick(event: MouseEvent): void {
   const button = (event.target as Element | null)?.closest<HTMLButtonElement>('button[data-chart-metric]');
   if (!button || !metricSwitchEl.contains(button)) return;
   const metric = normalizeChartMetric(button.dataset.chartMetric);
-  if (!metric || metric === state.chartMetric) return;
+  if (!metric || metric === state.chartMetric || !isChartMetricAvailable(metric)) return;
   state.chartMetric = metric;
   renderFilterControls();
   renderAll();
@@ -1498,7 +1584,7 @@ function renderInferenceXSyncUpdateSummary(items: InferenceXSyncSummaryItem[]): 
     .slice(0, 8)
     .map(
       (item) =>
-        `${item.name} ${item.precision.toUpperCase()} ${item.isl}/${item.osl}${item.latestDate ? ` (${item.latestDate})` : ''}`
+        `${item.name} ${item.precision.toUpperCase()} ${formatInferenceXSummarySequenceLabel(item)}${item.latestDate ? ` (${item.latestDate})` : ''}`
     );
   const hiddenCount = Math.max(0, items.length - visible.length);
   const suffix = hiddenCount > 0 ? `; +${hiddenCount} more` : '';
@@ -1651,12 +1737,18 @@ function renderInferenceXSpecMethodOptions(values: string[], selected: string): 
   return renderInferenceXAllOptions(values, selected, formatInferenceXSpecMethodLabel);
 }
 
-function renderInferenceXShapeOptions(shapes: { isl: number; osl: number }[], selected: string): string {
+interface InferenceXSequenceOption {
+  scenario: string;
+  isl: number;
+  osl: number;
+}
+
+function renderInferenceXShapeOptions(shapes: InferenceXSequenceOption[], selected: string): string {
   return [
     `<option value="${ALL_VALUE}" ${selected === ALL_VALUE ? 'selected' : ''}>All</option>`,
     ...shapes.map((shape) => {
       const value = makeInferenceXShapeValue(shape);
-      return `<option value="${escapeAttribute(value)}" ${selected === value ? 'selected' : ''}>${escapeHtml(`${shape.isl} / ${shape.osl}`)}</option>`;
+      return `<option value="${escapeAttribute(value)}" ${selected === value ? 'selected' : ''}>${escapeHtml(formatInferenceXSequenceOptionLabel(shape))}</option>`;
     })
   ].join('');
 }
@@ -1681,13 +1773,41 @@ function formatInferenceXSpecMethodLabel(value: string): string {
   return value;
 }
 
-function makeInferenceXShapeValue(shape: { isl: number; osl: number }): string {
-  return `${shape.isl}|${shape.osl}`;
+function makeInferenceXShapeValue(shape: InferenceXSequenceOption): string {
+  return shape.scenario ? `scenario:${shape.scenario}` : `${shape.isl}|${shape.osl}`;
+}
+
+function parseInferenceXShapeValue(value: string): InferenceXSequenceOption | null {
+  if (value.startsWith('scenario:')) {
+    const scenario = value.slice('scenario:'.length).trim();
+    return scenario ? { scenario, isl: 0, osl: 0 } : null;
+  }
+  const [isl, osl] = value.split('|').map((part) => Number(part));
+  return Number.isFinite(isl) && Number.isFinite(osl) ? { scenario: '', isl, osl } : null;
+}
+
+function formatInferenceXSequenceOptionLabel(shape: InferenceXSequenceOption): string {
+  return shape.scenario ? formatScenarioLabel(shape.scenario) : `${shape.isl} / ${shape.osl}`;
+}
+
+function formatInferenceXSummarySequenceLabel(item: Pick<InferenceXSyncSummaryItem, 'scenario' | 'isl' | 'osl'>): string {
+  return item.scenario ? formatScenarioLabel(item.scenario) : `${item.isl}/${item.osl}`;
+}
+
+function formatScenarioLabel(value: string): string {
+  return value
+    .split(/[-_\s]+/u)
+    .filter(Boolean)
+    .map((part) => {
+      if (part.toLowerCase() === 'ai') return 'AI';
+      return part[0] ? `${part[0].toUpperCase()}${part.slice(1)}` : part;
+    })
+    .join(' ');
 }
 
 function getInferenceXAddOptions(): {
   models: string[];
-  shapes: { isl: number; osl: number }[];
+  shapes: InferenceXSequenceOption[];
   precisions: string[];
   hardware: string[];
   frameworks: string[];
@@ -1707,9 +1827,7 @@ function getInferenceXAddOptions(): {
   const sequenceRows =
     inferenceXSync.addShapeSelection === ALL_VALUE
       ? targetScopedRows
-      : targetScopedRows.filter(
-          (row) => row.isl === inferenceXSync.addDraft.isl && row.osl === inferenceXSync.addDraft.osl
-        );
+      : targetScopedRows.filter((row) => inferenceXAvailabilityRowMatchesSequence(row, inferenceXSync.addDraft));
   const sequenceScopedRows = sequenceRows.length ? sequenceRows : targetScopedRows;
   const precisionRows =
     inferenceXSync.addPrecisionSelection === ALL_VALUE
@@ -1738,6 +1856,7 @@ function getInferenceXOptionRows(): InferenceXAvailabilityRow[] {
   return inferenceXSync.configs.map((config) => ({
     model: config.model,
     modelDisplay: getInferenceXDisplayModel(config.model),
+    scenario: config.scenario ?? '',
     isl: config.isl,
     osl: config.osl,
     precision: config.precision,
@@ -1749,16 +1868,23 @@ function getInferenceXOptionRows(): InferenceXAvailabilityRow[] {
   }));
 }
 
-function uniqueShapes(rows: InferenceXAvailabilityRow[]): { isl: number; osl: number }[] {
+function uniqueShapes(rows: InferenceXAvailabilityRow[]): InferenceXSequenceOption[] {
   const seen = new Set<string>();
   return rows
     .filter((row) => {
-      const key = `${row.isl}|${row.osl}`;
+      const key = row.scenario ? `scenario:${row.scenario}` : `${row.isl}|${row.osl}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
     })
-    .sort((a, b) => b.isl - a.isl || b.osl - a.osl);
+    .map((row) => ({ scenario: row.scenario, isl: row.isl, osl: row.osl }))
+    .sort(
+      (a, b) =>
+        Number(Boolean(a.scenario)) - Number(Boolean(b.scenario)) ||
+        b.isl - a.isl ||
+        b.osl - a.osl ||
+        a.scenario.localeCompare(b.scenario)
+    );
 }
 
 function uniqueBooleans(values: boolean[]): boolean[] {
@@ -2069,10 +2195,11 @@ function updateInferenceXAddDraft(field: string, value: string): void {
   } else if (field === 'shape') {
     inferenceXSync.addShapeSelection = value;
     if (value !== ALL_VALUE) {
-      const [isl, osl] = value.split('|').map((part) => Number(part));
-      if (Number.isFinite(isl) && Number.isFinite(osl)) {
-        inferenceXSync.addDraft.isl = isl;
-        inferenceXSync.addDraft.osl = osl;
+      const sequence = parseInferenceXShapeValue(value);
+      if (sequence) {
+        inferenceXSync.addDraft.scenario = sequence.scenario || undefined;
+        inferenceXSync.addDraft.isl = sequence.isl;
+        inferenceXSync.addDraft.osl = sequence.osl;
       }
     }
   } else if (field === 'precision') {
@@ -2107,6 +2234,7 @@ function alignInferenceXAddDraft(preferredField = ''): void {
   if (!candidate) return;
   inferenceXSync.addDraft = {
     model: candidate.modelDisplay,
+    scenario: candidate.scenario || undefined,
     isl: candidate.isl,
     osl: candidate.osl,
     precision: candidate.precision,
@@ -2144,7 +2272,7 @@ function pickBestInferenceXAddRow(
     if (shouldScoreFramework && row.framework === desired.framework) {
       score += preferredField === 'framework' ? 1000 : 80;
     }
-    if (shouldScoreShape && row.isl === desired.isl && row.osl === desired.osl) {
+    if (shouldScoreShape && inferenceXAvailabilityRowMatchesSequence(row, desired)) {
       score += preferredField === 'shape' ? 1000 : 70;
     }
     if (shouldScorePrecision && row.precision === desired.precision) {
@@ -2168,6 +2296,7 @@ function compareInferenceXAvailabilityRows(
     b.date.localeCompare(a.date) ||
     a.hardware.localeCompare(b.hardware) ||
     a.framework.localeCompare(b.framework) ||
+    a.scenario.localeCompare(b.scenario) ||
     b.isl - a.isl ||
     b.osl - a.osl ||
     a.precision.localeCompare(b.precision) ||
@@ -2219,6 +2348,7 @@ function createInferenceXConfigsFromAddDraft(): InferenceXSyncConfig[] {
     return [
       normalizeInferenceXSyncConfig({
         ...inferenceXSync.addDraft,
+        scenario: inferenceXSync.addDraft.scenario,
         framework: inferenceXSync.addFrameworkSelection,
         specMethod: inferenceXSync.addSpecMethodSelection,
         enabled: true
@@ -2232,6 +2362,7 @@ function createInferenceXConfigsFromAddDraft(): InferenceXSyncConfig[] {
     .map((row) =>
       normalizeInferenceXSyncConfig({
         ...inferenceXSync.addDraft,
+        scenario: row.scenario || undefined,
         isl: row.isl,
         osl: row.osl,
         precision: row.precision,
@@ -2254,7 +2385,7 @@ function inferenceXAvailabilityRowMatchesAddDraft(row: InferenceXAvailabilityRow
     row.modelDisplay === draft.model &&
     (
       inferenceXSync.addShapeSelection === ALL_VALUE ||
-      (row.isl === draft.isl && row.osl === draft.osl)
+      inferenceXAvailabilityRowMatchesSequence(row, draft)
     ) &&
     (
       inferenceXSync.addPrecisionSelection === ALL_VALUE ||
@@ -2269,6 +2400,16 @@ function inferenceXAvailabilityRowMatchesAddDraft(row: InferenceXAvailabilityRow
       row.specMethod === inferenceXSync.addSpecMethodSelection) &&
     row.disagg === draft.disagg
   );
+}
+
+function inferenceXAvailabilityRowMatchesSequence(
+  row: Pick<InferenceXAvailabilityRow, 'scenario' | 'isl' | 'osl'>,
+  draft: Pick<InferenceXSyncAddDraft, 'scenario' | 'isl' | 'osl'>
+): boolean {
+  const rowScenario = row.scenario.trim();
+  const draftScenario = (draft.scenario ?? '').trim();
+  if (rowScenario || draftScenario) return rowScenario === draftScenario;
+  return row.isl === draft.isl && row.osl === draft.osl;
 }
 
 function removeInferenceXSyncConfig(index: number): void {
@@ -2414,7 +2555,7 @@ function renderMtpFilterOptions(values: string[]): string {
 }
 
 function renderMetricSwitchOptions(): string {
-  return chartMetricOptions
+  return getAvailableChartMetricOptions()
     .map(
       (option) => `
         <button
@@ -2489,7 +2630,7 @@ function renderSeriesCard(series: SeriesDraft, seriesIndex: number, autoColor: s
             <span class="help-tip-bubble" aria-hidden="true">
               <strong class="help-tip-title">Copy and split by config.</strong>
               <span class="help-tip-row">
-                Groups points by Prefill/Decode GPUs, TP, EP, DPA, and hidden strategy fields.
+                Groups points by Prefill/Decode GPUs, TP, EP, DPA, KV Offload, and hidden strategy fields.
               </span>
               <span class="help-tip-row">
                 Ignores concurrency, interactivity, throughput, point marker, and note.
@@ -3688,10 +3829,13 @@ function seriesToDrafts(series: InferenceCurveSeries[]): SeriesDraft[] {
       const labelMetadata = parsePointMetadataLabel(point.label);
       const strategyMetadata = parsePointStrategy(point.strategy);
       return {
-        interactivity: String(point.interactivity),
+        interactivity: formatPointFieldValue(point.interactivity),
         throughput: String(point.throughput),
         ttft: formatPointFieldValue(point.ttft),
         endToEnd: formatPointFieldValue(point.endToEnd),
+        normalizedEndToEnd: formatPointFieldValue(point.normalizedEndToEnd),
+        sessionTime: formatPointFieldValue(point.sessionTime),
+        prefillTpsPerUser: formatPointFieldValue(point.prefillTpsPerUser),
         shape: normalizePointShapeValue(formatPointFieldValue(point.shape)),
         strategy: point.strategy ?? '',
         tp: formatPointFieldValue(point.tp),
@@ -3712,6 +3856,7 @@ function seriesToDrafts(series: InferenceCurveSeries[]): SeriesDraft[] {
         decode_num_workers: formatPointFieldValue(point.decode_num_workers),
         disagg: formatPointFieldValue(point.disagg),
         is_multinode: formatPointFieldValue(point.is_multinode),
+        kv_offload: formatPointFieldValue(point.kv_offload),
         concurrency: formatPointFieldValue(point.concurrency),
         label: point.label ?? ''
       };
@@ -3738,13 +3883,24 @@ function draftsToSeriesInternal(drafts: SeriesDraft[]): InferenceCurveSeries[] {
         if (isEmptyPointRow(row)) return null;
         const interactivity = parseNumber(row.interactivity);
         const throughput = parseNumber(row.throughput);
-        if (interactivity === null || throughput === null) {
+        const ttft = parseNumber(row.ttft);
+        const endToEnd = parseNumber(row.endToEnd);
+        const normalizedEndToEnd = parseNumber(row.normalizedEndToEnd);
+        const sessionTime = parseNumber(row.sessionTime);
+        const prefillTpsPerUser = parseNumber(row.prefillTpsPerUser);
+        const hasXMetric =
+          interactivity !== null ||
+          ttft !== null ||
+          endToEnd !== null ||
+          normalizedEndToEnd !== null ||
+          sessionTime !== null ||
+          prefillTpsPerUser !== null;
+        if (throughput === null || !hasXMetric) {
           throw new Error(
-            `Line ${seriesIndex + 1}, row ${pointIndex + 1}: Interactivity and Throughput/GPU must be numbers.`
+            `Line ${seriesIndex + 1}, row ${pointIndex + 1}: Throughput/GPU and at least one X-axis metric must be numbers.`
           );
         }
         const point: InferenceCurveSeries['points'][number] = {
-          interactivity,
           throughput,
           precision: draft.precision.trim() || undefined,
           strategy: (row.strategy ?? '').trim() || undefined,
@@ -3752,10 +3908,9 @@ function draftsToSeriesInternal(drafts: SeriesDraft[]): InferenceCurveSeries[] {
           concurrency: parseNumber(row.concurrency) ?? undefined,
           label: row.label.trim() || undefined
         };
+        if (interactivity !== null) point.interactivity = interactivity;
         const pointShape = normalizePointShapeValue(row.shape);
         if (pointShape) point.shape = pointShape;
-        const ttft = parseNumber(row.ttft);
-        const endToEnd = parseNumber(row.endToEnd);
         const numPrefillGpu = parseNumber(row.num_prefill_gpu);
         const numDecodeGpu = parseNumber(row.num_decode_gpu);
         const prefillTp = parseNumber(row.prefill_tp);
@@ -3768,10 +3923,14 @@ function draftsToSeriesInternal(drafts: SeriesDraft[]): InferenceCurveSeries[] {
         const decodeNumWorkers = parseNumber(row.decode_num_workers);
         const disagg = parseBoolean(row.disagg);
         const isMultinode = parseBoolean(row.is_multinode);
+        const kvOffload = (row.kv_offload ?? '').trim();
         const totalGpu =
           numPrefillGpu !== null && numDecodeGpu !== null ? numPrefillGpu + numDecodeGpu : null;
         if (ttft !== null) point.ttft = ttft;
         if (endToEnd !== null) point.endToEnd = endToEnd;
+        if (normalizedEndToEnd !== null) point.normalizedEndToEnd = normalizedEndToEnd;
+        if (sessionTime !== null) point.sessionTime = sessionTime;
+        if (prefillTpsPerUser !== null) point.prefillTpsPerUser = prefillTpsPerUser;
         if (numPrefillGpu !== null) point.num_prefill_gpu = numPrefillGpu;
         if (numDecodeGpu !== null) point.num_decode_gpu = numDecodeGpu;
         if (prefillTp !== null) point.prefill_tp = prefillTp;
@@ -3794,6 +3953,7 @@ function draftsToSeriesInternal(drafts: SeriesDraft[]): InferenceCurveSeries[] {
         if (disagg !== null) point.disagg = disagg;
         else if (numPrefillGpu !== null && numDecodeGpu !== null) point.disagg = true;
         if (isMultinode !== null) point.is_multinode = isMultinode;
+        if (kvOffload) point.kv_offload = kvOffload;
         return point;
       })
       .filter((point): point is NonNullable<typeof point> => point !== null);
@@ -3844,6 +4004,16 @@ function detectPointHeaderMap(headerRow: string[]): Map<number, string> | null {
   const aliases = new Map<string, string>([
     ['interactivity', 'interactivity'],
     ['interactivity (tok/s/user)', 'interactivity'],
+    ['p90 interactivity', 'interactivity'],
+    ['p90 interactivity (tok/s/user)', 'interactivity'],
+    ['median_intvty', 'interactivity'],
+    ['median_interactivity', 'interactivity'],
+    ['metrics.median_intvty', 'interactivity'],
+    ['metrics.median_interactivity', 'interactivity'],
+    ['p90_intvty', 'interactivity'],
+    ['p90_interactivity', 'interactivity'],
+    ['metrics.p90_intvty', 'interactivity'],
+    ['metrics.p90_interactivity', 'interactivity'],
     ['tok/s/user', 'interactivity'],
     ['x', 'interactivity'],
     ['交互性', 'interactivity'],
@@ -3858,16 +4028,103 @@ function detectPointHeaderMap(headerRow: string[]): Map<number, string> | null {
     ['gpu吞吐量', 'throughput'],
     ['ttft', 'ttft'],
     ['ttft (s)', 'ttft'],
+    ['time to first token', 'ttft'],
+    ['time to first token (s)', 'ttft'],
+    ['p90 ttft', 'ttft'],
+    ['p90 ttft (s)', 'ttft'],
+    ['p90 time to first token', 'ttft'],
+    ['p90 time to first token (s)', 'ttft'],
     ['median_ttft', 'ttft'],
+    ['p90_ttft', 'ttft'],
     ['metrics.median_ttft', 'ttft'],
+    ['metrics.p90_ttft', 'ttft'],
     ['end-to-end', 'endToEnd'],
     ['end-to-end (s)', 'endToEnd'],
+    ['end-to-end latency', 'endToEnd'],
+    ['end-to-end latency (s)', 'endToEnd'],
     ['endtoend', 'endToEnd'],
     ['end_to_end', 'endToEnd'],
     ['median_e2el', 'endToEnd'],
+    ['p90_e2el', 'endToEnd'],
+    ['p90_end_to_end', 'endToEnd'],
     ['metrics.median_e2el', 'endToEnd'],
+    ['metrics.p90_e2el', 'endToEnd'],
+    ['metrics.p90_end_to_end', 'endToEnd'],
     ['e2e', 'endToEnd'],
+    ['e2e latency', 'endToEnd'],
+    ['e2e latency (s)', 'endToEnd'],
     ['e2el', 'endToEnd'],
+    ['p90 end-to-end latency', 'endToEnd'],
+    ['p90 end-to-end latency (s)', 'endToEnd'],
+    ['normalized e2e', 'normalizedEndToEnd'],
+    ['normalized e2e (s)', 'normalizedEndToEnd'],
+    ['normalized e2e @ 400 output tokens', 'normalizedEndToEnd'],
+    ['normalized e2e @ 400 output tokens (s)', 'normalizedEndToEnd'],
+    ['p90 normalized e2e', 'normalizedEndToEnd'],
+    ['p90 normalized e2e (s)', 'normalizedEndToEnd'],
+    ['p90 normalized e2e @ 400 output tokens', 'normalizedEndToEnd'],
+    ['p90 normalized e2e @ 400 output tokens (s)', 'normalizedEndToEnd'],
+    ['p75 normalized e2e @ 400 output tokens', 'normalizedEndToEnd'],
+    ['p75 normalized e2e @ 400 output tokens (s)', 'normalizedEndToEnd'],
+    ['normalized_e2e', 'normalizedEndToEnd'],
+    ['normalized_e2e_400_s', 'normalizedEndToEnd'],
+    ['normalized_end_to_end', 'normalizedEndToEnd'],
+    ['normalized_e2el', 'normalizedEndToEnd'],
+    ['p90_normalized_e2e_400_s', 'normalizedEndToEnd'],
+    ['p75_normalized_e2e_400_s', 'normalizedEndToEnd'],
+    ['p90_normalized_e2e', 'normalizedEndToEnd'],
+    ['p90_normalized_e2el', 'normalizedEndToEnd'],
+    ['metrics.normalized_e2e_400_s', 'normalizedEndToEnd'],
+    ['metrics.normalized_e2e', 'normalizedEndToEnd'],
+    ['metrics.normalized_e2el', 'normalizedEndToEnd'],
+    ['metrics.p90_normalized_e2e_400_s', 'normalizedEndToEnd'],
+    ['metrics.p75_normalized_e2e_400_s', 'normalizedEndToEnd'],
+    ['metrics.p90_normalized_e2e', 'normalizedEndToEnd'],
+    ['metrics.p90_normalized_e2el', 'normalizedEndToEnd'],
+    ['session time', 'sessionTime'],
+    ['session time (min)', 'sessionTime'],
+    ['session time (minutes)', 'sessionTime'],
+    ['session time (s)', 'sessionTime'],
+    ['normalized session time', 'sessionTime'],
+    ['normalized session time (min)', 'sessionTime'],
+    ['normalized session time (minutes)', 'sessionTime'],
+    ['normalized session time (s)', 'sessionTime'],
+    ['mean normalized session time', 'sessionTime'],
+    ['mean normalized session time (min)', 'sessionTime'],
+    ['mean normalized session time (minutes)', 'sessionTime'],
+    ['mean normalized session time (s)', 'sessionTime'],
+    ['session_time', 'sessionTime'],
+    ['session_time_min', 'sessionTime'],
+    ['session_time_minutes', 'sessionTime'],
+    ['normalized_session_time', 'sessionTime'],
+    ['normalized_session_time_min', 'sessionTime'],
+    ['normalized_session_time_minutes', 'sessionTime'],
+    ['mean_normalized_session_time', 'sessionTime'],
+    ['mean_normalized_session_time_min', 'sessionTime'],
+    ['mean_normalized_session_time_minutes', 'sessionTime'],
+    ['stime', 'sessionTime'],
+    ['metrics.session_time', 'sessionTime'],
+    ['metrics.session_time_min', 'sessionTime'],
+    ['metrics.session_time_minutes', 'sessionTime'],
+    ['metrics.normalized_session_time', 'sessionTime'],
+    ['metrics.normalized_session_time_min', 'sessionTime'],
+    ['metrics.normalized_session_time_minutes', 'sessionTime'],
+    ['metrics.mean_normalized_session_time', 'sessionTime'],
+    ['metrics.mean_normalized_session_time_min', 'sessionTime'],
+    ['metrics.mean_normalized_session_time_minutes', 'sessionTime'],
+    ['prefill tps/user', 'prefillTpsPerUser'],
+    ['prefill tps / user', 'prefillTpsPerUser'],
+    ['prefill tps per user', 'prefillTpsPerUser'],
+    ['prefill tps per user (tok/s/user)', 'prefillTpsPerUser'],
+    ['prefill tps per user (tok/s)', 'prefillTpsPerUser'],
+    ['p90 prefill tps / user', 'prefillTpsPerUser'],
+    ['p90 prefill tps per user', 'prefillTpsPerUser'],
+    ['p90 prefill tps per user (tok/s)', 'prefillTpsPerUser'],
+    ['prefill_tps_per_user', 'prefillTpsPerUser'],
+    ['prefill_tps_user', 'prefillTpsPerUser'],
+    ['p90_prefill_tps_per_user', 'prefillTpsPerUser'],
+    ['metrics.prefill_tps_per_user', 'prefillTpsPerUser'],
+    ['metrics.p90_prefill_tps_per_user', 'prefillTpsPerUser'],
     ['marker', 'shape'],
     ['point marker', 'shape'],
     ['point shape', 'shape'],
@@ -3930,6 +4187,13 @@ function detectPointHeaderMap(headerRow: string[]): Map<number, string> | null {
     ['multinode', 'is_multinode'],
     ['is_multinode', 'is_multinode'],
     ['multi_node', 'is_multinode'],
+    ['kv offload', 'kv_offload'],
+    ['kv_offload', 'kv_offload'],
+    ['kv offloading', 'kv_offload'],
+    ['kv_offloading', 'kv_offload'],
+    ['offload', 'kv_offload'],
+    ['offload mode', 'kv_offload'],
+    ['offload_mode', 'kv_offload'],
     ['concurrency', 'concurrency'],
     ['conc', 'concurrency'],
     ['并发', 'concurrency'],
@@ -4036,7 +4300,10 @@ function makeUniqueLineId(baseId: string): string {
 }
 
 function makeEmptyPointRow(): PointRow {
-  return Object.fromEntries(pointColumns.map((column) => [column.key, '']));
+  return Object.fromEntries([
+    ...pointColumns.map((column) => [column.key, '']),
+    ...hiddenPointKeys.map((key) => [key, ''])
+  ]);
 }
 
 function ensurePointRow(seriesIndex: number, rowIndex: number): void {
@@ -4047,6 +4314,13 @@ function ensurePointRow(seriesIndex: number, rowIndex: number): void {
 
 function isEmptyPointRow(row: PointRow): boolean {
   return pointColumns.every((column) => !row[column.key]?.trim());
+}
+
+function pointHasAnyXAxisMetric(point: Record<string, unknown>): boolean {
+  return xMetricPointKeys.some((key) => {
+    const value = point[key];
+    return typeof value === 'number' && Number.isFinite(value);
+  });
 }
 
 function countPointRows(drafts: SeriesDraft[]): number {
@@ -4134,8 +4408,51 @@ function normalizePointShapeValue(value: string | undefined): string {
 }
 
 function normalizeChartMetric(value: unknown): InferenceCurveXAxisMetric | undefined {
-  if (value === 'interactivity' || value === 'endToEnd' || value === 'ttft') return value;
-  return undefined;
+  if (typeof value !== 'string') return undefined;
+  return chartMetricOptions.some((option) => option.value === value)
+    ? (value as InferenceCurveXAxisMetric)
+    : undefined;
+}
+
+function getAvailableChartMetricOptions(series: InferenceCurveSeries[] = currentSeries): typeof chartMetricOptions {
+  return isAgenticTraceView(series)
+    ? chartMetricOptions
+    : chartMetricOptions.filter((option) => fixedLengthChartMetrics.has(option.value));
+}
+
+function isChartMetricAvailable(metric: InferenceCurveXAxisMetric, series: InferenceCurveSeries[] = currentSeries): boolean {
+  return getAvailableChartMetricOptions(series).some((option) => option.value === metric);
+}
+
+function ensureChartMetricForCurrentView(series: InferenceCurveSeries[] = currentSeries): void {
+  if (isChartMetricAvailable(state.chartMetric, series)) return;
+  state.chartMetric = 'interactivity';
+}
+
+function isAgenticTraceView(series: InferenceCurveSeries[]): boolean {
+  if (state.islOslFilter !== ALL_VALUE) return isAgenticTraceSequence(state.islOslFilter);
+  const viewSequences = new Set(
+    filterSeriesByMtp(
+      filterSeriesByModelAndSequence(series, state.modelFilter, state.islOslFilter),
+      state.mtpFilter
+    ).map(getSeriesIslOsl)
+  );
+  return viewSequences.size > 0 && Array.from(viewSequences).every(isAgenticTraceSequence);
+}
+
+function isAgenticTraceSequence(value: string): boolean {
+  const normalized = normalizeScenarioKey(value);
+  return normalized === 'agentic' ||
+    normalized.startsWith('agentic-') ||
+    (normalized.includes('agentic') && normalized.includes('trace'));
+}
+
+function normalizeScenarioKey(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, '-')
+    .replace(/^-|-$/gu, '');
 }
 
 function resetSelectionsForSeries(series: InferenceCurveSeries[]): void {
@@ -4227,6 +4544,7 @@ function reconcileFiltersForSeries(series: InferenceCurveSeries[]): void {
   }
 
   ensureSelectedPrecisions(getAvailablePrecisions(getModelSequenceMtpFilteredSeries()));
+  ensureChartMetricForCurrentView(series);
 }
 
 function ensureSelectedPrecisions(precisions: string[]): void {
@@ -4791,7 +5109,10 @@ function comparePointRowsForMerge(a: PointRow, b: PointRow): number {
   return compareNullableNumbers(parseNumber(a.interactivity), parseNumber(b.interactivity)) ||
     compareNullableNumbers(parseNumber(a.throughput), parseNumber(b.throughput)) ||
     compareNullableNumbers(parseNumber(a.ttft), parseNumber(b.ttft)) ||
-    compareNullableNumbers(parseNumber(a.endToEnd), parseNumber(b.endToEnd));
+    compareNullableNumbers(parseNumber(a.endToEnd), parseNumber(b.endToEnd)) ||
+    compareNullableNumbers(parseNumber(a.normalizedEndToEnd), parseNumber(b.normalizedEndToEnd)) ||
+    compareNullableNumbers(parseNumber(a.sessionTime), parseNumber(b.sessionTime)) ||
+    compareNullableNumbers(parseNumber(a.prefillTpsPerUser), parseNumber(b.prefillTpsPerUser));
 }
 
 function compareNullableNumbers(a: number | null, b: number | null): number {
@@ -4799,6 +5120,10 @@ function compareNullableNumbers(a: number | null, b: number | null): number {
   if (a === null) return 1;
   if (b === null) return -1;
   return a - b;
+}
+
+function compareOptionalNumbers(a: number | undefined, b: number | undefined): number {
+  return compareNullableNumbers(a ?? null, b ?? null);
 }
 
 function clearMergePreview(): void {
@@ -5309,6 +5634,26 @@ async function loadGitHubActionSeries(
   token: string,
   onProgress?: (fraction: number) => void
 ): Promise<InferenceCurveSeries[]> {
+  const preflightFailures: string[] = [];
+  if (isInferenceXGitHubRun(run)) {
+    try {
+      setImportStatus('Fetching InferenceX unofficial run JSON...');
+      onProgress?.(-1);
+      const series = await loadInferenceXUnofficialRunSeries(run.runId);
+      const merged = mergeImportedSeries(series);
+      if (merged.length > 0) {
+        onProgress?.(1);
+        return merged;
+      }
+      preflightFailures.push('InferenceX unofficial run JSON: no importable benchmark data found.');
+    } catch (error) {
+      preflightFailures.push(
+        `InferenceX unofficial run JSON: ${error instanceof Error ? error.message : 'failed'}`
+      );
+    }
+    setImportStatus('Fetching GitHub Actions artifacts...');
+  }
+
   const headers = makeGitHubHeaders(token);
   const downloadHeaders = makeGitHubDownloadHeaders(token);
   const artifacts = await fetchGitHubArtifacts(run, headers);
@@ -5345,10 +5690,46 @@ async function loadGitHubActionSeries(
 
   const merged = mergeImportedSeries(imported);
   if (merged.length === 0) {
-    const suffix = failures.length ? ` Last error: ${failures.at(-1)}` : '';
+    const allFailures = [...preflightFailures, ...failures];
+    const suffix = allFailures.length ? ` Last error: ${allFailures.at(-1)}` : '';
     throw new Error(`No benchmark CSV/JSON data found in the action artifacts.${suffix}`);
   }
   return merged;
+}
+
+async function loadInferenceXUnofficialRunSeries(runId: string): Promise<InferenceCurveSeries[]> {
+  const url = `${getInferenceXUnofficialRunApiBase()}/unofficial-run?runId=${encodeURIComponent(runId)}`;
+  const value = await fetchInferenceXUnofficialRunJson(url);
+  return parseJsonImport(JSON.stringify(value), `InferenceX unofficial run ${runId}`);
+}
+
+function getInferenceXUnofficialRunApiBase(): string {
+  return typeof window !== 'undefined' &&
+    (VITE_DEV_PORTS.has(window.location.port) ||
+      ['localhost', '127.0.0.1'].includes(window.location.hostname))
+    ? INFERENCEX_UNOFFICIAL_RUN_DEV_PROXY_API_BASE
+    : INFERENCEX_UNOFFICIAL_RUN_REMOTE_API_BASE;
+}
+
+async function fetchInferenceXUnofficialRunJson(url: string): Promise<unknown> {
+  let response: Response;
+  try {
+    response = await fetch(url, { headers: { Accept: 'application/json' } });
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw new Error(
+        'InferenceX unofficial run API is blocked by CORS or unreachable from this page; falling back to GitHub artifacts.',
+        { cause: error }
+      );
+    }
+    throw error;
+  }
+  if (!response.ok) throw new Error(await formatFetchError(response));
+  return response.json() as Promise<unknown>;
+}
+
+function isInferenceXGitHubRun(run: GitHubRunRef): boolean {
+  return run.owner.toLowerCase() === 'semianalysisai' && run.repo.toLowerCase() === 'inferencex';
 }
 
 function parseGitHubRunUrl(value: string): GitHubRunRef {
@@ -5559,12 +5940,34 @@ function readNativeSeries(value: unknown): InferenceCurveSeries[] {
       .filter(isRecord)
       .map((point) => ({
         ...point,
-        interactivity: Number(point.interactivity),
+        interactivity: asOptionalNumber(
+          point.interactivity ?? point.median_intvty ?? point.p90_intvty ?? point.p90_interactivity
+        ),
         throughput: Number(point.throughput),
         ttft: asOptionalNumber(point.ttft ?? point.median_ttft),
-        endToEnd: asOptionalNumber(point.endToEnd ?? point.end_to_end ?? point.e2el ?? point.median_e2el)
+        endToEnd: asOptionalNumber(
+          point.endToEnd ?? point.end_to_end ?? point.e2el ?? point.median_e2el ?? point.p90_e2el
+        ),
+        normalizedEndToEnd: asOptionalNumber(
+          point.normalizedEndToEnd ??
+            point.normalized_end_to_end ??
+            point.normalized_e2e_400_s ??
+            point.normalized_e2e ??
+            point.normalized_e2el ??
+            point.p90_normalized_e2e_400_s ??
+            point.p75_normalized_e2e_400_s ??
+            point.p90_normalized_e2e ??
+            point.p90_normalized_e2el
+        ),
+        sessionTime: asOptionalSessionTime(point),
+        prefillTpsPerUser: asOptionalNumber(
+          point.prefillTpsPerUser ??
+            point.prefill_tps_per_user ??
+            point.prefill_tps_user ??
+            point.p90_prefill_tps_per_user
+        )
       }))
-      .filter((point) => Number.isFinite(point.interactivity) && Number.isFinite(point.throughput))
+      .filter((point) => Number.isFinite(point.throughput) && pointHasAnyXAxisMetric(point))
   }));
 }
 
@@ -5588,32 +5991,264 @@ function extractBenchmarkRecords(value: unknown): Record<string, unknown>[] {
 }
 
 function looksLikeBenchmarkRecord(record: Record<string, unknown>): boolean {
-  return readMetricNumber(record, ['metrics.median_intvty', 'median_intvty', 'interactivity', 'x']) !== null &&
-    readMetricNumber(record, ['metrics.tput_per_gpu', 'tput_per_gpu', 'throughput', 'throughput_per_gpu', 'y']) !== null;
+  return readImportedThroughput(record) !== null && readAnyImportedXAxisMetric(record) !== null;
+}
+
+function readAnyImportedXAxisMetric(record: Record<string, unknown>): number | null {
+  for (const key of xMetricPointKeys) {
+    const value = readImportedXAxisMetric(record, key);
+    if (value !== null) return value;
+  }
+  return null;
+}
+
+function readImportedXAxisMetric(
+  record: Record<string, unknown>,
+  key: InferenceCurveXAxisMetric
+): number | null {
+  if (key === 'interactivity') {
+    return readMetricNumber(record, [
+      'metrics.median_intvty',
+      'metrics.interactivity',
+      'metrics.p90_intvty',
+      'metrics.p90_interactivity',
+      'median_intvty',
+      'median_interactivity',
+      'p90_intvty',
+      'p90_interactivity',
+      'interactivity',
+      'P90 Interactivity',
+      'tok/s/user',
+      'x'
+    ]);
+  }
+  if (key === 'ttft') {
+    return readMetricNumber(record, [
+      'metrics.median_ttft',
+      'metrics.p90_ttft',
+      'median_ttft',
+      'p90_ttft',
+      'ttft',
+      'TTFT',
+      'TTFT (s)',
+      'Time To First Token',
+      'Time To First Token (s)',
+      'P90 TTFT',
+      'P90 TTFT (s)',
+      'P90 Time To First Token',
+      'P90 Time To First Token (s)'
+    ]);
+  }
+  if (key === 'endToEnd') {
+    return readMetricNumber(record, [
+      'metrics.median_e2el',
+      'metrics.p90_e2el',
+      'metrics.p90_end_to_end',
+      'median_e2el',
+      'p90_e2el',
+      'p90_end_to_end',
+      'endToEnd',
+      'end_to_end',
+      'end-to-end',
+      'End-to-end (s)',
+      'End-to-end Latency',
+      'End-to-end Latency (s)',
+      'E2E',
+      'E2E Latency',
+      'E2E Latency (s)',
+      'e2el',
+      'P90 End-to-end Latency',
+      'P90 End-to-end Latency (s)'
+    ]);
+  }
+  if (key === 'normalizedEndToEnd') {
+    return readMetricNumber(record, [
+      'metrics.p90_normalized_e2e_400_s',
+      'metrics.p75_normalized_e2e_400_s',
+      'metrics.normalized_e2e_400_s',
+      'metrics.normalized_e2e',
+      'metrics.normalized_e2el',
+      'metrics.p90_normalized_e2e',
+      'metrics.p90_normalized_e2el',
+      'normalizedEndToEnd',
+      'normalized_end_to_end',
+      'normalized_e2e_400_s',
+      'normalized_e2e',
+      'normalized_e2el',
+      'p90_normalized_e2e_400_s',
+      'p75_normalized_e2e_400_s',
+      'p90_normalized_e2e',
+      'p90_normalized_e2el',
+      'Normalized E2E',
+      'Normalized E2E (s)',
+      'Normalized E2E @ 400 output tokens',
+      'Normalized E2E @ 400 output tokens (s)',
+      'P90 Normalized E2E',
+      'P90 Normalized E2E (s)',
+      'P90 Normalized E2E @ 400 output tokens',
+      'P90 Normalized E2E @ 400 output tokens (s)',
+      'P75 Normalized E2E @ 400 output tokens',
+      'P75 Normalized E2E @ 400 output tokens (s)'
+    ]);
+  }
+  if (key === 'sessionTime') {
+    return readImportedSessionTimeMetric(record);
+  }
+  return readMetricNumber(record, [
+    'metrics.prefill_tps_per_user',
+    'metrics.p90_prefill_tps_per_user',
+    'prefillTpsPerUser',
+    'prefill_tps_per_user',
+    'prefill_tps_user',
+    'p90_prefill_tps_per_user',
+    'Prefill TPS/user',
+    'Prefill TPS / user',
+    'Prefill TPS per user',
+    'Prefill TPS per user (tok/s/user)',
+    'Prefill TPS per user (tok/s)',
+    'P90 Prefill TPS / user',
+    'P90 Prefill TPS per user',
+    'P90 Prefill TPS per user (tok/s)'
+  ]);
+}
+
+function readImportedSessionTimeMetric(record: Record<string, unknown>): number | null {
+  const minutes = readMetricNumber(record, SESSION_TIME_MINUTE_IMPORT_ALIASES);
+  if (minutes !== null) return minutes;
+  const seconds = readMetricNumber(record, SESSION_TIME_SECOND_IMPORT_ALIASES);
+  return seconds !== null ? seconds / 60 : null;
+}
+
+function readImportedThroughput(record: Record<string, unknown>): number | null {
+  return readMetricNumber(record, [
+    'metrics.tput_per_gpu',
+    'tput_per_gpu',
+    'throughput_per_gpu',
+    'token throughput per gpu',
+    'token throughput per gpu (tok/s/gpu)',
+    'throughput',
+    'Throughput/GPU',
+    'Throughput/GPU (tok/s/gpu)',
+    'tok/s/gpu',
+    'y'
+  ]);
 }
 
 // Extra header aliases so a CSV produced by Download CSV (whose headers carry
 // units / different wording) round-trips through the editor import path.
 const POINT_IMPORT_ALIASES: Record<string, string[]> = {
-  interactivity: ['interactivity', 'Interactivity (tok/s/user)', 'tok/s/user'],
+  interactivity: [
+    'interactivity',
+    'Interactivity (tok/s/user)',
+    'P90 Interactivity',
+    'P90 Interactivity (tok/s/user)',
+    'median_intvty',
+    'p90_intvty',
+    'p90_interactivity',
+    'metrics.median_intvty',
+    'metrics.p90_intvty',
+    'metrics.p90_interactivity',
+    'tok/s/user'
+  ],
   throughput: ['throughput', 'Throughput/GPU', 'Throughput/GPU (tok/s/gpu)', 'tok/s/gpu'],
-  ttft: ['ttft', 'TTFT', 'TTFT (s)', 'median_ttft', 'metrics.median_ttft'],
+  ttft: [
+    'ttft',
+    'TTFT',
+    'TTFT (s)',
+    'Time To First Token',
+    'Time To First Token (s)',
+    'P90 TTFT',
+    'P90 TTFT (s)',
+    'P90 Time To First Token',
+    'P90 Time To First Token (s)',
+    'median_ttft',
+    'p90_ttft',
+    'metrics.median_ttft',
+    'metrics.p90_ttft'
+  ],
   endToEnd: [
     'endToEnd',
     'end_to_end',
     'End-to-end',
     'End-to-end (s)',
+    'End-to-end Latency',
+    'End-to-end Latency (s)',
     'E2E',
+    'E2E Latency',
+    'E2E Latency (s)',
     'e2el',
     'median_e2el',
-    'metrics.median_e2el'
+    'p90_e2el',
+    'p90_end_to_end',
+    'P90 End-to-end Latency',
+    'P90 End-to-end Latency (s)',
+    'metrics.median_e2el',
+    'metrics.p90_e2el',
+    'metrics.p90_end_to_end'
+  ],
+  normalizedEndToEnd: [
+    'normalizedEndToEnd',
+    'normalized_end_to_end',
+    'normalized_e2e_400_s',
+    'normalized_e2e',
+    'normalized_e2el',
+    'Normalized E2E',
+    'Normalized E2E (s)',
+    'Normalized E2E @ 400 output tokens',
+    'Normalized E2E @ 400 output tokens (s)',
+    'P90 Normalized E2E',
+    'P90 Normalized E2E (s)',
+    'P90 Normalized E2E @ 400 output tokens',
+    'P90 Normalized E2E @ 400 output tokens (s)',
+    'P75 Normalized E2E @ 400 output tokens',
+    'P75 Normalized E2E @ 400 output tokens (s)',
+    'p90_normalized_e2e_400_s',
+    'p75_normalized_e2e_400_s',
+    'p90_normalized_e2e',
+    'p90_normalized_e2el',
+    'metrics.normalized_e2e_400_s',
+    'metrics.normalized_e2e',
+    'metrics.normalized_e2el',
+    'metrics.p90_normalized_e2e_400_s',
+    'metrics.p75_normalized_e2e_400_s',
+    'metrics.p90_normalized_e2e',
+    'metrics.p90_normalized_e2el'
+  ],
+  sessionTime: [...SESSION_TIME_MINUTE_IMPORT_ALIASES, ...SESSION_TIME_SECOND_IMPORT_ALIASES],
+  prefillTpsPerUser: [
+    'prefillTpsPerUser',
+    'prefill_tps_per_user',
+    'prefill_tps_user',
+    'Prefill TPS/user',
+    'Prefill TPS / user',
+    'Prefill TPS per user',
+    'Prefill TPS per user (tok/s/user)',
+    'Prefill TPS per user (tok/s)',
+    'P90 Prefill TPS / user',
+    'P90 Prefill TPS per user',
+    'P90 Prefill TPS per user (tok/s)',
+    'p90_prefill_tps_per_user',
+    'metrics.prefill_tps_per_user',
+    'metrics.p90_prefill_tps_per_user'
   ],
   shape: ['shape', 'Marker', 'Point Marker'],
   dp_attention: ['dp_attention', 'DPA', 'DP Attention'],
   prefill_num_workers: ['prefill_num_workers', 'Prefill Workers', 'Prefill Worker', 'prefill workers'],
   decode_num_workers: ['decode_num_workers', 'Decode Workers', 'Decode Worker', 'decode workers'],
   disagg: ['disagg', 'Disagg', 'disaggregated'],
-  is_multinode: ['is_multinode', 'multi_node', 'multinode', 'Multi-node', 'Multi node']
+  is_multinode: ['is_multinode', 'multi_node', 'multinode', 'Multi-node', 'Multi node'],
+  kv_offload: [
+    'kv_offload',
+    'KV Offload',
+    'kv offload',
+    'kv_offloading',
+    'KV Offloading',
+    'kv offloading',
+    'offload',
+    'offload_mode',
+    'Offload Mode',
+    'offload mode'
+  ]
 };
 
 function readEditorColor(record: Record<string, unknown>): string {
@@ -5658,6 +6293,11 @@ function seriesFromEditorRecords(records: Record<string, unknown>[]): InferenceC
 
     const point = makeEmptyPointRow();
     [...pointColumns.map((column) => column.key), ...hiddenPointKeys].forEach((key) => {
+      if (key === 'sessionTime') {
+        const value = readImportedSessionTimeField(record);
+        if (value) point[key] = value;
+        return;
+      }
       const column = pointColumns.find((item) => item.key === key);
       const aliases = POINT_IMPORT_ALIASES[key] ?? [key, column?.label ?? key];
       const value = readMetricString(record, aliases);
@@ -5668,6 +6308,11 @@ function seriesFromEditorRecords(records: Record<string, unknown>[]): InferenceC
   });
 
   return draftsToSeries(Array.from(drafts.values()).filter((draft) => draft.points.length > 0));
+}
+
+function readImportedSessionTimeField(record: Record<string, unknown>): string {
+  const value = readImportedSessionTimeMetric(record);
+  return value !== null ? formatPointFieldValue(value) : '';
 }
 
 function seriesFromBenchmarkRecords(
@@ -5707,7 +6352,16 @@ function seriesFromBenchmarkRecords(
 
   return Array.from(grouped.values()).map((line) => ({
     ...line,
-    points: line.points.sort((a, b) => a.interactivity - b.interactivity || a.throughput - b.throughput)
+    points: line.points.sort(
+      (a, b) =>
+        compareOptionalNumbers(a.interactivity, b.interactivity) ||
+        compareOptionalNumbers(a.endToEnd, b.endToEnd) ||
+        compareOptionalNumbers(a.ttft, b.ttft) ||
+        compareOptionalNumbers(a.normalizedEndToEnd, b.normalizedEndToEnd) ||
+        compareOptionalNumbers(a.sessionTime, b.sessionTime) ||
+        compareOptionalNumbers(a.prefillTpsPerUser, b.prefillTpsPerUser) ||
+        a.throughput - b.throughput
+    )
   }));
 }
 
@@ -5715,42 +6369,26 @@ function importedPointFromBenchmarkRecord(
   record: Record<string, unknown>,
   sourceName: string
 ): ImportedPointRow | null {
-  const interactivity = readMetricNumber(record, [
-    'metrics.median_intvty',
-    'metrics.interactivity',
-    'median_intvty',
-    'median_interactivity',
-    'interactivity',
-    'tok/s/user',
-    'x'
-  ]);
-  const throughput = readMetricNumber(record, [
-    'metrics.tput_per_gpu',
-    'tput_per_gpu',
-    'throughput_per_gpu',
-    'token throughput per gpu',
-    'throughput',
-    'tok/s/gpu',
-    'y'
-  ]);
-  if (interactivity === null || throughput === null) return null;
-  const ttft = readMetricNumber(record, [
-    'metrics.median_ttft',
-    'median_ttft',
-    'ttft',
-    'TTFT',
-    'TTFT (s)'
-  ]);
-  const endToEnd = readMetricNumber(record, [
-    'metrics.median_e2el',
-    'median_e2el',
-    'endToEnd',
-    'end_to_end',
-    'end-to-end',
-    'End-to-end (s)',
-    'E2E',
-    'e2el'
-  ]);
+  const interactivity = readImportedXAxisMetric(record, 'interactivity');
+  const throughput = readImportedThroughput(record);
+  const ttft = readImportedXAxisMetric(record, 'ttft');
+  const endToEnd = readImportedXAxisMetric(record, 'endToEnd');
+  const normalizedEndToEnd = readImportedXAxisMetric(record, 'normalizedEndToEnd');
+  const sessionTime = readImportedXAxisMetric(record, 'sessionTime');
+  const prefillTpsPerUser = readImportedXAxisMetric(record, 'prefillTpsPerUser');
+  if (
+    throughput === null ||
+    (
+      interactivity === null &&
+      ttft === null &&
+      endToEnd === null &&
+      normalizedEndToEnd === null &&
+      sessionTime === null &&
+      prefillTpsPerUser === null
+    )
+  ) {
+    return null;
+  }
 
   const hardware =
     normalizeImportedHardware(readMetricString(record, ['hardware', 'hw_key', 'hwKey', 'hw', 'gpu', 'accelerator'])) ||
@@ -5760,9 +6398,30 @@ function importedPointFromBenchmarkRecord(
   const mtp = specMethod === MTP_VALUE ? MTP_VALUE : NON_MTP_VALUE;
   const model = formatImportedModelFromRecord(record, sourceName);
   const precision = (readMetricString(record, ['precision', 'dtype', 'quantization']) || DEFAULT_PRECISION).toLowerCase();
+  const scenario = readMetricString(record, [
+    'scenario',
+    'benchmark_scenario',
+    'scenario type',
+    'scenario_type',
+    'metrics.scenario_type',
+    'benchmark type',
+    'benchmark_type',
+    'metrics.benchmark_type',
+    'workload',
+    'workload_type',
+    'trace',
+    'trace_type',
+    'dataset',
+    'task'
+  ]);
   const isl = readMetricNumber(record, ['isl', 'input_len', 'input_length', 'input sequence length', 'input_tokens']);
   const osl = readMetricNumber(record, ['osl', 'output_len', 'output_length', 'output sequence length', 'output_tokens']);
-  const islOsl = isl !== null && osl !== null ? `ISL ${isl} / OSL ${osl}` : DEFAULT_ISL_OSL;
+  const islOsl = scenario
+    ? formatScenarioLabel(scenario)
+    : isl !== null && osl !== null
+      ? `ISL ${isl} / OSL ${osl}`
+      : DEFAULT_ISL_OSL;
+  const offload = readImportedOffloadConfig(record);
   const lineName = formatImportedLineName(hardware, framework, specMethod);
   const title = `${model} ${islOsl} ${precision.toUpperCase()} ${lineName}`;
   const prefillGpu = readMetricNumber(record, ['num_prefill_gpu', 'prefill gpus', 'prefill_gpu']);
@@ -5785,16 +6444,29 @@ function importedPointFromBenchmarkRecord(
   const totalGpu = prefillGpu !== null && decodeGpu !== null ? prefillGpu + decodeGpu : null;
 
   const point: InferenceCurveSeries['points'][number] = {
-    interactivity,
     throughput,
     precision,
     strategy: makeStrategyLabel(decodeTp, decodeEp),
     tp: totalGpu ?? decodeTp ?? undefined,
     concurrency: concurrency ?? undefined,
-    label: makeImportedPointLabel(date, prefillTp, prefillEp, prefillGpu, decodeGpu, prefillDpa, decodeDpa, sourceName)
+    label: makeImportedPointLabel(
+      date,
+      prefillTp,
+      prefillEp,
+      prefillGpu,
+      decodeGpu,
+      prefillDpa,
+      decodeDpa,
+      offload.label,
+      sourceName
+    )
   };
+  if (interactivity !== null) point.interactivity = interactivity;
   if (ttft !== null) point.ttft = ttft;
   if (endToEnd !== null) point.endToEnd = endToEnd;
+  if (normalizedEndToEnd !== null) point.normalizedEndToEnd = normalizedEndToEnd;
+  if (sessionTime !== null) point.sessionTime = sessionTime;
+  if (prefillTpsPerUser !== null) point.prefillTpsPerUser = prefillTpsPerUser;
   if (prefillGpu !== null) point.num_prefill_gpu = prefillGpu;
   if (decodeGpu !== null) point.num_decode_gpu = decodeGpu;
   if (prefillTp !== null) point.prefill_tp = prefillTp;
@@ -5804,13 +6476,27 @@ function importedPointFromBenchmarkRecord(
   if (prefillDpa !== undefined) point.prefill_dp_attention = prefillDpa;
   if (decodeDpa !== undefined) point.decode_dp_attention = decodeDpa;
   if (prefillDpa !== undefined && prefillDpa === decodeDpa) point.dp_attention = prefillDpa;
+  if (offload.label) point.kv_offload = offload.label;
   if (shape) point.shape = shape;
   point.prefill_num_workers = readMetricNumber(record, ['prefill_num_workers', 'prefill workers']) ?? undefined;
   point.decode_num_workers = readMetricNumber(record, ['decode_num_workers', 'decode workers']) ?? undefined;
   point.disagg = readMetricBoolean(record, ['disagg']) ?? (prefillGpu !== null && decodeGpu !== null);
   point.is_multinode = readMetricBoolean(record, ['is_multinode', 'multi_node', 'multinode']) ?? undefined;
 
-  return { interactivity, throughput, model, islOsl, precision, mtp, hardware, framework, specMethod, lineName, title, point };
+  return {
+    interactivity: interactivity ?? undefined,
+    throughput,
+    model,
+    islOsl,
+    precision,
+    mtp,
+    hardware,
+    framework,
+    specMethod,
+    lineName,
+    title,
+    point
+  };
 }
 
 function makeImportedPointLabel(
@@ -5821,6 +6507,7 @@ function makeImportedPointLabel(
   decodeGpu: number | null,
   prefillDpa: boolean | undefined,
   decodeDpa: boolean | undefined,
+  offloadLabel: string,
   sourceName: string
 ): string {
   return [
@@ -5830,6 +6517,7 @@ function makeImportedPointLabel(
     prefillGpu !== null ? `prefill GPUs ${prefillGpu}` : '',
     prefillDpa !== undefined ? `prefill DPA ${prefillDpa}` : '',
     decodeDpa !== undefined ? `decode DPA ${decodeDpa}` : '',
+    offloadLabel ? offloadLabel : '',
     `source ${sourceName}`
   ]
     .filter(Boolean)
@@ -5855,6 +6543,10 @@ function mergeImportedSeries(series: InferenceCurveSeries[]): InferenceCurveSeri
         point.throughput,
         point.ttft,
         point.endToEnd,
+        point.normalizedEndToEnd,
+        point.sessionTime,
+        point.prefillTpsPerUser,
+        point.kv_offload,
         point.precision,
         point.concurrency,
         point.label
@@ -6099,12 +6791,58 @@ function normalizeImportedSpecMethod(value: string): string {
   return normalized;
 }
 
-function formatImportedLineName(hardware: string, framework: string, specMethod: string): string {
+function readImportedOffloadConfig(record: Record<string, unknown>): { key: string; label: string } {
+  const mode = readMetricString(record, ['offload_mode', 'offload mode', 'metrics.offload_mode']);
+  const kvOffloading = readMetricString(record, ['kv_offloading', 'kv offloading', 'metrics.kv_offloading']);
+  const backend = readMetricString(record, [
+    'kv_offload_backend',
+    'kv offload backend',
+    'metrics.kv_offload_backend'
+  ]);
+  if (!mode && !kvOffloading && !backend) return { key: '', label: '' };
+
+  const modeEnabled = normalizeOffloadFlag(mode);
+  const kvEnabled = kvOffloading ? normalizeOffloadFlag(kvOffloading) : null;
+  const enabled = modeEnabled ?? kvEnabled ?? Boolean(backend);
+  if (!enabled) return { key: 'offload-off', label: 'KV offload off' };
+
+  const target = normalizeOffloadPart(kvOffloading) || normalizeOffloadPart(mode) || 'on';
+  const backendKey = normalizeOffloadPart(backend);
+  const label = [
+    'KV offload',
+    target === 'on' ? 'on' : target.toUpperCase(),
+    backendKey ? `via ${formatFrameworkLabel(backendKey)}` : ''
+  ]
+    .filter(Boolean)
+    .join(' ');
+  return {
+    key: ['offload', target, backendKey].filter(Boolean).join('-'),
+    label
+  };
+}
+
+function normalizeOffloadFlag(value: string): boolean | null {
+  const normalized = normalizeOffloadPart(value);
+  if (!normalized) return null;
+  if (['off', 'none', 'false', 'no', 'n', '0', 'disabled', 'disable'].includes(normalized)) return false;
+  if (['on', 'true', 'yes', 'y', '1', 'enabled', 'enable'].includes(normalized)) return true;
+  return true;
+}
+
+function normalizeOffloadPart(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/gu, '-').replace(/^-|-$/gu, '');
+}
+
+function formatImportedLineName(
+  hardware: string,
+  framework: string,
+  specMethod: string
+): string {
   const hardwareLabel = formatHardwareLabel(hardware);
   const frameworkLabel = formatFrameworkLabel(framework);
   const suffix = specMethod === MTP_VALUE ? ' MTP' : '';
   return frameworkLabel === 'Unknown'
-    ? `${hardwareLabel}${suffix}`
+    ? [hardwareLabel, suffix.trim()].filter(Boolean).join(' ')
     : `${hardwareLabel} (${frameworkLabel}${suffix})`;
 }
 
@@ -6132,7 +6870,9 @@ function formatFrameworkLabel(value: string): string {
     sglang: 'SGLang',
     dynamo: 'Dynamo',
     trt: 'TRT',
-    tensorrt: 'TRT'
+    tensorrt: 'TRT',
+    vllm: 'vLLM',
+    lmcache: 'LMCache'
   };
   return normalized
     .split(/[-_\s]+/u)
@@ -6175,6 +6915,32 @@ function asOptionalNumber(value: unknown): number | undefined {
     if (Number.isFinite(parsed)) return parsed;
   }
   return undefined;
+}
+
+function asOptionalSessionTime(point: Record<string, unknown>): number | undefined {
+  const minutes = asOptionalNumber(
+    point.sessionTime ??
+      point.session_time ??
+      point.session_time_min ??
+      point.session_time_minutes ??
+      point.normalized_session_time ??
+      point.normalized_session_time_min ??
+      point.normalized_session_time_minutes ??
+      point.mean_normalized_session_time ??
+      point.mean_normalized_session_time_min ??
+      point.mean_normalized_session_time_minutes
+  );
+  if (minutes !== undefined) return minutes;
+
+  const seconds = asOptionalNumber(
+    point.session_time_s ??
+      point.session_time_seconds ??
+      point.normalized_session_time_s ??
+      point.normalized_session_time_seconds ??
+      point.mean_normalized_session_time_s ??
+      point.mean_normalized_session_time_seconds
+  );
+  return seconds !== undefined ? seconds / 60 : undefined;
 }
 
 async function formatFetchError(response: Response): Promise<string> {
@@ -6322,25 +7088,22 @@ function buildChartCsvRows(mode: CsvExportMode): string[][] {
       currentPointByKey.set(`${series.id}|${point.pointIndex}`, point);
     });
   });
-  const prepared =
-    mode === 'visible'
-      ? currentPrepared
-      : prepareInferenceCurveSeries(
-          sourceSeries,
-          state.highContrast,
-          state.theme,
-          getInferenceCurveColorSourceSeries(
-            chartSeries,
-            state.activeSeriesIds,
-            Array.from(state.selectedPrecisions),
-            'interactivity'
-          ),
-          'interactivity'
-        );
   const colorBySeriesId = new Map(currentPrepared.map((series) => [series.id, series.color]));
-  prepared.forEach((series) => {
-    if (!colorBySeriesId.has(series.id)) colorBySeriesId.set(series.id, series.color);
-  });
+  const renderOrderBySeriesId = new Map(currentPrepared.map((series) => [series.id, series.renderOrder]));
+  const exportSeries =
+    mode === 'visible'
+      ? currentPrepared.map((series) => ({
+          id: series.id,
+          color: series.color,
+          renderOrder: series.renderOrder,
+          points: series.points.map((point) => ({ point, pointIndex: point.pointIndex }))
+        }))
+      : sourceSeries.map((line, seriesIndex) => ({
+          id: line.id,
+          color: colorBySeriesId.get(line.id) ?? line.color ?? '',
+          renderOrder: renderOrderBySeriesId.get(line.id) ?? getSeriesRenderOrder(line, seriesIndex),
+          points: line.points.map((point, pointIndex) => ({ point, pointIndex }))
+        }));
   const rows: string[][] = [
     [
       'Line ID',
@@ -6365,6 +7128,9 @@ function buildChartCsvRows(mode: CsvExportMode): string[][] {
       'Throughput/GPU (tok/s/gpu)',
       'TTFT (s)',
       'End-to-end (s)',
+      'P90 Normalized E2E @ 400 output tokens (s)',
+      'Session Time (min)',
+      'P90 Prefill TPS/user',
       'Prefill GPUs',
       'Decode GPUs',
       'Total GPUs',
@@ -6379,20 +7145,22 @@ function buildChartCsvRows(mode: CsvExportMode): string[][] {
       'DPA',
       'Disagg',
       'Multi-node',
+      'KV Offload',
       'Concurrency',
       'Strategy',
       'Note'
     ]
   ];
 
-  prepared.forEach((series) => {
+  exportSeries.forEach((series) => {
     const line = lineById.get(series.id);
     if (!line) return;
     const activeLine = state.activeSeriesIds.has(series.id);
     const filteredLine = chartSeriesIds.has(series.id);
 
-    series.points.forEach((point) => {
-      const currentPoint = currentPointByKey.get(`${series.id}|${point.pointIndex}`);
+    series.points.forEach(({ point, pointIndex }) => {
+      const currentPoint = currentPointByKey.get(`${series.id}|${pointIndex}`);
+      const pointPrecision = String(point.precision ?? getSeriesPrecision(line));
       const prefillGpus = readExportNumber(point.num_prefill_gpu);
       const decodeGpus = readExportNumber(point.num_decode_gpu);
       const totalGpus =
@@ -6400,7 +7168,7 @@ function buildChartCsvRows(mode: CsvExportMode): string[][] {
       const includedInChart =
         filteredLine &&
         activeLine &&
-        state.selectedPrecisions.has(point.precision) &&
+        state.selectedPrecisions.has(pointPrecision) &&
         Boolean(currentPoint) &&
         (state.showNonOptimalPoints || currentPoint!.roof);
 
@@ -6422,13 +7190,16 @@ function buildChartCsvRows(mode: CsvExportMode): string[][] {
         String(line.renderOrder ?? series.renderOrder),
         formatExportValue(includedInChart),
         formatExportValue(activeLine),
-        String(point.pointIndex + 1),
+        String(pointIndex + 1),
         formatExportValue(currentPoint?.roof ?? false),
         normalizePointShapeValue(String(point.shape ?? '')) || '',
         formatExportValue(point.interactivity),
         formatExportValue(point.throughput),
         formatExportValue(point.ttft),
         formatExportValue(point.endToEnd),
+        formatExportValue(point.normalizedEndToEnd),
+        formatExportValue(point.sessionTime),
+        formatExportValue(point.prefillTpsPerUser),
         formatExportValue(point.num_prefill_gpu),
         formatExportValue(point.num_decode_gpu),
         formatExportValue(totalGpus),
@@ -6443,6 +7214,7 @@ function buildChartCsvRows(mode: CsvExportMode): string[][] {
         formatExportValue(point.dp_attention),
         formatExportValue(point.disagg),
         formatExportValue(point.is_multinode),
+        formatExportValue(point.kv_offload),
         formatExportValue(point.concurrency),
         String(point.strategy ?? ''),
         String(point.label ?? '')

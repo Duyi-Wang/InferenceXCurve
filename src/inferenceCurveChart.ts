@@ -1,10 +1,13 @@
 import * as d3 from 'd3';
 
 export interface InferenceCurvePoint {
-  interactivity: number;
+  interactivity?: number;
   throughput: number;
   ttft?: number;
   endToEnd?: number;
+  normalizedEndToEnd?: number;
+  sessionTime?: number;
+  prefillTpsPerUser?: number;
   strategy?: string;
   precision?: string;
   tp?: number;
@@ -22,6 +25,7 @@ export interface InferenceCurvePoint {
   decode_num_workers?: number;
   disagg?: boolean;
   is_multinode?: boolean;
+  kv_offload?: string;
   concurrency?: number;
   shape?: string;
   label?: string;
@@ -65,7 +69,13 @@ export interface InferenceCurveChartOptions {
   yLabel?: string;
 }
 
-export type InferenceCurveXAxisMetric = 'interactivity' | 'endToEnd' | 'ttft';
+export type InferenceCurveXAxisMetric =
+  | 'interactivity'
+  | 'endToEnd'
+  | 'ttft'
+  | 'normalizedEndToEnd'
+  | 'sessionTime'
+  | 'prefillTpsPerUser';
 
 interface ChartPoint extends InferenceCurvePoint {
   seriesId: string;
@@ -207,27 +217,60 @@ const LIGHTNESS = {
 
 const X_AXIS_METRICS: Record<
   InferenceCurveXAxisMetric,
-  { label: string; tooltipLabel: string; unit: string; title: string }
+  { label: string; tooltipLabel: string; unit: string; title: string; higherIsBetter: boolean }
 > = {
   interactivity: {
     label: 'Interactivity (tok/s/user)',
     tooltipLabel: 'Interactivity',
     unit: 'tok/s/user',
-    title: 'Token Throughput per GPU vs. Interactivity'
+    title: 'Token Throughput per GPU vs. Interactivity',
+    higherIsBetter: true
   },
   endToEnd: {
-    label: 'End-to-end (s)',
-    tooltipLabel: 'End-to-end',
+    label: 'End-to-end Latency (s)',
+    tooltipLabel: 'End-to-end Latency',
     unit: 's',
-    title: 'Token Throughput per GPU vs. End-to-end'
+    title: 'Token Throughput per GPU vs. E2E Latency',
+    higherIsBetter: false
   },
   ttft: {
     label: 'TTFT (s)',
     tooltipLabel: 'TTFT',
     unit: 's',
-    title: 'Token Throughput per GPU vs. TTFT'
+    title: 'Token Throughput per GPU vs. TTFT',
+    higherIsBetter: false
+  },
+  normalizedEndToEnd: {
+    label: 'P90 Normalized E2E @ 400 output tokens (s)',
+    tooltipLabel: 'P90 Normalized E2E @ 400 output tokens',
+    unit: 's',
+    title: 'Token Throughput per GPU vs. Normalized E2E',
+    higherIsBetter: false
+  },
+  sessionTime: {
+    label: 'Mean Normalized Session Time (min)',
+    tooltipLabel: 'Mean Normalized Session Time',
+    unit: 'min',
+    title: 'Token Throughput per GPU vs. Session Time',
+    higherIsBetter: false
+  },
+  prefillTpsPerUser: {
+    label: 'P90 Prefill TPS per user (tok/s)',
+    tooltipLabel: 'P90 Prefill TPS per user',
+    unit: 'tok/s',
+    title: 'Token Throughput per GPU vs. Prefill TPS / user',
+    higherIsBetter: true
   }
 };
+
+const X_AXIS_METRIC_ORDER: InferenceCurveXAxisMetric[] = [
+  'interactivity',
+  'endToEnd',
+  'ttft',
+  'normalizedEndToEnd',
+  'sessionTime',
+  'prefillTpsPerUser'
+];
 
 const defaultOptions: Required<
   Omit<InferenceCurveChartOptions, 'activeSeriesIds' | 'selectedPrecisions'>
@@ -390,7 +433,9 @@ function getParetoFront<T extends { x: number; y: number }>(
   points: T[],
   metric: InferenceCurveXAxisMetric
 ): T[] {
-  return metric === 'interactivity' ? paretoFrontUpperRight(points) : paretoFrontUpperLeft(points);
+  return X_AXIS_METRICS[metric].higherIsBetter
+    ? paretoFrontUpperRight(points)
+    : paretoFrontUpperLeft(points);
 }
 
 export function resolveInferenceCurveColors(
@@ -567,9 +612,19 @@ function sortPreparedSeriesForRender(series: PreparedSeries[]): PreparedSeries[]
 }
 
 function getPointXValue(point: InferenceCurvePoint, metric: InferenceCurveXAxisMetric): number {
-  if (metric === 'ttft') return readFiniteNumber(point.ttft) ?? Number.NaN;
-  if (metric === 'endToEnd') return readFiniteNumber(point.endToEnd) ?? Number.NaN;
-  return point.interactivity;
+  return readPointMetricValue(point, metric) ?? Number.NaN;
+}
+
+function readPointMetricValue(
+  point: InferenceCurvePoint,
+  metric: InferenceCurveXAxisMetric
+): number | undefined {
+  if (metric === 'interactivity') return readFiniteNumber(point.interactivity);
+  if (metric === 'endToEnd') return readFiniteNumber(point.endToEnd);
+  if (metric === 'ttft') return readFiniteNumber(point.ttft);
+  if (metric === 'normalizedEndToEnd') return readFiniteNumber(point.normalizedEndToEnd);
+  if (metric === 'sessionTime') return readFiniteNumber(point.sessionTime);
+  return readFiniteNumber(point.prefillTpsPerUser);
 }
 
 export function renderInferenceCurveChart(
@@ -1713,23 +1768,19 @@ function computeGradientStops(
 
 function formatTooltip(point: ChartPoint, metric: InferenceCurveXAxisMetric): string {
   const metricConfig = X_AXIS_METRICS[metric] ?? X_AXIS_METRICS.interactivity;
-  const ttft = readFiniteNumber(point.ttft);
-  const endToEnd = readFiniteNumber(point.endToEnd);
   const fields = [
     `<strong>${escapeHtml(point.seriesName)}</strong>`,
-    `${metricConfig.tooltipLabel}: ${formatTooltipMetric(point.x)} ${metricConfig.unit}`,
+    formatTooltipMetricField(metricConfig.tooltipLabel, point.x, metricConfig.unit),
     `Throughput: ${formatTooltipMetric(point.y)} tok/s/gpu`,
     `Precision: ${escapeHtml(formatPrecision(point.precision))}`
   ];
-  if (metric !== 'interactivity' && Number.isFinite(point.interactivity)) {
-    fields.push(`Interactivity: ${formatTooltipMetric(point.interactivity)} tok/s/user`);
-  }
-  if (metric !== 'ttft' && ttft !== undefined) {
-    fields.push(`TTFT: ${formatTooltipMetric(ttft)} s`);
-  }
-  if (metric !== 'endToEnd' && endToEnd !== undefined) {
-    fields.push(`End-to-end: ${formatTooltipMetric(endToEnd)} s`);
-  }
+  X_AXIS_METRIC_ORDER.forEach((candidate) => {
+    if (candidate === metric) return;
+    const value = readPointMetricValue(point, candidate);
+    if (value === undefined) return;
+    const config = X_AXIS_METRICS[candidate];
+    fields.push(formatTooltipMetricField(config.tooltipLabel, value, config.unit));
+  });
   if (point.strategy) fields.push(`Parallelism: ${escapeHtml(point.strategy)}`);
   const prefillGpu = readFiniteNumber(point.num_prefill_gpu) ?? parseGpuCountFromLabel(point.label, 'prefill');
   const decodeGpu = readFiniteNumber(point.num_decode_gpu) ?? parseGpuCountFromLabel(point.label, 'decode');
@@ -1739,8 +1790,15 @@ function formatTooltip(point: ChartPoint, metric: InferenceCurveXAxisMetric): st
     fields.push(`TP: ${point.tp}`);
   }
   if (point.concurrency !== undefined) fields.push(`Concurrency: ${point.concurrency}`);
+  if (typeof point.kv_offload === 'string' && point.kv_offload.trim()) {
+    fields.push(`KV Offload: ${escapeHtml(point.kv_offload.trim())}`);
+  }
   if (point.label) fields.push(escapeHtml(point.label));
   return fields.map((field) => `<div>${field}</div>`).join('');
+}
+
+function formatTooltipMetricField(label: string, value: number, unit: string): string {
+  return `${label}: ${formatTooltipMetric(value)}${unit ? ` ${unit}` : ''}`;
 }
 
 function computeTooltipPosition(

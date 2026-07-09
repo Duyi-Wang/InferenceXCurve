@@ -3,6 +3,7 @@ import type { InferenceCurveSeries } from './inferenceCurveChart';
 export interface InferenceXSyncConfig {
   id: string;
   model: string;
+  scenario?: string;
   isl: number;
   osl: number;
   precision: string;
@@ -16,6 +17,7 @@ export interface InferenceXSyncConfig {
 export interface InferenceXAvailabilityRow {
   model: string;
   modelDisplay: string;
+  scenario: string;
   isl: number;
   osl: number;
   precision: string;
@@ -34,6 +36,7 @@ export interface InferenceXSyncSummaryItem {
   hardware: string;
   framework: string;
   precision: string;
+  scenario: string;
   isl: number;
   osl: number;
   specMethod: string;
@@ -76,6 +79,69 @@ const INFERENCEX_CORS_HELP =
   'unaffected because it uses the Vite dev proxy.)';
 const NON_MTP_SPEC = 'none';
 const MTP_SPEC = 'mtp';
+const FIXED_SEQUENCE_SCENARIOS = new Set(['fixed', 'fixed-length', 'fixed length', 'isl/osl']);
+
+const INTERACTIVITY_METRIC_KEYS = [
+  'median_intvty',
+  'median_interactivity',
+  'interactivity',
+  'p90_intvty',
+  'p90_interactivity'
+] as const;
+const THROUGHPUT_METRIC_KEYS = [
+  'tput_per_gpu',
+  'throughput_per_gpu',
+  'token_throughput_per_gpu',
+  'throughput'
+] as const;
+const TTFT_METRIC_KEYS = ['median_ttft', 'ttft', 'p90_ttft'] as const;
+const E2E_METRIC_KEYS = [
+  'median_e2el',
+  'e2el',
+  'end_to_end',
+  'endToEnd',
+  'p90_e2el',
+  'p90_end_to_end'
+] as const;
+const NORMALIZED_E2E_METRIC_KEYS = [
+  'p90_normalized_e2e_400_s',
+  'p75_normalized_e2e_400_s',
+  'normalized_e2e_400_s',
+  'normalized_e2e',
+  'normalized_e2el',
+  'normalized_end_to_end',
+  'p90_normalized_e2e',
+  'p90_normalized_e2el'
+] as const;
+const SESSION_TIME_MINUTE_METRIC_KEYS = [
+  'session_time',
+  'normalized_session_time',
+  'mean_normalized_session_time',
+  'stime'
+] as const;
+const SESSION_TIME_SECOND_METRIC_KEYS = [
+  'session_time_s',
+  'normalized_session_time_s',
+  'mean_normalized_session_time_s',
+  'stime_s'
+] as const;
+const SESSION_TIME_METRIC_KEYS = [
+  ...SESSION_TIME_MINUTE_METRIC_KEYS,
+  ...SESSION_TIME_SECOND_METRIC_KEYS
+] as const;
+const PREFILL_TPS_PER_USER_METRIC_KEYS = [
+  'prefill_tps_per_user',
+  'prefill_tps_user',
+  'p90_prefill_tps_per_user'
+] as const;
+const X_METRIC_KEYS = [
+  INTERACTIVITY_METRIC_KEYS,
+  TTFT_METRIC_KEYS,
+  E2E_METRIC_KEYS,
+  NORMALIZED_E2E_METRIC_KEYS,
+  SESSION_TIME_METRIC_KEYS,
+  PREFILL_TPS_PER_USER_METRIC_KEYS
+] as const;
 
 const MODEL_DISPLAY_NAMES: Record<string, string> = {
   dsr1: 'DeepSeek-R1-0528',
@@ -141,24 +207,37 @@ export function createDefaultInferenceXSyncConfigs(): InferenceXSyncConfig[] {
 
 export function normalizeInferenceXSyncConfigs(value: unknown): InferenceXSyncConfig[] {
   if (!Array.isArray(value)) return createDefaultInferenceXSyncConfigs();
-  const configs = value
+  const configs = Array.from(new Map(value
     .filter(isRecord)
     .map((item) => normalizeInferenceXSyncConfig(item))
-    .filter((config) => config.model && config.precision && config.hardware && config.framework);
+    .filter((config) => config.model && config.precision && config.hardware && config.framework)
+    .map((config) => [config.id, config])).values());
   return configs.length > 0 ? configs : createDefaultInferenceXSyncConfigs();
 }
 
 export function normalizeInferenceXSyncConfig(value: Partial<InferenceXSyncConfig>): InferenceXSyncConfig {
   const model = normalizeText(value.model) || DEFAULT_SYNC_MATRIX.model;
-  const isl = normalizePositiveInteger(value.isl, 1024);
-  const osl = normalizePositiveInteger(value.osl, 1024);
+  const scenario = normalizeScenario(value.scenario);
+  const isl = normalizeSequenceInteger(value.isl, scenario ? 0 : 1024);
+  const osl = normalizeSequenceInteger(value.osl, scenario ? 0 : 1024);
   const precision = normalizeText(value.precision).toLowerCase() || 'fp4';
   const hardware = normalizeText(value.hardware).toLowerCase() || 'mi355x';
   const framework = normalizeText(value.framework).toLowerCase() || 'mori-sglang';
   const specMethod = normalizeSpecMethod(value.specMethod);
   const disagg = typeof value.disagg === 'boolean' ? value.disagg : true;
   const enabled = typeof value.enabled === 'boolean' ? value.enabled : true;
-  const normalized = { model, isl, osl, precision, hardware, framework, specMethod, disagg, enabled };
+  const normalized = {
+    model,
+    scenario,
+    isl,
+    osl,
+    precision,
+    hardware,
+    framework,
+    specMethod,
+    disagg,
+    enabled
+  };
   return {
     ...normalized,
     id: normalizeText(value.id) || makeInferenceXSyncConfigId(normalized)
@@ -174,10 +253,11 @@ export function makeInferenceXSyncConfigId(
 export function makeInferenceXSyncLineId(
   config: Omit<InferenceXSyncConfig, 'id' | 'enabled'>
 ): string {
+  const scenario = normalizeScenario(config.scenario);
   return [
     getInferenceXDisplayModel(config.model),
-    `isl-${config.isl}`,
-    `osl-${config.osl}`,
+    scenario || `isl-${config.isl}`,
+    scenario ? '' : `osl-${config.osl}`,
     config.precision,
     config.hardware,
     config.framework,
@@ -264,6 +344,9 @@ export function fingerprintInferenceCurveSeries(line: InferenceCurveSeries): str
       throughput: point.throughput,
       ttft: point.ttft ?? '',
       endToEnd: point.endToEnd ?? '',
+      normalizedEndToEnd: point.normalizedEndToEnd ?? '',
+      sessionTime: point.sessionTime ?? '',
+      prefillTpsPerUser: point.prefillTpsPerUser ?? '',
       strategy: point.strategy ?? '',
       precision: point.precision ?? '',
       tp: point.tp ?? '',
@@ -281,6 +364,7 @@ export function fingerprintInferenceCurveSeries(line: InferenceCurveSeries): str
       decode_num_workers: point.decode_num_workers ?? '',
       disagg: point.disagg ?? '',
       is_multinode: point.is_multinode ?? '',
+      kv_offload: point.kv_offload ?? '',
       concurrency: point.concurrency ?? '',
       label: point.label ?? ''
     }))
@@ -291,12 +375,12 @@ export function fingerprintInferenceCurveSeries(line: InferenceCurveSeries): str
 export function formatInferenceXConfigLabel(config: InferenceXSyncConfig): string {
   return [
     getInferenceXDisplayModel(config.model),
-    `ISL ${config.isl} / OSL ${config.osl}`,
+    formatSequenceLabel(config),
     config.precision.toUpperCase(),
     `${formatHardwareLabel(config.hardware)} / ${formatFrameworkLabel(config.framework)}`,
     normalizeSpecMethod(config.specMethod) === MTP_SPEC ? 'MTP' : 'Non-MTP',
     config.disagg ? 'disagg' : 'aggregated'
-  ].join(' • ');
+  ].filter(Boolean).join(' • ');
 }
 
 export function inferenceXAvailabilityRowMatchesConfig(
@@ -305,8 +389,7 @@ export function inferenceXAvailabilityRowMatchesConfig(
 ): boolean {
   return (
     resolveModelKey(row.model) === resolveModelKey(config.model) &&
-    row.isl === config.isl &&
-    row.osl === config.osl &&
+    sequenceMatches(row, config) &&
     row.precision.toLowerCase() === config.precision.toLowerCase() &&
     hardwareMatches(row.hardware, config.hardware) &&
     row.framework.toLowerCase() === config.framework.toLowerCase() &&
@@ -322,15 +405,17 @@ export function getInferenceXDisplayModel(model: string): string {
 
 function readAvailabilityRow(record: Record<string, unknown>): InferenceXAvailabilityRow | null {
   const model = readString(record, 'model');
-  const isl = readNumber(record, 'isl');
-  const osl = readNumber(record, 'osl');
+  const scenario = readRecordScenario(record);
+  const isl = readNumber(record, 'isl') ?? 0;
+  const osl = readNumber(record, 'osl') ?? 0;
   const precision = readString(record, 'precision').toLowerCase();
   const hardware = readString(record, 'hardware').toLowerCase();
   const framework = readString(record, 'framework').toLowerCase();
-  if (!model || isl === null || osl === null || !precision || !hardware || !framework) return null;
+  if (!model || (!scenario && (isl <= 0 || osl <= 0)) || !precision || !hardware || !framework) return null;
   return {
     model,
     modelDisplay: getInferenceXDisplayModel(model),
+    scenario,
     isl,
     osl,
     precision,
@@ -401,28 +486,28 @@ function benchmarkRecordMatchesConfig(
   config: InferenceXSyncConfig
 ): boolean {
   const model = readString(record, 'model');
-  const isl = readNumber(record, 'isl');
-  const osl = readNumber(record, 'osl');
+  const scenario = readRecordScenario(record);
+  const isl = readNumber(record, 'isl') ?? 0;
+  const osl = readNumber(record, 'osl') ?? 0;
   const precision = readString(record, 'precision').toLowerCase();
   const hardware = readString(record, 'hardware').toLowerCase();
   const framework = readString(record, 'framework').toLowerCase();
   const specMethod = normalizeSpecMethod(readString(record, 'spec_method'));
   const disagg = readBoolean(record, 'disagg') ?? false;
   const metrics = readMetrics(record);
-  const interactivity = readNumber(metrics, 'median_intvty');
-  const throughput = readNumber(metrics, 'tput_per_gpu');
+  const throughput = readMetricNumber(metrics, THROUGHPUT_METRIC_KEYS);
+  const hasXMetric = X_METRIC_KEYS.some((keys) => readMetricNumber(metrics, keys) !== null);
 
   return (
     resolveModelKey(model) === resolveModelKey(config.model) &&
-    isl === config.isl &&
-    osl === config.osl &&
+    sequenceValuesMatch({ scenario, isl, osl }, config) &&
     precision === config.precision.toLowerCase() &&
     hardwareMatches(hardware, config.hardware) &&
     framework === config.framework.toLowerCase() &&
     specMethod === normalizeSpecMethod(config.specMethod) &&
     disagg === config.disagg &&
-    interactivity !== null &&
-    throughput !== null
+    throughput !== null &&
+    hasXMetric
   );
 }
 
@@ -451,14 +536,19 @@ function benchmarkRecordsToSeries(
     .filter((point): point is InferenceCurveSeries['points'][number] => point !== null)
     .sort(
       (a, b) =>
-        a.interactivity - b.interactivity ||
+        compareOptionalNumbers(a.interactivity, b.interactivity) ||
+        compareOptionalNumbers(a.endToEnd, b.endToEnd) ||
+        compareOptionalNumbers(a.ttft, b.ttft) ||
+        compareOptionalNumbers(a.normalizedEndToEnd, b.normalizedEndToEnd) ||
+        compareOptionalNumbers(a.sessionTime, b.sessionTime) ||
+        compareOptionalNumbers(a.prefillTpsPerUser, b.prefillTpsPerUser) ||
         b.throughput - a.throughput ||
         Number(a.concurrency ?? 0) - Number(b.concurrency ?? 0)
     );
   if (points.length === 0) return null;
 
   const lineName = formatInferenceXLineName(config.hardware, config.framework, config.specMethod);
-  const islOsl = `ISL ${config.isl} / OSL ${config.osl}`;
+  const islOsl = formatSequenceLabel(config);
   const model = getInferenceXDisplayModel(config.model);
   const precision = config.precision.toLowerCase();
   const mtp = normalizeSpecMethod(config.specMethod) === MTP_SPEC ? 'mtp' : 'non-mtp';
@@ -480,11 +570,26 @@ function benchmarkRecordToPoint(
   record: InferenceXBenchmarkRecord
 ): InferenceCurveSeries['points'][number] | null {
   const metrics = readMetrics(record);
-  const interactivity = readNumber(metrics, 'median_intvty');
-  const throughput = readNumber(metrics, 'tput_per_gpu');
-  const ttft = readNumber(metrics, 'median_ttft');
-  const endToEnd = readNumber(metrics, 'median_e2el');
-  if (interactivity === null || throughput === null) return null;
+  const interactivity = readMetricNumber(metrics, INTERACTIVITY_METRIC_KEYS);
+  const throughput = readMetricNumber(metrics, THROUGHPUT_METRIC_KEYS);
+  const ttft = readMetricNumber(metrics, TTFT_METRIC_KEYS);
+  const endToEnd = readMetricNumber(metrics, E2E_METRIC_KEYS);
+  const normalizedEndToEnd = readMetricNumber(metrics, NORMALIZED_E2E_METRIC_KEYS);
+  const sessionTime = readSessionTimeMetric(metrics);
+  const prefillTpsPerUser = readMetricNumber(metrics, PREFILL_TPS_PER_USER_METRIC_KEYS);
+  if (
+    throughput === null ||
+    (
+      interactivity === null &&
+      ttft === null &&
+      endToEnd === null &&
+      normalizedEndToEnd === null &&
+      sessionTime === null &&
+      prefillTpsPerUser === null
+    )
+  ) {
+    return null;
+  }
 
   const prefillTp = readNumber(record, 'prefill_tp');
   const prefillEp = readNumber(record, 'prefill_ep');
@@ -495,19 +600,23 @@ function benchmarkRecordToPoint(
   const prefillDpa = readBoolean(record, 'prefill_dp_attention');
   const decodeDpa = readBoolean(record, 'decode_dp_attention');
   const totalGpu = numPrefillGpu !== null && numDecodeGpu !== null ? numPrefillGpu + numDecodeGpu : null;
+  const offload = readRecordOffloadConfig(record);
 
   const point: InferenceCurveSeries['points'][number] = {
-    interactivity,
     throughput,
     precision: config.precision.toLowerCase(),
     strategy: makeStrategyLabel(decodeTp, decodeEp),
     tp: totalGpu ?? decodeTp ?? undefined,
     concurrency: readNumber(record, 'conc') ?? undefined,
-    label: makePointLabel(readString(record, 'date'), readString(record, 'run_url'))
+    label: makePointLabel(readString(record, 'date'), readString(record, 'run_url'), offload.label)
   };
 
+  if (interactivity !== null) point.interactivity = interactivity;
   if (ttft !== null) point.ttft = ttft;
   if (endToEnd !== null) point.endToEnd = endToEnd;
+  if (normalizedEndToEnd !== null) point.normalizedEndToEnd = normalizedEndToEnd;
+  if (sessionTime !== null) point.sessionTime = sessionTime;
+  if (prefillTpsPerUser !== null) point.prefillTpsPerUser = prefillTpsPerUser;
   if (prefillTp !== null) point.prefill_tp = prefillTp;
   if (prefillEp !== null) point.prefill_ep = prefillEp;
   if (decodeTp !== null) point.decode_tp = decodeTp;
@@ -517,6 +626,7 @@ function benchmarkRecordToPoint(
   if (prefillDpa !== undefined) point.prefill_dp_attention = prefillDpa;
   if (decodeDpa !== undefined) point.decode_dp_attention = decodeDpa;
   if (prefillDpa !== undefined && prefillDpa === decodeDpa) point.dp_attention = prefillDpa;
+  if (offload.label) point.kv_offload = offload.label;
   point.prefill_num_workers = readNumber(record, 'prefill_num_workers') ?? undefined;
   point.decode_num_workers = readNumber(record, 'decode_num_workers') ?? undefined;
   point.disagg = config.disagg;
@@ -537,6 +647,7 @@ function makeSummaryItem(
     hardware: config.hardware,
     framework: config.framework,
     precision: config.precision,
+    scenario: normalizeScenario(config.scenario),
     isl: config.isl,
     osl: config.osl,
     specMethod: normalizeSpecMethod(config.specMethod),
@@ -558,6 +669,98 @@ function normalizeSpecMethod(value: string | undefined): string {
   if (!normalized || ['none', 'off', 'false', 'no', 'n', '0'].includes(normalized)) return NON_MTP_SPEC;
   if (['mtp', 'on', 'true', 'yes', 'y', '1'].includes(normalized)) return MTP_SPEC;
   return normalized;
+}
+
+function normalizeScenario(value: unknown): string {
+  const normalized = normalizeText(String(value ?? '')).toLowerCase().replace(/[_\s]+/gu, '-');
+  if (!normalized || FIXED_SEQUENCE_SCENARIOS.has(normalized) || FIXED_SEQUENCE_SCENARIOS.has(normalized.replace(/-/gu, ' '))) {
+    return '';
+  }
+  return normalized;
+}
+
+function normalizeOffloadKey(value: string | undefined): string {
+  return normalizeText(value).toLowerCase().replace(/[^a-z0-9]+/gu, '-').replace(/^-|-$/gu, '');
+}
+
+function formatOffloadLabelFromKey(key: string): string {
+  const normalized = normalizeOffloadKey(key);
+  if (!normalized) return '';
+  if (normalized === 'offload-off') return 'KV offload off';
+  const parts = normalized.replace(/^offload-?/u, '').split('-').filter(Boolean);
+  const target = parts[0] ?? 'on';
+  const backend = parts.slice(1).join('-');
+  return [
+    'KV offload',
+    target === 'on' ? 'on' : target.toUpperCase(),
+    backend ? `via ${formatFrameworkLabel(backend)}` : ''
+  ].filter(Boolean).join(' ');
+}
+
+function readRecordOffloadConfig(record: Record<string, unknown>): { key: string; label: string } {
+  const metrics = readMetrics(record);
+  const mode = readStringFromKeys(record, ['offload_mode', 'offload mode']) ||
+    readStringFromKeys(metrics, ['offload_mode', 'offload mode']);
+  const kvOffloading = readStringFromKeys(record, ['kv_offloading', 'kv offloading']) ||
+    readStringFromKeys(metrics, ['kv_offloading', 'kv offloading']);
+  const backend = readStringFromKeys(record, ['kv_offload_backend', 'kv offload backend']) ||
+    readStringFromKeys(metrics, ['kv_offload_backend', 'kv offload backend']);
+  if (!mode && !kvOffloading && !backend) return { key: '', label: '' };
+
+  const modeEnabled = normalizeOffloadFlag(mode);
+  const kvEnabled = kvOffloading ? normalizeOffloadFlag(kvOffloading) : null;
+  const enabled = modeEnabled ?? kvEnabled ?? Boolean(backend);
+  if (!enabled) return { key: 'offload-off', label: 'KV offload off' };
+
+  const target = normalizeOffloadKey(kvOffloading) || normalizeOffloadKey(mode) || 'on';
+  const backendKey = normalizeOffloadKey(backend);
+  const key = ['offload', target, backendKey].filter(Boolean).join('-');
+  return { key, label: formatOffloadLabelFromKey(key) };
+}
+
+function normalizeOffloadFlag(value: string): boolean | null {
+  const normalized = normalizeOffloadKey(value);
+  if (!normalized) return null;
+  if (['off', 'none', 'false', 'no', 'n', '0', 'disabled', 'disable'].includes(normalized)) return false;
+  if (['on', 'true', 'yes', 'y', '1', 'enabled', 'enable'].includes(normalized)) return true;
+  return true;
+}
+
+function formatSequenceLabel(config: Pick<InferenceXSyncConfig, 'scenario' | 'isl' | 'osl'>): string {
+  const scenario = normalizeScenario(config.scenario);
+  return scenario ? formatScenarioLabel(scenario) : `ISL ${config.isl} / OSL ${config.osl}`;
+}
+
+function formatScenarioLabel(value: string): string {
+  return value
+    .split(/[-_\s]+/u)
+    .filter(Boolean)
+    .map((part) => {
+      if (part.toLowerCase() === 'ai') return 'AI';
+      return part[0] ? `${part[0].toUpperCase()}${part.slice(1)}` : part;
+    })
+    .join(' ');
+}
+
+function sequenceMatches(row: InferenceXAvailabilityRow, config: InferenceXSyncConfig): boolean {
+  return sequenceValuesMatch(row, config);
+}
+
+function sequenceValuesMatch(
+  row: Pick<InferenceXAvailabilityRow, 'scenario' | 'isl' | 'osl'>,
+  config: Pick<InferenceXSyncConfig, 'scenario' | 'isl' | 'osl'>
+): boolean {
+  const configScenario = normalizeScenario(config.scenario);
+  const rowScenario = normalizeScenario(row.scenario);
+  if (configScenario || rowScenario) return configScenario === rowScenario;
+  return row.isl === config.isl && row.osl === config.osl;
+}
+
+function compareOptionalNumbers(a: number | undefined, b: number | undefined): number {
+  if (a === undefined && b === undefined) return 0;
+  if (a === undefined) return 1;
+  if (b === undefined) return -1;
+  return a - b;
 }
 
 function resolveModelKey(model: string): string {
@@ -583,7 +786,11 @@ function makeHwKey(config: InferenceXSyncConfig): string {
   return `${config.hardware.toLowerCase()}_${config.framework.toLowerCase()}${suffix}`;
 }
 
-function formatInferenceXLineName(hardware: string, framework: string, specMethod: string): string {
+function formatInferenceXLineName(
+  hardware: string,
+  framework: string,
+  specMethod: string
+): string {
   const suffix = normalizeSpecMethod(specMethod) === MTP_SPEC ? ' MTP' : '';
   return `${formatHardwareLabel(hardware)} (${formatFrameworkLabel(framework)}${suffix})`;
 }
@@ -603,7 +810,8 @@ function formatFrameworkLabel(value: string): string {
     dynamo: 'Dynamo',
     trt: 'TRT',
     tensorrt: 'TRT',
-    vllm: 'vLLM'
+    vllm: 'vLLM',
+    lmcache: 'LMCache'
   };
   return value
     .toLowerCase()
@@ -620,8 +828,12 @@ function makeStrategyLabel(tp: number | null, ep: number | null): string | undef
   return `EP${ep}`;
 }
 
-function makePointLabel(date: string, runUrl: string): string {
-  return [date ? `date ${date}` : '', runUrl ? `run_url ${runUrl}` : ''].filter(Boolean).join('; ');
+function makePointLabel(date: string, runUrl: string, offloadLabel = ''): string {
+  return [
+    date ? `date ${date}` : '',
+    runUrl ? `run_url ${runUrl}` : '',
+    offloadLabel ? offloadLabel : ''
+  ].filter(Boolean).join('; ');
 }
 
 function readMetrics(record: InferenceXBenchmarkRecord): Record<string, unknown> {
@@ -629,10 +841,55 @@ function readMetrics(record: InferenceXBenchmarkRecord): Record<string, unknown>
   return isRecord(metrics) ? metrics : {};
 }
 
+function readRecordScenario(record: Record<string, unknown>): string {
+  return normalizeScenario(
+    readStringFromKeys(record, [
+      'scenario',
+      'benchmark_scenario',
+      'benchmark scenario',
+      'scenario_type',
+      'scenario type',
+      'benchmark_type',
+      'benchmark type',
+      'workload',
+      'workload_type',
+      'workload type',
+      'trace',
+      'trace_type',
+      'trace type',
+      'dataset',
+      'task'
+    ])
+  );
+}
+
+function readStringFromKeys(record: Record<string, unknown>, keys: readonly string[]): string {
+  for (const key of keys) {
+    const value = readString(record, key);
+    if (value) return value;
+  }
+  return '';
+}
+
 function readString(record: Record<string, unknown>, key: string): string {
   const value = record[key];
   if (value === null || value === undefined) return '';
   return normalizeText(String(value));
+}
+
+function readMetricNumber(record: Record<string, unknown>, keys: readonly string[]): number | null {
+  for (const key of keys) {
+    const value = readNumber(record, key);
+    if (value !== null) return value;
+  }
+  return null;
+}
+
+function readSessionTimeMetric(record: Record<string, unknown>): number | null {
+  const minutes = readMetricNumber(record, SESSION_TIME_MINUTE_METRIC_KEYS);
+  if (minutes !== null) return minutes;
+  const seconds = readMetricNumber(record, SESSION_TIME_SECOND_METRIC_KEYS);
+  return seconds !== null ? seconds / 60 : null;
 }
 
 function readNumber(record: Record<string, unknown>, key: string): number | null {
@@ -664,14 +921,14 @@ function normalizeText(value: string | undefined): string {
   return (value ?? '').replace(/\u00a0/g, ' ').trim();
 }
 
-function normalizePositiveInteger(value: unknown, fallback: number): number {
+function normalizeSequenceInteger(value: unknown, fallback: number): number {
   const parsed =
     typeof value === 'number'
       ? value
       : typeof value === 'string'
         ? Number(value.trim().replaceAll(',', ''))
         : NaN;
-  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : fallback;
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed) : fallback;
 }
 
 function hashString(value: string): string {
