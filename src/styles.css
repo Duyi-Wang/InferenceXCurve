@@ -282,21 +282,29 @@ p {
   background: color-mix(in srgb, var(--background) 86%, transparent);
 }
 
+.metric-row {
+  display: flex;
+  justify-content: center;
+  padding: 0 12px 2px;
+}
+
 .metric-switch {
-  grid-column: 1 / -1;
-  display: inline-flex;
-  width: fit-content;
+  display: flex;
+  width: max-content;
   max-width: 100%;
-  gap: 4px;
-  padding: 4px;
-  border: 1px solid color-mix(in srgb, var(--border) 44%, transparent);
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 5px;
+  padding: 5px;
+  border: 1px solid color-mix(in srgb, var(--border) 38%, transparent);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--background) 70%, transparent);
+  background: color-mix(in srgb, var(--background) 74%, var(--accent));
+  box-shadow: 0 8px 20px rgb(0 0 0 / 10%);
 }
 
 .metric-switch-button {
   min-height: 30px;
-  padding: 6px 12px;
+  padding: 6px 14px;
   border: 0;
   border-radius: 6px;
   background: transparent;
@@ -2562,12 +2570,16 @@ p {
     grid-template-columns: 1fr;
   }
 
+  .metric-row {
+    padding-inline: 0;
+  }
+
   .metric-switch {
     width: 100%;
   }
 
   .metric-switch-button {
-    flex: 1 1 0;
+    flex: 1 1 132px;
   }
 
   .chart-card-toolbar {

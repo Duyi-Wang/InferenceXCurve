@@ -52,6 +52,7 @@ export interface InferenceCurveChartOptions {
   activeSeriesIds?: Set<string>;
   selectedPrecisions?: string[];
   xMetric?: InferenceCurveXAxisMetric;
+  metricDisplayOverrides?: InferenceCurveXAxisMetricDisplayOverrides;
   showNonOptimalPoints?: boolean;
   hidePointLabels?: boolean;
   showConcurrencyLabels?: boolean;
@@ -76,6 +77,10 @@ export type InferenceCurveXAxisMetric =
   | 'normalizedEndToEnd'
   | 'sessionTime'
   | 'prefillTpsPerUser';
+
+export type InferenceCurveXAxisMetricDisplayOverrides = Partial<
+  Record<InferenceCurveXAxisMetric, Partial<Pick<XAxisMetricConfig, 'label' | 'tooltipLabel' | 'title'>>>
+>;
 
 interface ChartPoint extends InferenceCurvePoint {
   seriesId: string;
@@ -215,10 +220,15 @@ const LIGHTNESS = {
   dark: { min: 0.5, max: 0.78 }
 } as const;
 
-const X_AXIS_METRICS: Record<
-  InferenceCurveXAxisMetric,
-  { label: string; tooltipLabel: string; unit: string; title: string; higherIsBetter: boolean }
-> = {
+type XAxisMetricConfig = {
+  label: string;
+  tooltipLabel: string;
+  unit: string;
+  title: string;
+  higherIsBetter: boolean;
+};
+
+const X_AXIS_METRICS: Record<InferenceCurveXAxisMetric, XAxisMetricConfig> = {
   interactivity: {
     label: 'Interactivity (tok/s/user)',
     tooltipLabel: 'Interactivity',
@@ -230,7 +240,7 @@ const X_AXIS_METRICS: Record<
     label: 'End-to-end Latency (s)',
     tooltipLabel: 'End-to-end Latency',
     unit: 's',
-    title: 'Token Throughput per GPU vs. E2E Latency',
+    title: 'Token Throughput per GPU vs. End-to-end Latency',
     higherIsBetter: false
   },
   ttft: {
@@ -286,6 +296,7 @@ const defaultOptions: Required<
   logY: false,
   theme: 'dark',
   height: 575,
+  metricDisplayOverrides: {},
   title: 'Token Throughput per GPU vs. Interactivity',
   subtitle: 'Custom data • Source: user supplied',
   watermark: DEFAULT_CHART_WATERMARK,
@@ -299,12 +310,26 @@ export function resetInferenceCurveZoom(): void {
   resetZoom?.();
 }
 
-export function getInferenceCurveXAxisLabel(metric: InferenceCurveXAxisMetric): string {
-  return X_AXIS_METRICS[metric]?.label ?? X_AXIS_METRICS.interactivity.label;
+export function getInferenceCurveXAxisLabel(
+  metric: InferenceCurveXAxisMetric,
+  overrides?: InferenceCurveXAxisMetricDisplayOverrides
+): string {
+  return getXAxisMetricConfig(metric, overrides).label;
 }
 
-export function getInferenceCurveTitle(metric: InferenceCurveXAxisMetric): string {
-  return X_AXIS_METRICS[metric]?.title ?? X_AXIS_METRICS.interactivity.title;
+export function getInferenceCurveTitle(
+  metric: InferenceCurveXAxisMetric,
+  overrides?: InferenceCurveXAxisMetricDisplayOverrides
+): string {
+  return getXAxisMetricConfig(metric, overrides).title;
+}
+
+function getXAxisMetricConfig(
+  metric: InferenceCurveXAxisMetric,
+  overrides?: InferenceCurveXAxisMetricDisplayOverrides
+): XAxisMetricConfig {
+  const base = X_AXIS_METRICS[metric] ?? X_AXIS_METRICS.interactivity;
+  return { ...base, ...(overrides?.[metric] ?? {}) };
 }
 
 export function getAvailablePrecisions(series: InferenceCurveSeries[]): string[] {
@@ -838,7 +863,10 @@ export function renderInferenceCurveChart(
       rulerGroup.style('display', 'block');
       verticalRuler.attr('x1', current.xScale(point.x)).attr('x2', current.xScale(point.x));
       horizontalRuler.attr('y1', current.yScale(point.y)).attr('y2', current.yScale(point.y));
-      tooltip.style('opacity', 1).style('display', 'block').html(formatTooltip(point, options.xMetric));
+      tooltip
+        .style('opacity', 1)
+        .style('display', 'block')
+        .html(formatTooltip(point, options.xMetric, options.metricDisplayOverrides));
       moveTooltip(event, tooltip, container);
       return;
     }
@@ -1153,7 +1181,10 @@ function drawScatterPoints(
       rulerGroup.style('display', 'block');
       verticalRuler.attr('x1', xScale(point.x)).attr('x2', xScale(point.x));
       horizontalRuler.attr('y1', yScale(point.y)).attr('y2', yScale(point.y));
-      tooltip.style('opacity', 1).style('display', 'block').html(formatTooltip(point, options.xMetric));
+      tooltip
+        .style('opacity', 1)
+        .style('display', 'block')
+        .html(formatTooltip(point, options.xMetric, options.metricDisplayOverrides));
       moveTooltip(event, tooltip, container);
     })
     .on('pointermove', (event) => {
@@ -1766,8 +1797,12 @@ function computeGradientStops(
   return stops.sort((a, b) => a.offset - b.offset);
 }
 
-function formatTooltip(point: ChartPoint, metric: InferenceCurveXAxisMetric): string {
-  const metricConfig = X_AXIS_METRICS[metric] ?? X_AXIS_METRICS.interactivity;
+function formatTooltip(
+  point: ChartPoint,
+  metric: InferenceCurveXAxisMetric,
+  overrides?: InferenceCurveXAxisMetricDisplayOverrides
+): string {
+  const metricConfig = getXAxisMetricConfig(metric, overrides);
   const fields = [
     `<strong>${escapeHtml(point.seriesName)}</strong>`,
     formatTooltipMetricField(metricConfig.tooltipLabel, point.x, metricConfig.unit),
@@ -1778,7 +1813,7 @@ function formatTooltip(point: ChartPoint, metric: InferenceCurveXAxisMetric): st
     if (candidate === metric) return;
     const value = readPointMetricValue(point, candidate);
     if (value === undefined) return;
-    const config = X_AXIS_METRICS[candidate];
+    const config = getXAxisMetricConfig(candidate, overrides);
     fields.push(formatTooltipMetricField(config.tooltipLabel, value, config.unit));
   });
   if (point.strategy) fields.push(`Parallelism: ${escapeHtml(point.strategy)}`);

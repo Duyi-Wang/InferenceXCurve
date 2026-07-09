@@ -88,6 +88,13 @@ const INTERACTIVITY_METRIC_KEYS = [
   'p90_intvty',
   'p90_interactivity'
 ] as const;
+const INTERACTIVITY_P90_METRIC_KEYS = [
+  'p90_intvty',
+  'p90_interactivity',
+  'median_intvty',
+  'median_interactivity',
+  'interactivity'
+] as const;
 const THROUGHPUT_METRIC_KEYS = [
   'tput_per_gpu',
   'throughput_per_gpu',
@@ -95,6 +102,7 @@ const THROUGHPUT_METRIC_KEYS = [
   'throughput'
 ] as const;
 const TTFT_METRIC_KEYS = ['median_ttft', 'ttft', 'p90_ttft'] as const;
+const TTFT_P90_METRIC_KEYS = ['p90_ttft', 'median_ttft', 'ttft'] as const;
 const E2E_METRIC_KEYS = [
   'median_e2el',
   'e2el',
@@ -102,6 +110,14 @@ const E2E_METRIC_KEYS = [
   'endToEnd',
   'p90_e2el',
   'p90_end_to_end'
+] as const;
+const E2E_P90_METRIC_KEYS = [
+  'p90_e2el',
+  'p90_end_to_end',
+  'median_e2el',
+  'e2el',
+  'end_to_end',
+  'endToEnd'
 ] as const;
 const NORMALIZED_E2E_METRIC_KEYS = [
   'p90_normalized_e2e_400_s',
@@ -570,10 +586,20 @@ function benchmarkRecordToPoint(
   record: InferenceXBenchmarkRecord
 ): InferenceCurveSeries['points'][number] | null {
   const metrics = readMetrics(record);
-  const interactivity = readMetricNumber(metrics, INTERACTIVITY_METRIC_KEYS);
+  const preferP90Metrics = shouldPreferP90Metrics(record, config);
+  const interactivity = readMetricNumber(
+    metrics,
+    preferP90Metrics ? INTERACTIVITY_P90_METRIC_KEYS : INTERACTIVITY_METRIC_KEYS
+  );
   const throughput = readMetricNumber(metrics, THROUGHPUT_METRIC_KEYS);
-  const ttft = readMetricNumber(metrics, TTFT_METRIC_KEYS);
-  const endToEnd = readMetricNumber(metrics, E2E_METRIC_KEYS);
+  const ttft = readMetricNumber(
+    metrics,
+    preferP90Metrics ? TTFT_P90_METRIC_KEYS : TTFT_METRIC_KEYS
+  );
+  const endToEnd = readMetricNumber(
+    metrics,
+    preferP90Metrics ? E2E_P90_METRIC_KEYS : E2E_METRIC_KEYS
+  );
   const normalizedEndToEnd = readMetricNumber(metrics, NORMALIZED_E2E_METRIC_KEYS);
   const sessionTime = readSessionTimeMetric(metrics);
   const prefillTpsPerUser = readMetricNumber(metrics, PREFILL_TPS_PER_USER_METRIC_KEYS);
@@ -677,6 +703,20 @@ function normalizeScenario(value: unknown): string {
     return '';
   }
   return normalized;
+}
+
+function shouldPreferP90Metrics(
+  record: InferenceXBenchmarkRecord,
+  config: InferenceXSyncConfig
+): boolean {
+  return isAgenticScenario(readRecordScenario(record) || config.scenario);
+}
+
+function isAgenticScenario(value: string | undefined): boolean {
+  const normalized = normalizeScenario(value);
+  return normalized === 'agentic' ||
+    normalized.startsWith('agentic-') ||
+    (normalized.includes('agentic') && normalized.includes('trace'));
 }
 
 function normalizeOffloadKey(value: string | undefined): string {

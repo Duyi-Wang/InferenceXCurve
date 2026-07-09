@@ -32,6 +32,7 @@ import {
   resolveInferenceCurveColors,
   type InferenceCurveChartOptions,
   type InferenceCurveSeries,
+  type InferenceCurveXAxisMetricDisplayOverrides,
   type InferenceCurveXAxisMetric
 } from './inferenceCurveChart';
 
@@ -528,6 +529,23 @@ const fixedLengthChartMetrics = new Set<InferenceCurveXAxisMetric>([
   'endToEnd',
   'ttft'
 ]);
+const agenticTraceMetricDisplayOverrides: InferenceCurveXAxisMetricDisplayOverrides = {
+  interactivity: {
+    label: 'P90 Interactivity (tok/s/user)',
+    tooltipLabel: 'P90 Interactivity',
+    title: 'Token Throughput per GPU vs. P90 Interactivity'
+  },
+  endToEnd: {
+    label: 'P90 End-to-end Latency (s)',
+    tooltipLabel: 'P90 End-to-end Latency',
+    title: 'Token Throughput per GPU vs. P90 End-to-end Latency'
+  },
+  ttft: {
+    label: 'P90 Time To First Token (s)',
+    tooltipLabel: 'P90 Time To First Token',
+    title: 'Token Throughput per GPU vs. P90 Time To First Token'
+  }
+};
 
 function createInitialDataState(): InitialDataState {
   const defaultSeries = structuredClone(exampleSeries);
@@ -1018,6 +1036,8 @@ app.innerHTML = `
         <span>MTP</span>
         <select id="mtp-filter"></select>
       </label>
+    </section>
+    <section class="metric-row no-export">
       <div id="metric-switch" class="metric-switch" role="group" aria-label="Chart metric"></div>
     </section>
 
@@ -1497,8 +1517,10 @@ function handleMetricSwitchClick(event: MouseEvent): void {
 }
 
 function getChartOptions(): InferenceCurveChartOptions {
+  const metricDisplayOverrides = getMetricDisplayOverridesForCurrentView();
   return {
     xMetric: state.chartMetric,
+    metricDisplayOverrides,
     activeSeriesIds: state.activeSeriesIds,
     selectedPrecisions: Array.from(state.selectedPrecisions),
     showNonOptimalPoints: state.showNonOptimalPoints,
@@ -1513,7 +1535,7 @@ function getChartOptions(): InferenceCurveChartOptions {
     title: getChartTitle(),
     subtitle: getChartSubtitle(),
     watermark: state.watermark,
-    xLabel: getInferenceCurveXAxisLabel(state.chartMetric)
+    xLabel: getInferenceCurveXAxisLabel(state.chartMetric, metricDisplayOverrides)
   };
 }
 
@@ -4447,6 +4469,10 @@ function isAgenticTraceSequence(value: string): boolean {
     (normalized.includes('agentic') && normalized.includes('trace'));
 }
 
+function getMetricDisplayOverridesForCurrentView(): InferenceCurveXAxisMetricDisplayOverrides | undefined {
+  return isAgenticTraceView(currentSeries) ? agenticTraceMetricDisplayOverrides : undefined;
+}
+
 function normalizeScenarioKey(value: string): string {
   return value
     .trim()
@@ -4776,7 +4802,7 @@ function formatMtpFilterLabel(value: string): string {
 }
 
 function getChartTitle(): string {
-  return getInferenceCurveTitle(state.chartMetric);
+  return getInferenceCurveTitle(state.chartMetric, getMetricDisplayOverridesForCurrentView());
 }
 
 function getChartSubtitle(): string {
@@ -6004,49 +6030,67 @@ function readAnyImportedXAxisMetric(record: Record<string, unknown>): number | n
 
 function readImportedXAxisMetric(
   record: Record<string, unknown>,
-  key: InferenceCurveXAxisMetric
+  key: InferenceCurveXAxisMetric,
+  options: { preferP90?: boolean } = {}
 ): number | null {
   if (key === 'interactivity') {
-    return readMetricNumber(record, [
-      'metrics.median_intvty',
-      'metrics.interactivity',
+    const p90Aliases = [
       'metrics.p90_intvty',
       'metrics.p90_interactivity',
-      'median_intvty',
-      'median_interactivity',
       'p90_intvty',
       'p90_interactivity',
-      'interactivity',
       'P90 Interactivity',
+      'P90 Interactivity (tok/s/user)'
+    ];
+    const medianAliases = [
+      'metrics.median_intvty',
+      'metrics.interactivity',
+      'median_intvty',
+      'median_interactivity',
+      'interactivity',
       'tok/s/user',
       'x'
-    ]);
+    ];
+    const aliases = options.preferP90
+      ? [...p90Aliases, ...medianAliases]
+      : [...medianAliases, ...p90Aliases];
+    return readMetricNumber(record, aliases);
   }
   if (key === 'ttft') {
-    return readMetricNumber(record, [
-      'metrics.median_ttft',
+    const p90Aliases = [
       'metrics.p90_ttft',
-      'median_ttft',
       'p90_ttft',
-      'ttft',
-      'TTFT',
-      'TTFT (s)',
-      'Time To First Token',
-      'Time To First Token (s)',
       'P90 TTFT',
       'P90 TTFT (s)',
       'P90 Time To First Token',
       'P90 Time To First Token (s)'
-    ]);
+    ];
+    const medianAliases = [
+      'metrics.median_ttft',
+      'median_ttft',
+      'ttft',
+      'TTFT',
+      'TTFT (s)',
+      'Time To First Token',
+      'Time To First Token (s)'
+    ];
+    const aliases = options.preferP90
+      ? [...p90Aliases, ...medianAliases]
+      : [...medianAliases, ...p90Aliases];
+    return readMetricNumber(record, aliases);
   }
   if (key === 'endToEnd') {
-    return readMetricNumber(record, [
-      'metrics.median_e2el',
+    const p90Aliases = [
       'metrics.p90_e2el',
       'metrics.p90_end_to_end',
-      'median_e2el',
       'p90_e2el',
       'p90_end_to_end',
+      'P90 End-to-end Latency',
+      'P90 End-to-end Latency (s)'
+    ];
+    const medianAliases = [
+      'metrics.median_e2el',
+      'median_e2el',
       'endToEnd',
       'end_to_end',
       'end-to-end',
@@ -6056,10 +6100,12 @@ function readImportedXAxisMetric(
       'E2E',
       'E2E Latency',
       'E2E Latency (s)',
-      'e2el',
-      'P90 End-to-end Latency',
-      'P90 End-to-end Latency (s)'
-    ]);
+      'e2el'
+    ];
+    const aliases = options.preferP90
+      ? [...p90Aliases, ...medianAliases]
+      : [...medianAliases, ...p90Aliases];
+    return readMetricNumber(record, aliases);
   }
   if (key === 'normalizedEndToEnd') {
     return readMetricNumber(record, [
@@ -6369,10 +6415,27 @@ function importedPointFromBenchmarkRecord(
   record: Record<string, unknown>,
   sourceName: string
 ): ImportedPointRow | null {
-  const interactivity = readImportedXAxisMetric(record, 'interactivity');
+  const scenario = readMetricString(record, [
+    'scenario',
+    'benchmark_scenario',
+    'scenario type',
+    'scenario_type',
+    'metrics.scenario_type',
+    'benchmark type',
+    'benchmark_type',
+    'metrics.benchmark_type',
+    'workload',
+    'workload_type',
+    'trace',
+    'trace_type',
+    'dataset',
+    'task'
+  ]);
+  const metricReadOptions = { preferP90: isAgenticTraceSequence(scenario) };
+  const interactivity = readImportedXAxisMetric(record, 'interactivity', metricReadOptions);
   const throughput = readImportedThroughput(record);
-  const ttft = readImportedXAxisMetric(record, 'ttft');
-  const endToEnd = readImportedXAxisMetric(record, 'endToEnd');
+  const ttft = readImportedXAxisMetric(record, 'ttft', metricReadOptions);
+  const endToEnd = readImportedXAxisMetric(record, 'endToEnd', metricReadOptions);
   const normalizedEndToEnd = readImportedXAxisMetric(record, 'normalizedEndToEnd');
   const sessionTime = readImportedXAxisMetric(record, 'sessionTime');
   const prefillTpsPerUser = readImportedXAxisMetric(record, 'prefillTpsPerUser');
@@ -6398,22 +6461,6 @@ function importedPointFromBenchmarkRecord(
   const mtp = specMethod === MTP_VALUE ? MTP_VALUE : NON_MTP_VALUE;
   const model = formatImportedModelFromRecord(record, sourceName);
   const precision = (readMetricString(record, ['precision', 'dtype', 'quantization']) || DEFAULT_PRECISION).toLowerCase();
-  const scenario = readMetricString(record, [
-    'scenario',
-    'benchmark_scenario',
-    'scenario type',
-    'scenario_type',
-    'metrics.scenario_type',
-    'benchmark type',
-    'benchmark_type',
-    'metrics.benchmark_type',
-    'workload',
-    'workload_type',
-    'trace',
-    'trace_type',
-    'dataset',
-    'task'
-  ]);
   const isl = readMetricNumber(record, ['isl', 'input_len', 'input_length', 'input sequence length', 'input_tokens']);
   const osl = readMetricNumber(record, ['osl', 'output_len', 'output_length', 'output sequence length', 'output_tokens']);
   const islOsl = scenario
