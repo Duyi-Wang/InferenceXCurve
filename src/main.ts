@@ -6021,8 +6021,9 @@ function looksLikeBenchmarkRecord(record: Record<string, unknown>): boolean {
 }
 
 function readAnyImportedXAxisMetric(record: Record<string, unknown>): number | null {
+  const metricReadOptions = { preferP90: isAgenticTraceSequence(readImportedScenario(record)) };
   for (const key of xMetricPointKeys) {
-    const value = readImportedXAxisMetric(record, key);
+    const value = readImportedXAxisMetric(record, key, metricReadOptions);
     if (value !== null) return value;
   }
   return null;
@@ -6044,17 +6045,13 @@ function readImportedXAxisMetric(
     ];
     const medianAliases = [
       'metrics.median_intvty',
-      'metrics.interactivity',
+      'metrics.median_interactivity',
       'median_intvty',
       'median_interactivity',
-      'interactivity',
-      'tok/s/user',
-      'x'
+      'Median Interactivity',
+      'Median Interactivity (tok/s/user)'
     ];
-    const aliases = options.preferP90
-      ? [...p90Aliases, ...medianAliases]
-      : [...medianAliases, ...p90Aliases];
-    return readMetricNumber(record, aliases);
+    return readMetricNumber(record, options.preferP90 ? p90Aliases : medianAliases);
   }
   if (key === 'ttft') {
     const p90Aliases = [
@@ -6068,16 +6065,12 @@ function readImportedXAxisMetric(
     const medianAliases = [
       'metrics.median_ttft',
       'median_ttft',
-      'ttft',
-      'TTFT',
-      'TTFT (s)',
-      'Time To First Token',
-      'Time To First Token (s)'
+      'Median TTFT',
+      'Median TTFT (s)',
+      'Median Time To First Token',
+      'Median Time To First Token (s)'
     ];
-    const aliases = options.preferP90
-      ? [...p90Aliases, ...medianAliases]
-      : [...medianAliases, ...p90Aliases];
-    return readMetricNumber(record, aliases);
+    return readMetricNumber(record, options.preferP90 ? p90Aliases : medianAliases);
   }
   if (key === 'endToEnd') {
     const p90Aliases = [
@@ -6090,72 +6083,44 @@ function readImportedXAxisMetric(
     ];
     const medianAliases = [
       'metrics.median_e2el',
+      'metrics.median_end_to_end',
       'median_e2el',
-      'endToEnd',
-      'end_to_end',
-      'end-to-end',
-      'End-to-end (s)',
-      'End-to-end Latency',
-      'End-to-end Latency (s)',
-      'E2E',
-      'E2E Latency',
-      'E2E Latency (s)',
-      'e2el'
+      'median_end_to_end',
+      'Median End-to-end Latency',
+      'Median End-to-end Latency (s)',
+      'Median E2E Latency',
+      'Median E2E Latency (s)'
     ];
-    const aliases = options.preferP90
-      ? [...p90Aliases, ...medianAliases]
-      : [...medianAliases, ...p90Aliases];
-    return readMetricNumber(record, aliases);
+    return readMetricNumber(record, options.preferP90 ? p90Aliases : medianAliases);
   }
   if (key === 'normalizedEndToEnd') {
     return readMetricNumber(record, [
       'metrics.p90_normalized_e2e_400_s',
-      'metrics.p75_normalized_e2e_400_s',
-      'metrics.normalized_e2e_400_s',
-      'metrics.normalized_e2e',
-      'metrics.normalized_e2el',
-      'metrics.p90_normalized_e2e',
-      'metrics.p90_normalized_e2el',
-      'normalizedEndToEnd',
-      'normalized_end_to_end',
-      'normalized_e2e_400_s',
-      'normalized_e2e',
-      'normalized_e2el',
       'p90_normalized_e2e_400_s',
-      'p75_normalized_e2e_400_s',
-      'p90_normalized_e2e',
-      'p90_normalized_e2el',
-      'Normalized E2E',
-      'Normalized E2E (s)',
-      'Normalized E2E @ 400 output tokens',
-      'Normalized E2E @ 400 output tokens (s)',
-      'P90 Normalized E2E',
-      'P90 Normalized E2E (s)',
       'P90 Normalized E2E @ 400 output tokens',
-      'P90 Normalized E2E @ 400 output tokens (s)',
-      'P75 Normalized E2E @ 400 output tokens',
-      'P75 Normalized E2E @ 400 output tokens (s)'
+      'P90 Normalized E2E @ 400 output tokens (s)'
     ]);
   }
   if (key === 'sessionTime') {
-    return readImportedSessionTimeMetric(record);
+    return readImportedBenchmarkSessionTimeMetric(record);
   }
   return readMetricNumber(record, [
-    'metrics.prefill_tps_per_user',
     'metrics.p90_prefill_tps_per_user',
-    'prefillTpsPerUser',
-    'prefill_tps_per_user',
-    'prefill_tps_user',
     'p90_prefill_tps_per_user',
-    'Prefill TPS/user',
-    'Prefill TPS / user',
-    'Prefill TPS per user',
-    'Prefill TPS per user (tok/s/user)',
-    'Prefill TPS per user (tok/s)',
     'P90 Prefill TPS / user',
     'P90 Prefill TPS per user',
     'P90 Prefill TPS per user (tok/s)'
   ]);
+}
+
+function readImportedBenchmarkSessionTimeMetric(record: Record<string, unknown>): number | null {
+  const seconds = readMetricNumber(record, [
+    'metrics.normalized_session_time_s',
+    'normalized_session_time_s',
+    'Mean Normalized Session Time (s)',
+    'Normalized Session Time (s)'
+  ]);
+  return seconds !== null ? seconds / 60 : null;
 }
 
 function readImportedSessionTimeMetric(record: Record<string, unknown>): number | null {
@@ -6415,22 +6380,7 @@ function importedPointFromBenchmarkRecord(
   record: Record<string, unknown>,
   sourceName: string
 ): ImportedPointRow | null {
-  const scenario = readMetricString(record, [
-    'scenario',
-    'benchmark_scenario',
-    'scenario type',
-    'scenario_type',
-    'metrics.scenario_type',
-    'benchmark type',
-    'benchmark_type',
-    'metrics.benchmark_type',
-    'workload',
-    'workload_type',
-    'trace',
-    'trace_type',
-    'dataset',
-    'task'
-  ]);
+  const scenario = readImportedScenario(record);
   const metricReadOptions = { preferP90: isAgenticTraceSequence(scenario) };
   const interactivity = readImportedXAxisMetric(record, 'interactivity', metricReadOptions);
   const throughput = readImportedThroughput(record);
@@ -6544,6 +6494,25 @@ function importedPointFromBenchmarkRecord(
     title,
     point
   };
+}
+
+function readImportedScenario(record: Record<string, unknown>): string {
+  return readMetricString(record, [
+    'scenario',
+    'benchmark_scenario',
+    'scenario type',
+    'scenario_type',
+    'metrics.scenario_type',
+    'benchmark type',
+    'benchmark_type',
+    'metrics.benchmark_type',
+    'workload',
+    'workload_type',
+    'trace',
+    'trace_type',
+    'dataset',
+    'task'
+  ]);
 }
 
 function makeImportedPointLabel(

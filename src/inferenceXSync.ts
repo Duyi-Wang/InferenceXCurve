@@ -83,17 +83,11 @@ const FIXED_SEQUENCE_SCENARIOS = new Set(['fixed', 'fixed-length', 'fixed length
 
 const INTERACTIVITY_METRIC_KEYS = [
   'median_intvty',
-  'median_interactivity',
-  'interactivity',
-  'p90_intvty',
-  'p90_interactivity'
+  'median_interactivity'
 ] as const;
 const INTERACTIVITY_P90_METRIC_KEYS = [
   'p90_intvty',
-  'p90_interactivity',
-  'median_intvty',
-  'median_interactivity',
-  'interactivity'
+  'p90_interactivity'
 ] as const;
 const THROUGHPUT_METRIC_KEYS = [
   'tput_per_gpu',
@@ -101,62 +95,24 @@ const THROUGHPUT_METRIC_KEYS = [
   'token_throughput_per_gpu',
   'throughput'
 ] as const;
-const TTFT_METRIC_KEYS = ['median_ttft', 'ttft', 'p90_ttft'] as const;
-const TTFT_P90_METRIC_KEYS = ['p90_ttft', 'median_ttft', 'ttft'] as const;
+const TTFT_METRIC_KEYS = ['median_ttft'] as const;
+const TTFT_P90_METRIC_KEYS = ['p90_ttft'] as const;
 const E2E_METRIC_KEYS = [
   'median_e2el',
-  'e2el',
-  'end_to_end',
-  'endToEnd',
-  'p90_e2el',
-  'p90_end_to_end'
+  'median_end_to_end'
 ] as const;
 const E2E_P90_METRIC_KEYS = [
   'p90_e2el',
-  'p90_end_to_end',
-  'median_e2el',
-  'e2el',
-  'end_to_end',
-  'endToEnd'
+  'p90_end_to_end'
 ] as const;
 const NORMALIZED_E2E_METRIC_KEYS = [
-  'p90_normalized_e2e_400_s',
-  'p75_normalized_e2e_400_s',
-  'normalized_e2e_400_s',
-  'normalized_e2e',
-  'normalized_e2el',
-  'normalized_end_to_end',
-  'p90_normalized_e2e',
-  'p90_normalized_e2el'
-] as const;
-const SESSION_TIME_MINUTE_METRIC_KEYS = [
-  'session_time',
-  'normalized_session_time',
-  'mean_normalized_session_time',
-  'stime'
+  'p90_normalized_e2e_400_s'
 ] as const;
 const SESSION_TIME_SECOND_METRIC_KEYS = [
-  'session_time_s',
-  'normalized_session_time_s',
-  'mean_normalized_session_time_s',
-  'stime_s'
-] as const;
-const SESSION_TIME_METRIC_KEYS = [
-  ...SESSION_TIME_MINUTE_METRIC_KEYS,
-  ...SESSION_TIME_SECOND_METRIC_KEYS
+  'normalized_session_time_s'
 ] as const;
 const PREFILL_TPS_PER_USER_METRIC_KEYS = [
-  'prefill_tps_per_user',
-  'prefill_tps_user',
   'p90_prefill_tps_per_user'
-] as const;
-const X_METRIC_KEYS = [
-  INTERACTIVITY_METRIC_KEYS,
-  TTFT_METRIC_KEYS,
-  E2E_METRIC_KEYS,
-  NORMALIZED_E2E_METRIC_KEYS,
-  SESSION_TIME_METRIC_KEYS,
-  PREFILL_TPS_PER_USER_METRIC_KEYS
 ] as const;
 
 const MODEL_DISPLAY_NAMES: Record<string, string> = {
@@ -512,7 +468,8 @@ function benchmarkRecordMatchesConfig(
   const disagg = readBoolean(record, 'disagg') ?? false;
   const metrics = readMetrics(record);
   const throughput = readMetricNumber(metrics, THROUGHPUT_METRIC_KEYS);
-  const hasXMetric = X_METRIC_KEYS.some((keys) => readMetricNumber(metrics, keys) !== null);
+  const metricKeySets = getXAxisMetricKeySetsForRecord(record, config);
+  const hasXMetric = metricKeySets.some((keys) => readMetricNumber(metrics, keys) !== null);
 
   return (
     resolveModelKey(model) === resolveModelKey(config.model) &&
@@ -926,10 +883,23 @@ function readMetricNumber(record: Record<string, unknown>, keys: readonly string
 }
 
 function readSessionTimeMetric(record: Record<string, unknown>): number | null {
-  const minutes = readMetricNumber(record, SESSION_TIME_MINUTE_METRIC_KEYS);
-  if (minutes !== null) return minutes;
   const seconds = readMetricNumber(record, SESSION_TIME_SECOND_METRIC_KEYS);
   return seconds !== null ? seconds / 60 : null;
+}
+
+function getXAxisMetricKeySetsForRecord(
+  record: InferenceXBenchmarkRecord,
+  config: InferenceXSyncConfig
+): readonly (readonly string[])[] {
+  const useP90 = shouldPreferP90Metrics(record, config);
+  return [
+    useP90 ? INTERACTIVITY_P90_METRIC_KEYS : INTERACTIVITY_METRIC_KEYS,
+    useP90 ? TTFT_P90_METRIC_KEYS : TTFT_METRIC_KEYS,
+    useP90 ? E2E_P90_METRIC_KEYS : E2E_METRIC_KEYS,
+    NORMALIZED_E2E_METRIC_KEYS,
+    SESSION_TIME_SECOND_METRIC_KEYS,
+    PREFILL_TPS_PER_USER_METRIC_KEYS
+  ];
 }
 
 function readNumber(record: Record<string, unknown>, key: string): number | null {
