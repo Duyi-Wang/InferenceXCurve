@@ -272,7 +272,7 @@ const CUSTOM_LINE_STYLE = '__custom_line_style__';
 const MTP_VALUE = 'mtp';
 const NON_MTP_VALUE = 'non-mtp';
 const DEFAULT_MODEL = 'Default Model';
-const DEFAULT_ISL_OSL = 'Default ISL/OSL';
+const DEFAULT_ISL_OSL = 'Default Scenario';
 const DEFAULT_PRECISION = 'default';
 const DEFAULT_LINE_STYLE = 'solid';
 const LOCAL_STORAGE_KEY = 'inferencex-curve:user-data:v1';
@@ -1025,7 +1025,7 @@ app.innerHTML = `
         <select id="model-filter"></select>
       </label>
       <label>
-        <span>ISL/OSL</span>
+        <span>Scenario</span>
         <select id="isl-osl-filter"></select>
       </label>
       <label>
@@ -1698,7 +1698,7 @@ function renderInferenceXSyncAddConfig(): string {
         </select>
       </label>
       <label>
-        <span>ISL/OSL</span>
+        <span>Scenario</span>
         <select data-sync-add-field="shape">
           ${renderInferenceXShapeOptions(options.shapes, inferenceXSync.addShapeSelection)}
         </select>
@@ -2485,7 +2485,7 @@ function renderFilterControls(): void {
   ensureSelectedPrecisions(precisions);
 
   modelFilterEl.innerHTML = renderSelectOptions(models, state.modelFilter, 'All Models');
-  islOslFilterEl.innerHTML = renderSelectOptions(islOslValues, state.islOslFilter, 'All ISL/OSL');
+  islOslFilterEl.innerHTML = renderSelectOptions(islOslValues, state.islOslFilter, 'All Scenarios');
   precisionFilterEl.innerHTML = renderPrecisionFilterOptions(precisions);
   mtpFilterEl.innerHTML = renderMtpFilterOptions(mtpValues);
   metricSwitchEl.innerHTML = renderMetricSwitchOptions();
@@ -2681,7 +2681,7 @@ function renderSeriesCard(series: SeriesDraft, seriesIndex: number, autoColor: s
         ${renderSeriesInput(seriesIndex, 'id', 'Line ID', series.id, true)}
         ${renderSeriesInput(seriesIndex, 'name', 'Name', series.name, true)}
         ${renderSeriesInput(seriesIndex, 'model', 'Model', series.model, true)}
-        ${renderSeriesInput(seriesIndex, 'islOsl', 'ISL/OSL', series.islOsl, true)}
+        ${renderSeriesInput(seriesIndex, 'islOsl', 'Scenario', series.islOsl, true)}
         ${renderSeriesInput(seriesIndex, 'precision', 'Precision', series.precision, true)}
         ${renderSeriesMtpField(seriesIndex, series.mtp)}
         ${renderSeriesInput(seriesIndex, 'title', 'Title', series.title)}
@@ -2710,7 +2710,7 @@ function formatLineMeta(series: SeriesDraft, seriesIndex: number): string {
 function renderEmptySeriesFilter(): string {
   return `
     <div class="series-empty">
-      No line projects match the current Model, ISL/OSL, Precision, and MTP filters.
+      No line projects match the current Model, Scenario, Precision, and MTP filters.
     </div>
   `;
 }
@@ -3991,7 +3991,7 @@ function draftsToSeriesInternal(drafts: SeriesDraft[]): InferenceCurveSeries[] {
       throw new Error(`Line ${seriesIndex + 1}: Line ID and Name are required.`);
     }
     if (!model || !islOsl || !precision) {
-      throw new Error(`Line ${seriesIndex + 1}: Model, ISL/OSL, and Precision are required.`);
+      throw new Error(`Line ${seriesIndex + 1}: Model, Scenario, and Precision are required.`);
     }
 
     const line: InferenceCurveSeries = {
@@ -4818,7 +4818,7 @@ function getChartSubtitle(): string {
   return [
     state.modelFilter === ALL_VALUE ? 'All Models' : formatModelLabel(state.modelFilter),
     precisionLabel || 'No Precision',
-    state.islOslFilter === ALL_VALUE ? 'All ISL/OSL' : formatIslOslLabel(state.islOslFilter),
+    state.islOslFilter === ALL_VALUE ? 'All Scenarios' : formatIslOslLabel(state.islOslFilter),
     state.mtpFilter === ALL_VALUE ? 'All MTP' : formatMtpFilterLabel(state.mtpFilter)
   ].join(' • ');
 }
@@ -5340,7 +5340,7 @@ function renderImportPreviewItem(entry: PendingImportDraft, index: number): stri
       ${renderImportPreviewInput(index, 'id', 'Line ID', draft.id)}
       ${renderImportPreviewInput(index, 'name', 'Name', draft.name)}
       ${renderImportPreviewInput(index, 'model', 'Model', draft.model)}
-      ${renderImportPreviewInput(index, 'islOsl', 'ISL/OSL', draft.islOsl)}
+      ${renderImportPreviewInput(index, 'islOsl', 'Scenario', draft.islOsl)}
       ${renderImportPreviewInput(index, 'precision', 'Precision', draft.precision)}
       ${renderImportPreviewMtpField(index, draft.mtp)}
       ${renderImportPreviewMarkerField(index, draft.marker)}
@@ -6288,7 +6288,7 @@ function seriesFromEditorRecords(records: Record<string, unknown>[]): InferenceC
         id,
         name,
         model: readMetricString(record, ['model']) || getDefaultDraftModel(),
-        islOsl: readMetricString(record, ['islOsl', 'isl/osl']) || getDefaultDraftIslOsl(),
+        islOsl: readMetricString(record, ['islOsl', 'scenario', 'isl/osl']) || getDefaultDraftIslOsl(),
         precision: readMetricString(record, ['precision']) || getDefaultDraftPrecision(),
         mtp: rawMtp ? normalizeMtpValue(rawMtp) : inferMtpFilterFromTokens(`${id} ${name} ${title}`),
         marker: normalizePointShapeValue(
@@ -7126,7 +7126,7 @@ function buildChartCsvRows(mode: CsvExportMode): string[][] {
       'Line Name',
       'Title',
       'Model',
-      'ISL/OSL',
+      'Scenario',
       'Precision',
       'MTP',
       'HW Key',

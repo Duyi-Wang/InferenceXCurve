@@ -13,7 +13,7 @@ round-trips through the app, and is more deterministic than raw benchmark CSV.
 Use this header order for generated CSV:
 
 ```csv
-Line ID,Line Name,Title,Model,ISL/OSL,Precision,MTP,HW Key,Color Mode,Resolved Color,Line Type,Line Marker,Layer,Included in Chart,Active Line,Point Index,Roofline Point,Point Marker,Interactivity (tok/s/user),Throughput/GPU (tok/s/gpu),TTFT (s),End-to-end (s),P90 Normalized E2E @ 400 output tokens (s),Session Time (min),P90 Prefill TPS/user,Prefill GPUs,Decode GPUs,Total GPUs,Prefill TP,Prefill EP,Prefill DPA,Prefill Workers,Decode TP,Decode EP,Decode DPA,Decode Workers,DPA,Disagg,Multi-node,KV Offload,Concurrency,Strategy,Note
+Line ID,Line Name,Title,Model,Scenario,Precision,MTP,HW Key,Color Mode,Resolved Color,Line Type,Line Marker,Layer,Included in Chart,Active Line,Point Index,Roofline Point,Point Marker,Interactivity (tok/s/user),Throughput/GPU (tok/s/gpu),TTFT (s),End-to-end (s),P90 Normalized E2E @ 400 output tokens (s),Session Time (min),P90 Prefill TPS/user,Prefill GPUs,Decode GPUs,Total GPUs,Prefill TP,Prefill EP,Prefill DPA,Prefill Workers,Decode TP,Decode EP,Decode DPA,Decode Workers,DPA,Disagg,Multi-node,KV Offload,Concurrency,Strategy,Note
 ```
 
 The importer uses the editor parser when at least one row has a non-empty
@@ -27,7 +27,7 @@ These fields should always be present and non-empty in generated editor CSV:
 - `Line ID`: stable id for grouping rows into one curve.
 - `Line Name`: legend label.
 - `Model`: filter value, for example `DeepSeek-R1-0528`.
-- `ISL/OSL`: filter value, for example `ISL 8192 / OSL 1024`, `ISL 1024 / OSL 1024`, or a scenario label such as `Agentic Traces`.
+- `Scenario`: filter value, for example `ISL 8192 / OSL 1024`, `ISL 1024 / OSL 1024`, or a scenario label such as `Agentic Traces`.
 - `Precision`: filter value, for example `fp4` or `fp8`.
 - `Throughput/GPU (tok/s/gpu)`: numeric Y value.
 
@@ -41,7 +41,7 @@ Each point row with data must also include at least one numeric X-axis metric:
 - `P90 Prefill TPS/user`
 
 Avoid relying on the app's internal fallbacks for empty `Line ID`, `Line Name`,
-`Model`, `ISL/OSL`, or `Precision`; those defaults depend on current app state
+`Model`, `Scenario`, or `Precision`; those defaults depend on current app state
 and are not suitable for generated CSV. `MTP` is technically optional, but
 generated integrations should prefer explicit `MTP` or `Non-MTP`.
 
@@ -109,7 +109,7 @@ Accepted editor CSV aliases include:
 
 - Line id/name: `series_id`, `line_id`, `Line ID`; `series_name`, `Line Name`,
   `name`
-- Line fields: `model`, `islOsl`, `ISL/OSL`, `precision`, `mtp`, `title`,
+- Line fields: `model`, `islOsl`, `Scenario`, `ISL/OSL`, `precision`, `mtp`, `title`,
   `lineStyle`, `Line Type`, `line_marker`, `Line Marker`, `renderOrder`,
   `Layer`
 - Interactivity: `Interactivity`, `Interactivity (tok/s/user)`,
@@ -167,7 +167,7 @@ Accepted editor CSV aliases include:
 ## Example
 
 ```csv
-Line ID,Line Name,Title,Model,ISL/OSL,Precision,MTP,HW Key,Color Mode,Resolved Color,Line Type,Line Marker,Layer,Included in Chart,Active Line,Point Index,Roofline Point,Point Marker,Interactivity (tok/s/user),Throughput/GPU (tok/s/gpu),TTFT (s),End-to-end (s),P90 Normalized E2E @ 400 output tokens (s),Session Time (min),P90 Prefill TPS/user,Prefill GPUs,Decode GPUs,Total GPUs,Prefill TP,Prefill EP,Prefill DPA,Prefill Workers,Decode TP,Decode EP,Decode DPA,Decode Workers,DPA,Disagg,Multi-node,KV Offload,Concurrency,Strategy,Note
+Line ID,Line Name,Title,Model,Scenario,Precision,MTP,HW Key,Color Mode,Resolved Color,Line Type,Line Marker,Layer,Included in Chart,Active Line,Point Index,Roofline Point,Point Marker,Interactivity (tok/s/user),Throughput/GPU (tok/s/gpu),TTFT (s),End-to-end (s),P90 Normalized E2E @ 400 output tokens (s),Session Time (min),P90 Prefill TPS/user,Prefill GPUs,Decode GPUs,Total GPUs,Prefill TP,Prefill EP,Prefill DPA,Prefill Workers,Decode TP,Decode EP,Decode DPA,Decode Workers,DPA,Disagg,Multi-node,KV Offload,Concurrency,Strategy,Note
 dsr1-8192-fp8-b200-trt,B200 TRT,DeepSeek R1 B200 TRT,DeepSeek-R1-0528,ISL 8192 / OSL 1024,fp8,Non-MTP,,Auto,,solid,precision,1,,,,,,8.42,5220.5,0.12,9.04,,,,4,8,,4,4,true,,8,8,true,,true,true,false,,1024,,run 123
 dsr1-agentic-fp8-b200-trt,B200 TRT Agentic,DeepSeek R1 B200 TRT agentic traces,DeepSeek-R1-0528,Agentic Traces,fp8,Non-MTP,,Auto,,solid,precision,2,,,,,,,4830.2,0.18,37.4,31.073,74.2,168.5,4,8,,4,4,true,,8,8,true,,true,true,false,KV offload off,64,,agentic preview
 ```
@@ -175,7 +175,7 @@ dsr1-agentic-fp8-b200-trt,B200 TRT Agentic,DeepSeek R1 B200 TRT agentic traces,D
 ## Raw Benchmark CSV Fallback
 
 Raw benchmark CSV is supported only as a fallback. If no row has `Line ID`,
-the importer groups rows by parsed model, ISL/OSL or scenario, precision,
+the importer groups rows by parsed model, scenario, precision,
 MTP/spec, hardware, and framework. KV/offload mode is kept as `KV Offload`
 point metadata; it does not split rows into separate lines.
 
@@ -250,8 +250,8 @@ Optional raw benchmark aliases include:
   `timestamp`
 
 In raw benchmark CSV, optional metadata may be empty. If a scenario/workload
-field is present, it becomes the `ISL/OSL` filter label, for example
+field is present, it becomes the `Scenario` filter label, for example
 `Agentic Traces`. Otherwise, `isl` and `osl` are used when available. Missing
 hardware/framework becomes `unknown`, missing precision becomes `default`,
-missing ISL/OSL becomes `Default ISL/OSL`, and missing spec/MTP becomes
+missing scenario becomes `Default Scenario`, and missing spec/MTP becomes
 `Non-MTP`.
