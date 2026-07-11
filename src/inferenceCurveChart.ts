@@ -171,6 +171,8 @@ const STRATEGY_COLORS = [
 const SHAPE_ORDER: ShapeKey[] = ['circle', 'square', 'triangle', 'diamond'];
 const POINT_SIZE = 3.5;
 const HOVER_POINT_SIZE = 6;
+const OFFLOAD_RING_GAP = 2.1;
+const OFFLOAD_RING_STROKE = 1.7;
 const HIT_AREA_RADIUS = 12;
 const DIMMED_SERIES_OPACITY = 0.16;
 const CHART_MARGIN = { top: 18, right: 24, bottom: 48, left: 82 };
@@ -1140,7 +1142,7 @@ function drawScatterPoints(
     .style('pointer-events', (point) => (isPointVisible(point, options) ? 'auto' : 'none'));
 
   merged.each(function (point) {
-    const group = d3.select(this);
+    const group = d3.select<SVGGElement, ChartPoint>(this);
     const shapeKey = getPointShapeKey(point, selectedPrecisions);
     const targetTag = getShapeTag(shapeKey);
     const existing = group.select<SVGElement>('.visible-shape').node();
@@ -1156,6 +1158,7 @@ function drawScatterPoints(
     const shape = group.select<SVGElement>('.visible-shape');
     shape.attr('fill', color).attr('stroke', 'none').attr('data-shape-key', shapeKey);
     applyShapeState(shape, shapeKey, false);
+    updateOffloadRingState(group, point, false);
 
     const labelText = getPointLabelText(point, options);
     if (labelText) {
@@ -1354,6 +1357,11 @@ function applySeriesInteraction(
       applyShapeState(
         d3.select(this).select<SVGElement>('.visible-shape'),
         shapeKey,
+        interaction.hoveredPointKey === getChartPointKey(point)
+      );
+      updateOffloadRingState(
+        d3.select<SVGGElement, ChartPoint>(this),
+        point,
         interaction.hoveredPointKey === getChartPointKey(point)
       );
     });
@@ -1685,8 +1693,8 @@ function getShapeTag(shape: ShapeKey): 'circle' | 'rect' | 'path' {
   return 'circle';
 }
 
-function applyShapeState(
-  shape: d3.Selection<SVGElement, unknown, null, undefined>,
+function applyShapeState<Datum>(
+  shape: d3.Selection<SVGElement, Datum, null, undefined>,
   shapeKey: ShapeKey,
   hover: boolean
 ): void {
@@ -1715,6 +1723,31 @@ function applyShapeState(
       `M ${-size} ${-size + width} L ${-size + width} ${-size} L 0 ${-width} L ${size - width} ${-size} L ${size} ${-size + width} L ${width} 0 L ${size} ${size - width} L ${size - width} ${size} L 0 ${width} L ${-size + width} ${size} L ${-size} ${size - width} L ${-width} 0 Z`
     );
   }
+}
+
+function updateOffloadRingState(
+  group: d3.Selection<SVGGElement, ChartPoint, null, undefined>,
+  point: ChartPoint,
+  hover: boolean
+): void {
+  group
+    .selectAll<SVGCircleElement, ChartPoint>('.offload-ring')
+    .data(isOffloadOnPoint(point) ? [point] : [])
+    .join('circle')
+    .attr('class', 'offload-ring')
+    .attr('r', (hover ? HOVER_POINT_SIZE : POINT_SIZE) + OFFLOAD_RING_GAP)
+    .attr('fill', 'none')
+    .attr('stroke', '#fff')
+    .attr('stroke-width', OFFLOAD_RING_STROKE)
+    .attr('pointer-events', 'none');
+}
+
+function isOffloadOnPoint(point: InferenceCurvePoint): boolean {
+  const raw = typeof point.kv_offload === 'string' ? point.kv_offload.trim() : '';
+  if (!raw) return false;
+  const normalized = raw.toLowerCase().replace(/[^a-z0-9]+/gu, ' ');
+  if (/\b(off|none|false|no|disabled|disable)\b/u.test(normalized)) return false;
+  return /\b(on|dram|cpu|lmcache|hicache|enabled|enable)\b/u.test(normalized) || normalized.includes('kv offload');
 }
 
 function makeStarPath(outerRadius: number, innerRadius: number): string {

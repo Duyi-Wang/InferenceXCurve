@@ -11,7 +11,6 @@ export interface InferenceXSyncConfig {
   framework: string;
   specMethod: string;
   disagg: boolean;
-  offloadMode: string;
   enabled: boolean;
 }
 
@@ -26,7 +25,6 @@ export interface InferenceXAvailabilityRow {
   framework: string;
   specMethod: string;
   disagg: boolean;
-  offloadMode: string;
   date: string;
 }
 
@@ -43,7 +41,6 @@ export interface InferenceXSyncSummaryItem {
   osl: number;
   specMethod: string;
   disagg: boolean;
-  offloadMode: string;
   pointCount: number;
   latestDate: string;
 }
@@ -177,7 +174,6 @@ export function createDefaultInferenceXSyncConfigs(): InferenceXSyncConfig[] {
             framework: target.framework,
             specMethod,
             disagg: true,
-            offloadMode: '',
             enabled: true
           });
           configs.push(config);
@@ -194,7 +190,7 @@ export function normalizeInferenceXSyncConfigs(value: unknown): InferenceXSyncCo
     .filter(isRecord)
     .map((item) => normalizeInferenceXSyncConfig(item))
     .filter((config) => config.model && config.precision && config.hardware && config.framework)
-    .map((config) => [config.id, config])).values());
+    .map((config) => [makeInferenceXSyncLineId(config), config])).values());
   return configs.length > 0 ? configs : createDefaultInferenceXSyncConfigs();
 }
 
@@ -208,7 +204,6 @@ export function normalizeInferenceXSyncConfig(value: Partial<InferenceXSyncConfi
   const framework = normalizeText(value.framework).toLowerCase() || 'mori-sglang';
   const specMethod = normalizeSpecMethod(value.specMethod);
   const disagg = typeof value.disagg === 'boolean' ? value.disagg : true;
-  const offloadMode = normalizeOffloadKey(value.offloadMode);
   const enabled = typeof value.enabled === 'boolean' ? value.enabled : true;
   const normalized = {
     model,
@@ -220,7 +215,6 @@ export function normalizeInferenceXSyncConfig(value: Partial<InferenceXSyncConfi
     framework,
     specMethod,
     disagg,
-    offloadMode,
     enabled
   };
   return {
@@ -247,8 +241,7 @@ export function makeInferenceXSyncLineId(
     config.hardware,
     config.framework,
     normalizeSpecMethod(config.specMethod) === MTP_SPEC ? MTP_SPEC : '',
-    config.disagg ? '' : 'agg',
-    normalizeOffloadKey(config.offloadMode)
+    config.disagg ? '' : 'agg'
   ]
     .filter(Boolean)
     .join('-')
@@ -260,8 +253,7 @@ export function makeInferenceXSyncLineId(
 export async function fetchInferenceXAvailability(signal?: AbortSignal): Promise<InferenceXAvailabilityRow[]> {
   const value = await fetchInferenceXJson(`${INFERENCEX_API_BASE}/availability`, signal);
   if (!Array.isArray(value)) return [];
-  const rows = value.filter(isRecord).map(readAvailabilityRow).filter(isAvailabilityRow);
-  return enrichAvailabilityRowsWithOffloadModes(rows, signal);
+  return value.filter(isRecord).map(readAvailabilityRow).filter(isAvailabilityRow);
 }
 
 export async function fetchInferenceXSyncSeries(
@@ -366,30 +358,14 @@ export function formatInferenceXConfigLabel(config: InferenceXSyncConfig): strin
     config.precision.toUpperCase(),
     `${formatHardwareLabel(config.hardware)} / ${formatFrameworkLabel(config.framework)}`,
     normalizeSpecMethod(config.specMethod) === MTP_SPEC ? 'MTP' : 'Non-MTP',
-    config.disagg ? 'disagg' : 'aggregated',
-    config.offloadMode ? formatInferenceXOffloadModeLabel(config.offloadMode) : ''
+    config.disagg ? 'disagg' : 'aggregated'
   ].filter(Boolean).join(' • ');
-}
-
-export function formatInferenceXOffloadModeLabel(value: string): string {
-  const key = normalizeOffloadKey(value);
-  if (!key) return 'All';
-  if (key === 'offload-off') return 'Offload OFF';
-  const parts = key.replace(/^offload-?/u, '').split('-').filter(Boolean);
-  const target = parts[0] ?? 'on';
-  const backend = parts.slice(1).join('-');
-  const detail = [
-    target && target !== 'on' ? target.toUpperCase() : '',
-    backend ? `via ${formatFrameworkLabel(backend)}` : ''
-  ].filter(Boolean).join(' ');
-  return detail ? `Offload ON (${detail})` : 'Offload ON';
 }
 
 export function inferenceXAvailabilityRowMatchesConfig(
   row: InferenceXAvailabilityRow,
   config: InferenceXSyncConfig
 ): boolean {
-  const configOffloadMode = normalizeOffloadKey(config.offloadMode);
   return (
     resolveModelKey(row.model) === resolveModelKey(config.model) &&
     sequenceMatches(row, config) &&
@@ -397,8 +373,7 @@ export function inferenceXAvailabilityRowMatchesConfig(
     hardwareMatches(row.hardware, config.hardware) &&
     row.framework.toLowerCase() === config.framework.toLowerCase() &&
     normalizeSpecMethod(row.specMethod) === normalizeSpecMethod(config.specMethod) &&
-    row.disagg === config.disagg &&
-    (!configOffloadMode || normalizeOffloadKey(row.offloadMode) === configOffloadMode)
+    row.disagg === config.disagg
   );
 }
 
@@ -416,7 +391,6 @@ function readAvailabilityRow(record: Record<string, unknown>): InferenceXAvailab
   const hardware = readString(record, 'hardware').toLowerCase();
   const framework = readString(record, 'framework').toLowerCase();
   if (!model || (!scenario && (isl <= 0 || osl <= 0)) || !precision || !hardware || !framework) return null;
-  const offload = readRecordOffloadConfig(record);
   return {
     model,
     modelDisplay: getInferenceXDisplayModel(model),
@@ -428,7 +402,6 @@ function readAvailabilityRow(record: Record<string, unknown>): InferenceXAvailab
     framework,
     specMethod: normalizeSpecMethod(readString(record, 'spec_method')),
     disagg: readBoolean(record, 'disagg') ?? false,
-    offloadMode: offload.key,
     date: readString(record, 'date')
   };
 }
@@ -442,15 +415,8 @@ async function fetchBenchmarkRecordsByModel(
   signal?: AbortSignal
 ): Promise<Map<string, InferenceXBenchmarkRecord[]>> {
   const models = Array.from(new Set(configs.map((config) => resolveModelKey(config.model))));
-  return fetchBenchmarkRecordsForModelKeys(models, signal);
-}
-
-async function fetchBenchmarkRecordsForModelKeys(
-  modelKeys: string[],
-  signal?: AbortSignal
-): Promise<Map<string, InferenceXBenchmarkRecord[]>> {
   const entries = await Promise.all(
-    modelKeys.map(async (modelKey) => {
+    models.map(async (modelKey) => {
       const modelParam = modelKeyToApiParam(modelKey);
       const url = `${INFERENCEX_API_BASE}/benchmarks?model=${encodeURIComponent(modelParam)}`;
       const value = await fetchInferenceXJson(url, signal);
@@ -459,87 +425,6 @@ async function fetchBenchmarkRecordsForModelKeys(
     })
   );
   return new Map(entries);
-}
-
-async function enrichAvailabilityRowsWithOffloadModes(
-  rows: InferenceXAvailabilityRow[],
-  signal?: AbortSignal
-): Promise<InferenceXAvailabilityRow[]> {
-  const modelKeys = Array.from(new Set(
-    rows
-      .filter((row) => shouldDeriveOffloadAvailability(row))
-      .map((row) => resolveModelKey(row.model))
-  ));
-  if (modelKeys.length === 0) return rows;
-
-  let recordsByModel: Map<string, InferenceXBenchmarkRecord[]>;
-  try {
-    recordsByModel = await fetchBenchmarkRecordsForModelKeys(modelKeys, signal);
-  } catch {
-    return rows;
-  }
-
-  const derivedRows = Array.from(recordsByModel.values())
-    .flat()
-    .map(readAvailabilityRow)
-    .filter(isAvailabilityRow)
-    .filter((row) => shouldDeriveOffloadAvailability(row) && row.offloadMode);
-  if (derivedRows.length === 0) return rows;
-
-  const derivedByBaseKey = new Map<string, InferenceXAvailabilityRow[]>();
-  uniqueAvailabilityRows(derivedRows).forEach((row) => {
-    const key = makeAvailabilityBaseKey(row);
-    derivedByBaseKey.set(key, [...(derivedByBaseKey.get(key) ?? []), row]);
-  });
-
-  const merged: InferenceXAvailabilityRow[] = [];
-  rows.forEach((row) => {
-    const derived = derivedByBaseKey.get(makeAvailabilityBaseKey(row));
-    merged.push(...(derived?.length ? derived : [row]));
-  });
-  return uniqueAvailabilityRows(merged).sort(compareAvailabilityRows);
-}
-
-function shouldDeriveOffloadAvailability(row: InferenceXAvailabilityRow): boolean {
-  return isAgenticScenario(row.scenario);
-}
-
-function uniqueAvailabilityRows(rows: InferenceXAvailabilityRow[]): InferenceXAvailabilityRow[] {
-  return Array.from(new Map(rows.map((row) => [makeAvailabilityKey(row), row])).values());
-}
-
-function makeAvailabilityBaseKey(row: InferenceXAvailabilityRow): string {
-  return [
-    resolveModelKey(row.model),
-    normalizeScenario(row.scenario),
-    row.isl,
-    row.osl,
-    row.precision.toLowerCase(),
-    row.hardware.toLowerCase(),
-    row.framework.toLowerCase(),
-    normalizeSpecMethod(row.specMethod),
-    row.disagg ? 'disagg' : 'agg'
-  ].join('|');
-}
-
-function makeAvailabilityKey(row: InferenceXAvailabilityRow): string {
-  return `${makeAvailabilityBaseKey(row)}|${normalizeOffloadKey(row.offloadMode)}`;
-}
-
-function compareAvailabilityRows(a: InferenceXAvailabilityRow, b: InferenceXAvailabilityRow): number {
-  return (
-    b.date.localeCompare(a.date) ||
-    a.modelDisplay.localeCompare(b.modelDisplay) ||
-    a.hardware.localeCompare(b.hardware) ||
-    a.framework.localeCompare(b.framework) ||
-    a.scenario.localeCompare(b.scenario) ||
-    b.isl - a.isl ||
-    b.osl - a.osl ||
-    a.precision.localeCompare(b.precision) ||
-    a.specMethod.localeCompare(b.specMethod) ||
-    Number(b.disagg) - Number(a.disagg) ||
-    normalizeOffloadKey(a.offloadMode).localeCompare(normalizeOffloadKey(b.offloadMode))
-  );
 }
 
 async function fetchInferenceXJson(url: string, signal?: AbortSignal): Promise<unknown> {
@@ -588,8 +473,6 @@ function benchmarkRecordMatchesConfig(
   const framework = readString(record, 'framework').toLowerCase();
   const specMethod = normalizeSpecMethod(readString(record, 'spec_method'));
   const disagg = readBoolean(record, 'disagg') ?? false;
-  const recordOffloadMode = readRecordOffloadConfig(record).key;
-  const configOffloadMode = normalizeOffloadKey(config.offloadMode);
   const metrics = readMetrics(record);
   const throughput = readMetricNumber(metrics, THROUGHPUT_METRIC_KEYS);
   const metricKeySets = getXAxisMetricKeySetsForRecord(record, config);
@@ -603,15 +486,9 @@ function benchmarkRecordMatchesConfig(
     framework === config.framework.toLowerCase() &&
     specMethod === normalizeSpecMethod(config.specMethod) &&
     disagg === config.disagg &&
-    offloadModeMatches(recordOffloadMode, configOffloadMode) &&
     throughput !== null &&
     hasXMetric
   );
-}
-
-function offloadModeMatches(recordOffloadMode: string, configOffloadMode: string): boolean {
-  if (!configOffloadMode) return true;
-  return (recordOffloadMode || 'offload-off') === configOffloadMode;
 }
 
 function filterLatestBenchmarkRecords(records: InferenceXBenchmarkRecord[]): InferenceXBenchmarkRecord[] {
@@ -650,12 +527,7 @@ function benchmarkRecordsToSeries(
     );
   if (points.length === 0) return null;
 
-  const lineName = formatInferenceXLineName(
-    config.hardware,
-    config.framework,
-    config.specMethod,
-    config.offloadMode
-  );
+  const lineName = formatInferenceXLineName(config.hardware, config.framework, config.specMethod);
   const islOsl = formatSequenceLabel(config);
   const model = getInferenceXDisplayModel(config.model);
   const precision = config.precision.toLowerCase();
@@ -770,7 +642,6 @@ function makeSummaryItem(
     osl: config.osl,
     specMethod: normalizeSpecMethod(config.specMethod),
     disagg: config.disagg,
-    offloadMode: normalizeOffloadKey(config.offloadMode),
     pointCount: line.points.length,
     latestDate: latestPointDate(line)
   };
@@ -916,20 +787,16 @@ function hardwareMatches(recordHardware: string, configHardware: string): boolea
 
 function makeHwKey(config: InferenceXSyncConfig): string {
   const suffix = normalizeSpecMethod(config.specMethod) === MTP_SPEC ? '_mtp' : '';
-  const offload = normalizeOffloadKey(config.offloadMode);
-  const offloadSuffix = offload ? `_${offload}` : '';
-  return `${config.hardware.toLowerCase()}_${config.framework.toLowerCase()}${suffix}${offloadSuffix}`;
+  return `${config.hardware.toLowerCase()}_${config.framework.toLowerCase()}${suffix}`;
 }
 
 function formatInferenceXLineName(
   hardware: string,
   framework: string,
-  specMethod: string,
-  offloadMode = ''
+  specMethod: string
 ): string {
   const suffix = normalizeSpecMethod(specMethod) === MTP_SPEC ? ' MTP' : '';
-  const offloadSuffix = offloadMode ? `, ${formatInferenceXOffloadModeLabel(offloadMode)}` : '';
-  return `${formatHardwareLabel(hardware)} (${formatFrameworkLabel(framework)}${suffix}${offloadSuffix})`;
+  return `${formatHardwareLabel(hardware)} (${formatFrameworkLabel(framework)}${suffix})`;
 }
 
 function formatHardwareLabel(value: string): string {
