@@ -69,6 +69,7 @@ interface AppState {
   useAdvancedLabels: boolean;
   showGradientLabels: boolean;
   showLineLabels: boolean;
+  showOffloadRings: boolean;
   highContrast: boolean;
   logY: boolean;
   search: string;
@@ -142,6 +143,7 @@ interface PersistedAppState {
   useAdvancedLabels?: boolean;
   showGradientLabels?: boolean;
   showLineLabels?: boolean;
+  showOffloadRings?: boolean;
   highContrast?: boolean;
   logY?: boolean;
   search?: string;
@@ -730,6 +732,7 @@ function restorePersistedState(value: unknown): PersistedAppState {
     useAdvancedLabels: readPersistedBoolean(value.useAdvancedLabels),
     showGradientLabels: readPersistedBoolean(value.showGradientLabels),
     showLineLabels: readPersistedBoolean(value.showLineLabels),
+    showOffloadRings: readPersistedBoolean(value.showOffloadRings),
     highContrast: readPersistedBoolean(value.highContrast),
     logY: readPersistedBoolean(value.logY),
     search: readPersistedText(value, 'search'),
@@ -774,6 +777,7 @@ function restoreAppState(defaults: AppState, saved: PersistedAppState, series: I
     useAdvancedLabels: saved.useAdvancedLabels ?? defaults.useAdvancedLabels,
     showGradientLabels: saved.showGradientLabels ?? defaults.showGradientLabels,
     showLineLabels: saved.showLineLabels ?? defaults.showLineLabels,
+    showOffloadRings: saved.showOffloadRings ?? defaults.showOffloadRings,
     highContrast: saved.highContrast ?? defaults.highContrast,
     logY: saved.logY ?? defaults.logY,
     search: saved.search ?? defaults.search,
@@ -797,6 +801,7 @@ function serializeAppState(): PersistedAppState {
     useAdvancedLabels: state.useAdvancedLabels,
     showGradientLabels: state.showGradientLabels,
     showLineLabels: state.showLineLabels,
+    showOffloadRings: state.showOffloadRings,
     highContrast: state.highContrast,
     logY: state.logY,
     search: state.search,
@@ -1529,6 +1534,7 @@ function getChartOptions(): InferenceCurveChartOptions {
     useAdvancedLabels: state.useAdvancedLabels,
     showGradientLabels: state.showGradientLabels,
     showLineLabels: state.showLineLabels,
+    showOffloadRings: state.showOffloadRings,
     highContrast: state.highContrast,
     logY: state.logY,
     theme: state.theme,
@@ -3539,6 +3545,7 @@ function renderLegend(): void {
         ${renderSwitch('useAdvancedLabels', 'Parallelism Labels', state.useAdvancedLabels)}
         ${renderSwitch('showGradientLabels', 'Gradient Labels', state.showGradientLabels)}
         ${renderSwitch('showLineLabels', 'Line Labels', state.showLineLabels)}
+        ${renderSwitch('showOffloadRings', 'Offload Rings', state.showOffloadRings)}
       </div>
     </div>
   `;
@@ -4602,6 +4609,7 @@ function createInitialState(series: InferenceCurveSeries[]): AppState {
     useAdvancedLabels: false,
     showGradientLabels: false,
     showLineLabels: false,
+    showOffloadRings: true,
     highContrast: false,
     logY: false,
     search: '',

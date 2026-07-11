@@ -59,6 +59,7 @@ export interface InferenceCurveChartOptions {
   useAdvancedLabels?: boolean;
   showGradientLabels?: boolean;
   showLineLabels?: boolean;
+  showOffloadRings?: boolean;
   highContrast?: boolean;
   logY?: boolean;
   theme?: 'dark' | 'light';
@@ -171,8 +172,8 @@ const STRATEGY_COLORS = [
 const SHAPE_ORDER: ShapeKey[] = ['circle', 'square', 'triangle', 'diamond'];
 const POINT_SIZE = 3.5;
 const HOVER_POINT_SIZE = 6;
-const OFFLOAD_RING_GAP = 2.1;
-const OFFLOAD_RING_STROKE = 1.7;
+const OFFLOAD_RING_GAP = 4;
+const OFFLOAD_RING_STROKE = 1.5;
 const HIT_AREA_RADIUS = 12;
 const DIMMED_SERIES_OPACITY = 0.16;
 const CHART_MARGIN = { top: 18, right: 24, bottom: 48, left: 82 };
@@ -294,6 +295,7 @@ const defaultOptions: Required<
   useAdvancedLabels: false,
   showGradientLabels: false,
   showLineLabels: false,
+  showOffloadRings: true,
   highContrast: false,
   logY: false,
   theme: 'dark',
@@ -1158,7 +1160,7 @@ function drawScatterPoints(
     const shape = group.select<SVGElement>('.visible-shape');
     shape.attr('fill', color).attr('stroke', 'none').attr('data-shape-key', shapeKey);
     applyShapeState(shape, shapeKey, false);
-    updateOffloadRingState(group, point, false);
+    updateOffloadRingState(group, point, false, options.showOffloadRings);
 
     const labelText = getPointLabelText(point, options);
     if (labelText) {
@@ -1362,7 +1364,8 @@ function applySeriesInteraction(
       updateOffloadRingState(
         d3.select<SVGGElement, ChartPoint>(this),
         point,
-        interaction.hoveredPointKey === getChartPointKey(point)
+        interaction.hoveredPointKey === getChartPointKey(point),
+        options.showOffloadRings
       );
     });
 
@@ -1728,17 +1731,20 @@ function applyShapeState<Datum>(
 function updateOffloadRingState(
   group: d3.Selection<SVGGElement, ChartPoint, null, undefined>,
   point: ChartPoint,
-  hover: boolean
+  hover: boolean,
+  enabled: boolean
 ): void {
   group
-    .selectAll<SVGCircleElement, ChartPoint>('.offload-ring')
-    .data(isOffloadOnPoint(point) ? [point] : [])
+    .selectAll<SVGCircleElement, ChartPoint>('.offload-halo')
+    .data(enabled && isOffloadOnPoint(point) ? [point] : [])
     .join('circle')
-    .attr('class', 'offload-ring')
+    .attr('class', 'offload-halo')
     .attr('r', (hover ? HOVER_POINT_SIZE : POINT_SIZE) + OFFLOAD_RING_GAP)
     .attr('fill', 'none')
-    .attr('stroke', '#fff')
+    .attr('stroke', 'var(--foreground)')
     .attr('stroke-width', OFFLOAD_RING_STROKE)
+    .attr('stroke-dasharray', '3 2')
+    .attr('opacity', 0.9)
     .attr('pointer-events', 'none');
 }
 
