@@ -9,6 +9,7 @@ import {
   fetchInferenceXSyncSeries,
   fingerprintInferenceCurveSeries,
   formatInferenceXConfigLabel,
+  formatInferenceXOffloadModeLabel,
   getInferenceXDisplayModel,
   inferenceXAvailabilityRowMatchesConfig,
   makeInferenceXSyncLineId,
@@ -190,6 +191,7 @@ interface InferenceXSyncState {
   addPrecisionSelection: string;
   addFrameworkSelection: string;
   addSpecMethodSelection: string;
+  addOffloadModeSelection: string;
 }
 
 interface PersistedAppData {
@@ -627,7 +629,8 @@ function createInferenceXSyncState(saved?: PersistedInferenceXSyncState): Infere
     addShapeSelection: ALL_VALUE,
     addPrecisionSelection: ALL_VALUE,
     addFrameworkSelection: ALL_VALUE,
-    addSpecMethodSelection: ALL_VALUE
+    addSpecMethodSelection: ALL_VALUE,
+    addOffloadModeSelection: ALL_VALUE
   };
 }
 
@@ -655,7 +658,8 @@ function createInferenceXSyncAddDraft(config: InferenceXSyncConfig): InferenceXS
     hardware: config.hardware,
     framework: config.framework,
     specMethod: config.specMethod,
-    disagg: config.disagg
+    disagg: config.disagg,
+    offloadMode: config.offloadMode
   };
 }
 
@@ -1606,7 +1610,7 @@ function renderInferenceXSyncUpdateSummary(items: InferenceXSyncSummaryItem[]): 
     .slice(0, 8)
     .map(
       (item) =>
-        `${item.name} ${item.precision.toUpperCase()} ${formatInferenceXSummarySequenceLabel(item)}${item.latestDate ? ` (${item.latestDate})` : ''}`
+        `${item.name} ${item.precision.toUpperCase()} ${formatInferenceXSummarySequenceLabel(item)}${formatInferenceXSummaryOffloadLabel(item)}${item.latestDate ? ` (${item.latestDate})` : ''}`
     );
   const hiddenCount = Math.max(0, items.length - visible.length);
   const suffix = hiddenCount > 0 ? `; +${hiddenCount} more` : '';
@@ -1738,6 +1742,12 @@ function renderInferenceXSyncAddConfig(): string {
             .join('')}
         </select>
       </label>
+      <label>
+        <span>Offload</span>
+        <select data-sync-add-field="offloadMode">
+          ${renderInferenceXAllOptions(options.offloadModes, inferenceXSync.addOffloadModeSelection, formatInferenceXOffloadModeLabel)}
+        </select>
+      </label>
       <button type="button" class="primary action-button" data-sync-action="add-config">
         ${renderIcon('plus')}
         <span>Add Config</span>
@@ -1816,6 +1826,10 @@ function formatInferenceXSummarySequenceLabel(item: Pick<InferenceXSyncSummaryIt
   return item.scenario ? formatScenarioLabel(item.scenario) : `${item.isl}/${item.osl}`;
 }
 
+function formatInferenceXSummaryOffloadLabel(item: Pick<InferenceXSyncSummaryItem, 'offloadMode'>): string {
+  return item.offloadMode ? ` ${formatInferenceXOffloadModeLabel(item.offloadMode)}` : '';
+}
+
 function formatScenarioLabel(value: string): string {
   return value
     .split(/[-_\s]+/u)
@@ -1835,6 +1849,7 @@ function getInferenceXAddOptions(): {
   frameworks: string[];
   specMethods: string[];
   disaggValues: boolean[];
+  offloadModes: string[];
 } {
   const rows = getInferenceXOptionRows();
   const modelRows = rows.filter((row) => row.modelDisplay === inferenceXSync.addDraft.model);
@@ -1861,6 +1876,8 @@ function getInferenceXAddOptions(): {
       ? precisionScopedRows
       : precisionScopedRows.filter((row) => row.specMethod === inferenceXSync.addDraft.specMethod);
   const specScopedRows = specRows.length ? specRows : precisionScopedRows;
+  const disaggRows = specScopedRows.filter((row) => row.disagg === inferenceXSync.addDraft.disagg);
+  const disaggScopedRows = disaggRows.length ? disaggRows : specScopedRows;
 
   return {
     models: uniqueSorted(rows.map((row) => row.modelDisplay)),
@@ -1869,7 +1886,8 @@ function getInferenceXAddOptions(): {
     hardware: uniqueSorted(modelScopedRows.map((row) => row.hardware)),
     frameworks: uniqueSorted(hardwareScopedRows.map((row) => row.framework)),
     specMethods: uniqueSorted(precisionScopedRows.map((row) => row.specMethod)),
-    disaggValues: uniqueBooleans(specScopedRows.map((row) => row.disagg))
+    disaggValues: uniqueBooleans(specScopedRows.map((row) => row.disagg)),
+    offloadModes: uniqueSorted(disaggScopedRows.map((row) => row.offloadMode).filter(Boolean))
   };
 }
 
@@ -1886,6 +1904,7 @@ function getInferenceXOptionRows(): InferenceXAvailabilityRow[] {
     framework: config.framework,
     specMethod: config.specMethod,
     disagg: config.disagg,
+    offloadMode: config.offloadMode,
     date: ''
   }));
 }
@@ -2243,6 +2262,11 @@ function updateInferenceXAddDraft(field: string, value: string): void {
     }
   } else if (field === 'disagg') {
     inferenceXSync.addDraft.disagg = value === 'true';
+  } else if (field === 'offloadMode') {
+    inferenceXSync.addOffloadModeSelection = value;
+    if (value !== ALL_VALUE) {
+      inferenceXSync.addDraft.offloadMode = value;
+    }
   }
   alignInferenceXAddDraft(field);
 }
@@ -2263,7 +2287,8 @@ function alignInferenceXAddDraft(preferredField = ''): void {
     hardware: candidate.hardware,
     framework: candidate.framework,
     specMethod: candidate.specMethod,
-    disagg: candidate.disagg
+    disagg: candidate.disagg,
+    offloadMode: candidate.offloadMode
   };
   if (inferenceXSync.addShapeSelection !== ALL_VALUE) {
     inferenceXSync.addShapeSelection = makeInferenceXShapeValue(candidate);
@@ -2277,6 +2302,9 @@ function alignInferenceXAddDraft(preferredField = ''): void {
   if (inferenceXSync.addSpecMethodSelection !== ALL_VALUE) {
     inferenceXSync.addSpecMethodSelection = candidate.specMethod;
   }
+  if (inferenceXSync.addOffloadModeSelection !== ALL_VALUE) {
+    inferenceXSync.addOffloadModeSelection = candidate.offloadMode || ALL_VALUE;
+  }
 }
 
 function pickBestInferenceXAddRow(
@@ -2288,6 +2316,7 @@ function pickBestInferenceXAddRow(
   const shouldScorePrecision = inferenceXSync.addPrecisionSelection !== ALL_VALUE;
   const shouldScoreFramework = inferenceXSync.addFrameworkSelection !== ALL_VALUE;
   const shouldScoreSpecMethod = inferenceXSync.addSpecMethodSelection !== ALL_VALUE;
+  const shouldScoreOffloadMode = inferenceXSync.addOffloadModeSelection !== ALL_VALUE;
   const rowScore = (row: InferenceXAvailabilityRow): number => {
     let score = 0;
     if (row.hardware === desired.hardware) score += preferredField === 'hardware' ? 1000 : 90;
@@ -2304,6 +2333,9 @@ function pickBestInferenceXAddRow(
       score += preferredField === 'specMethod' ? 1000 : 30;
     }
     if (row.disagg === desired.disagg) score += preferredField === 'disagg' ? 1000 : 20;
+    if (shouldScoreOffloadMode && row.offloadMode === desired.offloadMode) {
+      score += preferredField === 'offloadMode' ? 1000 : 10;
+    }
     return score;
   };
 
@@ -2323,7 +2355,8 @@ function compareInferenceXAvailabilityRows(
     b.osl - a.osl ||
     a.precision.localeCompare(b.precision) ||
     a.specMethod.localeCompare(b.specMethod) ||
-    Number(b.disagg) - Number(a.disagg)
+    Number(b.disagg) - Number(a.disagg) ||
+    a.offloadMode.localeCompare(b.offloadMode)
   );
 }
 
@@ -2365,7 +2398,8 @@ function createInferenceXConfigsFromAddDraft(): InferenceXSyncConfig[] {
     inferenceXSync.addShapeSelection !== ALL_VALUE &&
     inferenceXSync.addPrecisionSelection !== ALL_VALUE &&
     inferenceXSync.addFrameworkSelection !== ALL_VALUE &&
-    inferenceXSync.addSpecMethodSelection !== ALL_VALUE
+    inferenceXSync.addSpecMethodSelection !== ALL_VALUE &&
+    inferenceXSync.addOffloadModeSelection !== ALL_VALUE
   ) {
     return [
       normalizeInferenceXSyncConfig({
@@ -2373,6 +2407,7 @@ function createInferenceXConfigsFromAddDraft(): InferenceXSyncConfig[] {
         scenario: inferenceXSync.addDraft.scenario,
         framework: inferenceXSync.addFrameworkSelection,
         specMethod: inferenceXSync.addSpecMethodSelection,
+        offloadMode: inferenceXSync.addOffloadModeSelection,
         enabled: true
       })
     ];
@@ -2390,6 +2425,7 @@ function createInferenceXConfigsFromAddDraft(): InferenceXSyncConfig[] {
         precision: row.precision,
         framework: row.framework,
         specMethod: row.specMethod,
+        offloadMode: row.offloadMode,
         enabled: true
       })
     )
@@ -2420,7 +2456,11 @@ function inferenceXAvailabilityRowMatchesAddDraft(row: InferenceXAvailabilityRow
     ) &&
     (inferenceXSync.addSpecMethodSelection === ALL_VALUE ||
       row.specMethod === inferenceXSync.addSpecMethodSelection) &&
-    row.disagg === draft.disagg
+    row.disagg === draft.disagg &&
+    (
+      inferenceXSync.addOffloadModeSelection === ALL_VALUE ||
+      row.offloadMode === inferenceXSync.addOffloadModeSelection
+    )
   );
 }
 
@@ -2461,6 +2501,7 @@ function resetInferenceXSyncConfigs(): void {
   inferenceXSync.addPrecisionSelection = ALL_VALUE;
   inferenceXSync.addFrameworkSelection = ALL_VALUE;
   inferenceXSync.addSpecMethodSelection = ALL_VALUE;
+  inferenceXSync.addOffloadModeSelection = ALL_VALUE;
   clearInferenceXStagedUpdate();
   inferenceXSync.status = 'idle';
   inferenceXSync.lastError = '';
