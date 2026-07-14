@@ -172,6 +172,10 @@ const STRATEGY_COLORS = [
 const SHAPE_ORDER: ShapeKey[] = ['circle', 'square', 'triangle', 'diamond'];
 const POINT_SIZE = 3.5;
 const HOVER_POINT_SIZE = 6;
+const POINT_LABEL_FONT_SIZE = '10px';
+const POINT_LABEL_FONT_WEIGHT = '700';
+const POINT_LABEL_FIRST_LINE_OFFSET_EM = 0.8;
+const POINT_LABEL_LINE_HEIGHT_EM = 1.1;
 const OFFLOAD_RING_GAP = 4;
 const OFFLOAD_RING_STROKE = 1.5;
 const HIT_AREA_RADIUS = 12;
@@ -1163,21 +1167,7 @@ function drawScatterPoints(
     updateOffloadRingState(group, point, false, options.showOffloadRings);
 
     const labelText = getPointLabelText(point, options);
-    if (labelText) {
-      group
-        .selectAll<SVGTextElement, string>('.point-label')
-        .data([labelText])
-        .join('text')
-        .attr('class', 'point-label')
-        .attr('dy', -8)
-        .attr('text-anchor', 'middle')
-        .attr('fill', 'var(--foreground)')
-        .attr('font-size', '10px')
-        .attr('pointer-events', 'none')
-        .text((text) => text);
-    } else {
-      group.selectAll('.point-label').remove();
-    }
+    updatePointLabel(group, labelText);
   });
 
   merged
@@ -1484,16 +1474,72 @@ function getPointLabelText(
 ): string {
   if (options.hidePointLabels || options.showGradientLabels) return '';
   if (options.showConcurrencyLabels) return getConcurrencyPointLabel(point);
-  if (options.useAdvancedLabels) return getAdvancedPointLabel(point);
+  if (options.useAdvancedLabels) {
+    return appendConcurrencyToPointLabel(getAdvancedPointLabel(point), point);
+  }
   const referenceTp = getReferenceTp(point);
-  if (referenceTp !== undefined) return formatPointLabelNumber(referenceTp);
-  if (point.concurrency !== undefined) return String(point.concurrency);
+  if (referenceTp !== undefined) {
+    return appendConcurrencyToPointLabel(formatPointLabelNumber(referenceTp), point, '\n');
+  }
+  const concurrency = readFiniteNumber(point.concurrency);
+  if (concurrency !== undefined) return `C=${formatPointLabelNumber(concurrency)}`;
   return point.strategy ?? '';
 }
 
 function getConcurrencyPointLabel(point: ChartPoint): string {
   const concurrency = readFiniteNumber(point.concurrency);
   return concurrency === undefined ? '' : formatPointLabelNumber(concurrency);
+}
+
+function appendConcurrencyToPointLabel(
+  label: string,
+  point: ChartPoint,
+  separator = ' '
+): string {
+  const concurrency = readFiniteNumber(point.concurrency);
+  if (concurrency === undefined) return label;
+  const concurrencyLabel = `C=${formatPointLabelNumber(concurrency)}`;
+  return label ? `${label}${separator}${concurrencyLabel}` : concurrencyLabel;
+}
+
+function updatePointLabel(
+  group: d3.Selection<SVGGElement, ChartPoint, null, undefined>,
+  labelText: string
+): void {
+  const lines = labelText
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (lines.length === 0) {
+    group.selectAll('.point-label').remove();
+    return;
+  }
+
+  const firstLineDy = -(
+    POINT_LABEL_FIRST_LINE_OFFSET_EM +
+    (lines.length - 1) * POINT_LABEL_LINE_HEIGHT_EM
+  );
+  const label = group
+    .selectAll<SVGTextElement, string[]>('.point-label')
+    .data([lines])
+    .join('text')
+    .attr('class', 'point-label')
+    .attr('text-anchor', 'middle')
+    .attr('fill', 'var(--foreground)')
+    .attr('font-size', POINT_LABEL_FONT_SIZE)
+    .attr('font-weight', POINT_LABEL_FONT_WEIGHT)
+    .attr('pointer-events', 'none');
+
+  label
+    .selectAll<SVGTSpanElement, string>('tspan')
+    .data(lines)
+    .join('tspan')
+    .attr('x', 0)
+    .attr('dy', (_line, index) =>
+      index === 0 ? `${firstLineDy}em` : `${POINT_LABEL_LINE_HEIGHT_EM}em`
+    )
+    .text((line) => line);
 }
 
 function getReferenceTp(point: ChartPoint): number | undefined {

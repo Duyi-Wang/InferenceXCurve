@@ -3541,7 +3541,7 @@ function renderLegend(): void {
         ${renderSwitch('showNonOptimalPoints', 'Optimal Only', !state.showNonOptimalPoints)}
         ${renderSwitch('hidePointLabels', 'Hide Labels', state.hidePointLabels)}
         ${renderSwitch('highContrast', 'High Contrast', state.highContrast)}
-        ${renderSwitch('showConcurrencyLabels', 'Concurrency Labels', state.showConcurrencyLabels)}
+        ${renderSwitch('showConcurrencyLabels', 'Only Concurrency Labels', state.showConcurrencyLabels)}
         ${renderSwitch('useAdvancedLabels', 'Parallelism Labels', state.useAdvancedLabels)}
         ${renderSwitch('showGradientLabels', 'Gradient Labels', state.showGradientLabels)}
         ${renderSwitch('showLineLabels', 'Line Labels', state.showLineLabels)}
@@ -7363,7 +7363,7 @@ function buildExportStyle(palette: ExportPalette): string {
       .chart-root .grid .plot-border { stroke: ${palette.border}; }
       .chart-watermark { fill: ${palette.foreground}; font-weight: 800; opacity: 0.055; user-select: none; }
       .y-axis-label, .x-axis-label { fill: ${palette.foreground}; font-size: 12px; }
-      .point-label { paint-order: stroke; stroke: ${palette.background}; stroke-width: 3px; fill: ${palette.foreground}; }
+      .point-label { paint-order: stroke; stroke: ${palette.background}; stroke-width: 3px; fill: ${palette.foreground}; font-size: 10px; font-weight: 700; }
       .parallelism-label text, .line-label text, .pill-text { fill: #fff; font-size: 9px; font-weight: 700; }
       .line-label text { font-size: 11px; }
       .pill-bg { opacity: 0.9; }

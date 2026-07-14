@@ -519,6 +519,8 @@ p {
   paint-order: stroke;
   stroke: var(--background);
   stroke-width: 3px;
+  font-size: 10px;
+  font-weight: 700;
 }
 
 .parallelism-label text,
