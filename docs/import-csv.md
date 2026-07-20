@@ -27,7 +27,7 @@ These fields should always be present and non-empty in generated editor CSV:
 - `Line ID`: stable id for grouping rows into one curve.
 - `Line Name`: legend label.
 - `Model`: filter value, for example `DeepSeek-R1-0528`.
-- `Scenario`: filter value, for example `ISL 8192 / OSL 1024`, `ISL 1024 / OSL 1024`, or a scenario label such as `Agentic Traces`.
+- `Scenario`: sequence/scenario value, for example `ISL 8192 / OSL 1024`, `ISL 1024 / OSL 1024`, or `Agentic Traces`. The UI classifies numeric ISL/OSL values under `Fixed Sequence Length` and agentic labels under `Agentic Traces`.
 - `Precision`: filter value, for example `fp4` or `fp8`.
 - `Throughput/GPU (tok/s/gpu)`: numeric Y value.
 
@@ -249,9 +249,10 @@ Optional raw benchmark aliases include:
   `conc`, `concurrency`, `batch_size`, `date`, `created_at`, `run_date`,
   `timestamp`
 
-In raw benchmark CSV, optional metadata may be empty. If a scenario/workload
-field is present, it becomes the `Scenario` filter label, for example
-`Agentic Traces`. Otherwise, `isl` and `osl` are used when available. Missing
+In raw benchmark CSV, optional metadata may be empty. Agentic scenario/workload
+values such as `agentic_traces` become `Agentic Traces`. Fixed-run values such
+as `single_turn` do not replace sequence lengths: `isl` and `osl` are used when
+available, preserving `ISL 8192 / OSL 1024` and `ISL 1024 / OSL 1024`. Missing
 hardware/framework becomes `unknown`, missing precision becomes `default`,
 missing scenario becomes `Default Scenario`, and missing spec/MTP becomes
 `Non-MTP`.
