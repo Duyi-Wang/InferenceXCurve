@@ -4499,6 +4499,20 @@ function activateSeriesForChart(series: InferenceCurveSeries[]): void {
   saveActiveSeriesForCurrentView();
 }
 
+function revealImportedSeries(series: InferenceCurveSeries[]): void {
+  const models = uniqueSorted(series.map(getSeriesModel));
+  const scenarios = sortIslOslValues(series.map(getSeriesIslOsl));
+  const mtpValues = getAvailableMtpFilters(series);
+  const precisions = getAvailablePrecisions(series);
+
+  state.modelFilter = models.length === 1 ? models[0]! : ALL_VALUE;
+  state.islOslFilter = scenarios.length === 1 ? scenarios[0]! : ALL_VALUE;
+  state.mtpFilter = mtpValues.length === 1 ? mtpValues[0]! : ALL_VALUE;
+  state.selectedPrecisions = new Set(precisions);
+  reconcileFiltersForSeries(currentSeries);
+  activateSeriesForChart(series);
+}
+
 function queueSeriesActiveByDraft(draft: SeriesDraft, index: number): void {
   pendingActiveSeriesIds.add(getDraftSeriesId(draft, index));
 }
@@ -5564,12 +5578,11 @@ function addSelectedImportLines(): void {
     const existingSeries = draftsToSeriesAllowEmpty(seriesDrafts);
     const selectedSeries = draftsToSeries(selectedDrafts);
     currentSeries = mergeImportedSeries([...existingSeries, ...selectedSeries]);
-    activateSeriesForChart(selectedSeries);
     seriesDrafts = seriesToDrafts(currentSeries);
     sortSeriesDraftsByLayer();
     normalizeDraftRenderOrderFromPanelOrder();
     syncCurrentSeriesOrderFromDrafts();
-    reconcileFiltersForSeries(currentSeries);
+    revealImportedSeries(selectedSeries);
     state.search = '';
     renderFilterControls();
     renderSeriesEditor();
