@@ -64,6 +64,7 @@ interface AppState {
   scenarioFilter: string;
   islOslFilter: string;
   mtpFilter: string;
+  enforceEndToEndPareto: boolean;
   showNonOptimalPoints: boolean;
   hidePointLabels: boolean;
   showConcurrencyLabels: boolean;
@@ -139,6 +140,7 @@ interface PersistedAppState {
   scenarioFilter?: string;
   islOslFilter?: string;
   mtpFilter?: string;
+  enforceEndToEndPareto?: boolean;
   showNonOptimalPoints?: boolean;
   hidePointLabels?: boolean;
   showConcurrencyLabels?: boolean;
@@ -731,6 +733,7 @@ function restorePersistedState(value: unknown): PersistedAppState {
     scenarioFilter: readPersistedText(value, 'scenarioFilter') || undefined,
     islOslFilter: readPersistedText(value, 'islOslFilter') || undefined,
     mtpFilter: readPersistedText(value, 'mtpFilter') || undefined,
+    enforceEndToEndPareto: readPersistedBoolean(value.enforceEndToEndPareto),
     showNonOptimalPoints: readPersistedBoolean(value.showNonOptimalPoints),
     hidePointLabels: readPersistedBoolean(value.hidePointLabels),
     showConcurrencyLabels: readPersistedBoolean(value.showConcurrencyLabels),
@@ -779,6 +782,7 @@ function restoreAppState(defaults: AppState, saved: PersistedAppState, series: I
       (saved.islOslFilter ? getScenarioForSequence(saved.islOslFilter) : defaults.scenarioFilter),
     islOslFilter: saved.islOslFilter ?? defaults.islOslFilter,
     mtpFilter: saved.mtpFilter ?? defaults.mtpFilter,
+    enforceEndToEndPareto: saved.enforceEndToEndPareto ?? defaults.enforceEndToEndPareto,
     showNonOptimalPoints: saved.showNonOptimalPoints ?? defaults.showNonOptimalPoints,
     hidePointLabels: saved.hidePointLabels ?? defaults.hidePointLabels,
     showConcurrencyLabels: saved.showConcurrencyLabels ?? defaults.showConcurrencyLabels,
@@ -804,6 +808,7 @@ function serializeAppState(): PersistedAppState {
     scenarioFilter: state.scenarioFilter,
     islOslFilter: state.islOslFilter,
     mtpFilter: state.mtpFilter,
+    enforceEndToEndPareto: state.enforceEndToEndPareto,
     showNonOptimalPoints: state.showNonOptimalPoints,
     hidePointLabels: state.hidePointLabels,
     showConcurrencyLabels: state.showConcurrencyLabels,
@@ -1542,6 +1547,7 @@ function getChartOptions(): InferenceCurveChartOptions {
     metricDisplayOverrides,
     activeSeriesIds: state.activeSeriesIds,
     selectedPrecisions: Array.from(state.selectedPrecisions),
+    enforceEndToEndPareto: shouldEnforceEndToEndPareto(),
     showNonOptimalPoints: state.showNonOptimalPoints,
     hidePointLabels: state.hidePointLabels,
     showConcurrencyLabels: state.showConcurrencyLabels,
@@ -3590,6 +3596,16 @@ function renderLegend(): void {
         }
         ${renderSwitch('logY', 'Log Scale', state.logY)}
         ${renderSwitch('showNonOptimalPoints', 'Optimal Only', !state.showNonOptimalPoints)}
+        ${
+          state.scenarioFilter === AGENTIC_SCENARIO
+            ? renderSwitch(
+                'enforceEndToEndPareto',
+                'E2E Pareto Gate',
+                state.enforceEndToEndPareto,
+                'Agentic only: restrict non-E2E Pareto curves to points that are also optimal on end-to-end latency. Turn off to compute each metric independently.'
+              )
+            : ''
+        }
         ${renderSwitch('hidePointLabels', 'Hide Labels', state.hidePointLabels)}
         ${renderSwitch('highContrast', 'High Contrast', state.highContrast)}
         ${renderSwitch('showConcurrencyLabels', 'Only Concurrency Labels', state.showConcurrencyLabels)}
@@ -3718,9 +3734,9 @@ function locateSeriesInEditor(seriesId: string): void {
   }, 1800);
 }
 
-function renderSwitch(key: string, label: string, checked: boolean): string {
+function renderSwitch(key: string, label: string, checked: boolean, title = ''): string {
   return `
-    <label class="legend-switch">
+    <label class="legend-switch"${title ? ` title="${escapeAttribute(title)}"` : ''}>
       <input type="checkbox" data-switch="${key}" ${checked ? 'checked' : ''} />
       <span class="switch-track"></span>
       <span>${label}</span>
@@ -4711,6 +4727,7 @@ function createInitialState(series: InferenceCurveSeries[]): AppState {
     scenarioFilter,
     islOslFilter,
     mtpFilter,
+    enforceEndToEndPareto: true,
     showNonOptimalPoints: false,
     hidePointLabels: true,
     showConcurrencyLabels: false,
@@ -4794,6 +4811,10 @@ function getFilteredSeriesForChart(): InferenceCurveSeries[] {
   return getModelSequenceMtpFilteredSeries().filter((series) =>
     state.selectedPrecisions.has(getSeriesPrecision(series))
   );
+}
+
+function shouldEnforceEndToEndPareto(): boolean {
+  return state.enforceEndToEndPareto && state.scenarioFilter === AGENTIC_SCENARIO;
 }
 
 function getChartColorSourceSeries(series: InferenceCurveSeries[]): InferenceCurveSeries[] {
@@ -7255,7 +7276,8 @@ function buildChartCsvRows(mode: CsvExportMode): string[][] {
     state.highContrast,
     state.theme,
     getChartColorSourceSeries(chartSeries),
-    state.chartMetric
+    state.chartMetric,
+    shouldEnforceEndToEndPareto()
   );
   const currentPointByKey = new Map<string, { roof: boolean }>();
   currentPrepared.forEach((series) => {

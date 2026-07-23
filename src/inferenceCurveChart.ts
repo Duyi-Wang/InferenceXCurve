@@ -53,6 +53,7 @@ export interface InferenceCurveChartOptions {
   selectedPrecisions?: string[];
   xMetric?: InferenceCurveXAxisMetric;
   metricDisplayOverrides?: InferenceCurveXAxisMetricDisplayOverrides;
+  enforceEndToEndPareto?: boolean;
   showNonOptimalPoints?: boolean;
   hidePointLabels?: boolean;
   showConcurrencyLabels?: boolean;
@@ -293,6 +294,7 @@ const defaultOptions: Required<
   Omit<InferenceCurveChartOptions, 'activeSeriesIds' | 'selectedPrecisions'>
 > = {
   xMetric: 'interactivity',
+  enforceEndToEndPareto: false,
   showNonOptimalPoints: false,
   hidePointLabels: true,
   showConcurrencyLabels: false,
@@ -416,7 +418,8 @@ export function prepareInferenceCurveSeries(
   highContrast = false,
   theme: 'dark' | 'light' = 'dark',
   colorSeries: InferenceCurveSeries[] = series,
-  xMetric: InferenceCurveXAxisMetric = 'interactivity'
+  xMetric: InferenceCurveXAxisMetric = 'interactivity',
+  enforceEndToEndPareto = false
 ): PreparedSeries[] {
   const colors = resolveInferenceCurveColors(series, highContrast, theme, colorSeries);
   return series.map((line, seriesIndex) => {
@@ -443,11 +446,29 @@ export function prepareInferenceCurveSeries(
       });
     });
 
-    const roofline = getParetoFront(points, xMetric);
-    const roofKeys = new Set(roofline.map((point) => `${point.x}|${point.y}|${point.precision}`));
-    points.forEach((point) => {
-      point.roof = roofKeys.has(`${point.x}|${point.y}|${point.precision}`);
-    });
+    // Match InferenceX's agentic anti-hacking rule: establish the winners in
+    // (end-to-end latency, throughput) space first, then compute the selected
+    // non-E2E Pareto curve from only those winners. Keep every raw point in
+    // `points` so Show Non-Optimal can still reveal excluded configurations.
+    const gateApplies = enforceEndToEndPareto && xMetric !== 'endToEnd';
+    const e2eWinnerIndexes = gateApplies ? getEndToEndParetoPointIndexes(line) : null;
+    const rooflineSeed = e2eWinnerIndexes
+      ? points.filter((point) => point.x > 0 && e2eWinnerIndexes.has(point.pointIndex))
+      : points;
+    const roofline = gateApplies
+      ? getParetoFrontByPrecision(rooflineSeed, xMetric)
+      : getParetoFront(rooflineSeed, xMetric);
+    if (gateApplies) {
+      const roofPointIndexes = new Set(roofline.map((point) => point.pointIndex));
+      points.forEach((point) => {
+        point.roof = roofPointIndexes.has(point.pointIndex);
+      });
+    } else {
+      const roofKeys = new Set(roofline.map((point) => `${point.x}|${point.y}|${point.precision}`));
+      points.forEach((point) => {
+        point.roof = roofKeys.has(`${point.x}|${point.y}|${point.precision}`);
+      });
+    }
 
     return {
       id: line.id,
@@ -460,6 +481,44 @@ export function prepareInferenceCurveSeries(
       roofline
     };
   });
+}
+
+function getEndToEndParetoPointIndexes(series: InferenceCurveSeries): Set<number> {
+  const candidatesByPrecision = new Map<
+    string,
+    { x: number; y: number; pointIndex: number }[]
+  >();
+
+  series.points.forEach((point, pointIndex) => {
+    const x = readFiniteNumber(point.endToEnd);
+    const y = readFiniteNumber(point.throughput);
+    if (x === undefined || x <= 0 || y === undefined) return;
+    const precision = String(point.precision ?? series.precision ?? 'default');
+    const candidates = candidatesByPrecision.get(precision) ?? [];
+    candidates.push({ x, y, pointIndex });
+    candidatesByPrecision.set(precision, candidates);
+  });
+
+  const winners = new Set<number>();
+  candidatesByPrecision.forEach((candidates) => {
+    paretoFrontUpperLeft(candidates).forEach((point) => winners.add(point.pointIndex));
+  });
+  return winners;
+}
+
+function getParetoFrontByPrecision<T extends { x: number; y: number; precision: string }>(
+  points: T[],
+  metric: InferenceCurveXAxisMetric
+): T[] {
+  const pointsByPrecision = new Map<string, T[]>();
+  points.forEach((point) => {
+    const precisionPoints = pointsByPrecision.get(point.precision) ?? [];
+    precisionPoints.push(point);
+    pointsByPrecision.set(point.precision, precisionPoints);
+  });
+  return Array.from(pointsByPrecision.values()).flatMap((precisionPoints) =>
+    getParetoFront(precisionPoints, metric)
+  );
 }
 
 function getParetoFront<T extends { x: number; y: number }>(
@@ -684,7 +743,8 @@ export function renderInferenceCurveChart(
     options.highContrast,
     options.theme,
     colorSeries,
-    options.xMetric
+    options.xMetric,
+    options.enforceEndToEndPareto
   );
   const visibleSeries = sortPreparedSeriesForRender(
     prepared.map((series) => ({
