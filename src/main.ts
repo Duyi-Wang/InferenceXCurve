@@ -6167,6 +6167,7 @@ function readImportedXAxisMetric(
 ): number | null {
   if (key === 'interactivity') {
     const p90Aliases = [
+      'request_metrics.latency.intvty.p90',
       'metrics.p90_intvty',
       'metrics.p90_interactivity',
       'p90_intvty',
@@ -6175,6 +6176,7 @@ function readImportedXAxisMetric(
       'P90 Interactivity (tok/s/user)'
     ];
     const medianAliases = [
+      'request_metrics.latency.intvty.p50',
       'metrics.median_intvty',
       'metrics.median_interactivity',
       'median_intvty',
@@ -6186,6 +6188,7 @@ function readImportedXAxisMetric(
   }
   if (key === 'ttft') {
     const p90Aliases = [
+      'request_metrics.latency.ttft.p90',
       'metrics.p90_ttft',
       'p90_ttft',
       'P90 TTFT',
@@ -6194,6 +6197,7 @@ function readImportedXAxisMetric(
       'P90 Time To First Token (s)'
     ];
     const medianAliases = [
+      'request_metrics.latency.ttft.p50',
       'metrics.median_ttft',
       'median_ttft',
       'Median TTFT',
@@ -6205,6 +6209,7 @@ function readImportedXAxisMetric(
   }
   if (key === 'endToEnd') {
     const p90Aliases = [
+      'request_metrics.latency.e2el.p90',
       'metrics.p90_e2el',
       'metrics.p90_end_to_end',
       'p90_e2el',
@@ -6213,6 +6218,7 @@ function readImportedXAxisMetric(
       'P90 End-to-end Latency (s)'
     ];
     const medianAliases = [
+      'request_metrics.latency.e2el.p50',
       'metrics.median_e2el',
       'metrics.median_end_to_end',
       'median_e2el',
@@ -6263,6 +6269,7 @@ function readImportedSessionTimeMetric(record: Record<string, unknown>): number 
 
 function readImportedThroughput(record: Record<string, unknown>): number | null {
   return readMetricNumber(record, [
+    'request_metrics.throughput.per_gpu.total_tput_tps',
     'metrics.tput_per_gpu',
     'tput_per_gpu',
     'throughput_per_gpu',
@@ -6955,6 +6962,8 @@ function readImportedOffloadConfig(record: Record<string, unknown>): { key: stri
   const mode = readMetricString(record, ['offload_mode', 'offload mode', 'metrics.offload_mode']);
   const kvOffloading = readMetricString(record, ['kv_offloading', 'kv offloading', 'metrics.kv_offloading']);
   const backend = readMetricString(record, [
+    'kv_offload_backend.name',
+    'metrics.kv_offload_backend.name',
     'kv_offload_backend',
     'kv offload backend',
     'metrics.kv_offload_backend'
@@ -7009,7 +7018,8 @@ function formatImportedLineName(
 function normalizeImportedHardware(value: string): string {
   const lower = value.trim().toLowerCase();
   if (!lower) return '';
-  const base = lower.split('-')[0]!;
+  const unscoped = lower.replace(/^cluster:/u, '');
+  const base = unscoped.split('-')[0]!;
   const known = new Set(['gb300', 'gb200', 'b300', 'b200', 'h200', 'h100', 'mi355x', 'mi325x', 'mi300x']);
   return known.has(base) ? base : lower;
 }

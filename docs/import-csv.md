@@ -186,18 +186,23 @@ numeric X-axis metric column. Accepted aliases include:
   `metrics.p90_intvty`, `metrics.p90_interactivity`, `median_intvty`,
   `median_interactivity`, `p90_intvty`, `p90_interactivity`,
   `interactivity`, `P90 Interactivity`, `tok/s/user`, `x`
+- Nested agentic interactivity: `request_metrics.latency.intvty.p90` for
+  agentic rows, with `request_metrics.latency.intvty.p50` as the median
+  fallback when the row is not identified as agentic
 - Throughput: `metrics.tput_per_gpu`, `tput_per_gpu`, `throughput_per_gpu`,
   `token throughput per gpu`, `token throughput per gpu (tok/s/gpu)`,
   `throughput`, `Throughput/GPU`, `Throughput/GPU (tok/s/gpu)`, `tok/s/gpu`,
-  `y`
+  `y`, `request_metrics.throughput.per_gpu.total_tput_tps`
 - TTFT: `metrics.median_ttft`, `metrics.p90_ttft`, `median_ttft`,
   `p90_ttft`, `ttft`, `TTFT`, `TTFT (s)`, `Time To First Token`,
-  `Time To First Token (s)`, `P90 TTFT`, `P90 Time To First Token`
+  `Time To First Token (s)`, `P90 TTFT`, `P90 Time To First Token`,
+  `request_metrics.latency.ttft.p50`, `request_metrics.latency.ttft.p90`
 - End-to-end: `metrics.median_e2el`, `metrics.p90_e2el`,
   `metrics.p90_end_to_end`, `median_e2el`, `p90_e2el`, `p90_end_to_end`,
   `endToEnd`, `end_to_end`, `end-to-end`, `End-to-end (s)`,
   `End-to-end Latency`, `E2E`, `E2E Latency`, `e2el`,
-  `P90 End-to-end Latency`
+  `P90 End-to-end Latency`, `request_metrics.latency.e2el.p50`,
+  `request_metrics.latency.e2el.p90`
 - Normalized E2E: `metrics.normalized_e2e`, `metrics.normalized_e2el`,
   `metrics.p90_normalized_e2e`, `metrics.p90_normalized_e2el`,
   `normalizedEndToEnd`, `normalized_end_to_end`, `normalized_e2e`,
@@ -241,7 +246,8 @@ Optional raw benchmark aliases include:
   `benchmark_type=agentic_traces`, `offload_mode=on`, `kv_offloading=dram`,
   and `kv_offload_backend=lmcache`; the importer keeps that label on the
   point's `KV Offload` metadata while merging it into the same line as
-  non-offload rows.
+  non-offload rows. Object-shaped backends such as
+  `kv_offload_backend.name=hicache` are also supported.
 - Parallelism/source: `num_prefill_gpu`, `num_decode_gpu`, `prefill_tp`,
   `prefill_ep`, `prefill_num_workers`, `decode_tp`, `decode_ep`,
   `decode_num_workers`, `dp_attention`, `prefill_dp_attention`,
