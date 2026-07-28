@@ -129,6 +129,7 @@ const MODEL_DISPLAY_NAMES: Record<string, string> = {
   'qwen3.5': 'Qwen-3.5-397B-A17B',
   'kimik2.5': 'Kimi-K2.5',
   'kimik2.6': 'Kimi-K2.5',
+  kimik3: 'Kimi-K3',
   'minimaxm2.5': 'MiniMax-M2.5',
   'minimaxm2.7': 'MiniMax-M2.5',
   glm5: 'GLM-5',
