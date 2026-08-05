@@ -64,6 +64,255 @@ body {
   color: var(--foreground);
 }
 
+.workspace-panel[hidden] {
+  display: none !important;
+}
+
+.workspace-header {
+  position: sticky;
+  z-index: 140;
+  top: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+  background: color-mix(in srgb, var(--background) 92%, transparent);
+  backdrop-filter: blur(14px);
+}
+
+.workspace-tabs {
+  display: flex;
+  width: min(100% - 32px, 1440px);
+  min-height: 52px;
+  align-items: end;
+  gap: 6px;
+  margin-inline: auto;
+}
+
+.workspace-tab {
+  position: relative;
+  display: inline-flex;
+  min-height: 52px;
+  align-items: center;
+  padding: 0 16px;
+  color: var(--muted-foreground);
+  font-size: 14px;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.workspace-tab::after {
+  position: absolute;
+  right: 12px;
+  bottom: -1px;
+  left: 12px;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: transparent;
+  content: '';
+}
+
+.workspace-tab:hover,
+.workspace-tab:focus-visible,
+.workspace-tab.active {
+  color: var(--foreground);
+}
+
+.workspace-tab.active::after {
+  background: var(--brand);
+}
+
+.filter-card.plot-settings-card {
+  display: grid;
+  grid-template-columns: minmax(170px, 1.2fr) minmax(150px, 1fr) repeat(2, minmax(130px, 0.9fr)) repeat(2, minmax(190px, 1.25fr));
+  gap: 12px;
+}
+
+.plot-settings-card label {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.plot-settings-card label > span {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.plot-settings-card input,
+.plot-settings-card select {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 6px 10px;
+  background: color-mix(in srgb, var(--background) 86%, transparent);
+}
+
+.plot-goal-setting select {
+  border-color: color-mix(in srgb, var(--brand) 42%, var(--border));
+  font-weight: 650;
+}
+
+.plot-empty-lines {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+}
+
+.plot-empty-lines strong {
+  color: var(--foreground);
+}
+
+.plot-series-card.drag-over {
+  border-color: color-mix(in srgb, var(--primary) 78%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent);
+}
+
+.series-fields.plot-series-fields {
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+}
+
+.plot-series-fields .plot-line-name {
+  grid-column: span 2;
+}
+
+.plot-series-fields .plot-line-marker,
+.plot-series-fields .plot-line-style {
+  grid-column: span 1;
+}
+
+.plot-series-fields .plot-line-color {
+  grid-column: span 4;
+}
+
+.plot-line-color .color-controls {
+  grid-template-columns: 30px minmax(0, 1fr);
+}
+
+.plot-line-color .color-presets {
+  gap: 2px;
+}
+
+.plot-line-color .color-preset {
+  width: 15px;
+  min-width: 15px;
+  min-height: 15px;
+}
+
+.point-table.plot-point-table {
+  width: max(100%, 560px);
+}
+
+.point-table.plot-point-table th:nth-child(2),
+.point-table.plot-point-table td:nth-child(2) {
+  width: 100px;
+}
+
+.point-table.plot-point-table th.point-actions-head,
+.point-table.plot-point-table td.point-actions-cell {
+  width: 100px;
+  min-width: 100px;
+  max-width: 100px;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.point-table.plot-point-table th:nth-child(3),
+.point-table.plot-point-table td:nth-child(3),
+.point-table.plot-point-table th:nth-child(4),
+.point-table.plot-point-table td:nth-child(4) {
+  width: auto;
+}
+
+.plot-point-table td input {
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 7px;
+  border-color: color-mix(in srgb, var(--border) 48%, transparent);
+  background: color-mix(in srgb, var(--background) 88%, transparent);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.plot-point-table .point-row-actions {
+  padding: 3px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.plot-point-table .point-row-actions button {
+  display: inline-grid;
+  width: 27px;
+  height: 25px;
+  min-height: 25px;
+  place-items: center;
+  padding: 0;
+  border-color: color-mix(in srgb, var(--border) 46%, transparent);
+  color: var(--muted-foreground);
+}
+
+.plot-point-table .point-row-actions .button-icon {
+  width: 12px;
+  height: 12px;
+}
+
+.plot-import-preview {
+  margin-bottom: 14px;
+}
+
+.plot-import-list {
+  display: grid;
+  gap: 8px;
+  max-height: 360px;
+  margin-top: 10px;
+  overflow: auto;
+}
+
+.plot-import-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--border) 34%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--background) 72%, transparent);
+}
+
+.plot-import-item.conflict {
+  border-color: color-mix(in srgb, #f59e0b 60%, var(--border));
+}
+
+.plot-import-select,
+.plot-import-replace {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  cursor: pointer;
+}
+
+.plot-import-select > span,
+.plot-import-select strong,
+.plot-import-select small {
+  display: block;
+}
+
+.plot-import-select strong {
+  color: var(--foreground);
+  font-size: 13px;
+}
+
+.plot-import-select small,
+.plot-import-replace {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.plot-import-replace {
+  flex: 0 0 auto;
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: color-mix(in srgb, #f59e0b 12%, transparent);
+}
+
 button,
 select,
 input {
@@ -498,6 +747,30 @@ p {
 .x-axis-label {
   fill: var(--foreground);
   font-size: 12px;
+}
+
+.goal-direction-glow {
+  fill: #fff;
+  stroke: #fff;
+  stroke-width: 8px;
+  stroke-linejoin: round;
+  opacity: 0.14;
+}
+
+.goal-direction-arrow {
+  fill: #fff;
+  stroke: none;
+}
+
+.goal-direction-label {
+  fill: #fff;
+  font-size: 14px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  paint-order: stroke;
+  stroke: var(--background);
+  stroke-width: 4px;
+  stroke-linejoin: round;
 }
 
 .ruler-line {
@@ -2509,6 +2782,24 @@ p {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .series-fields.plot-series-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .plot-series-fields .plot-line-name,
+  .plot-series-fields .plot-line-marker,
+  .plot-series-fields .plot-line-style {
+    grid-column: span 1;
+  }
+
+  .plot-series-fields .plot-line-color {
+    grid-column: span 2;
+  }
+
+  .filter-card.plot-settings-card {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
   .series-field,
   .series-field-id,
   .series-field-name,
@@ -2570,6 +2861,29 @@ p {
 
   .filter-card {
     grid-template-columns: 1fr;
+  }
+
+  .filter-card.plot-settings-card {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-tabs {
+    width: min(100% - 20px, 1440px);
+    overflow-x: auto;
+  }
+
+  .workspace-tab {
+    flex: 0 0 auto;
+    padding-inline: 12px;
+  }
+
+  .plot-import-item {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .plot-import-replace {
+    align-self: flex-start;
   }
 
   .metric-row {
@@ -2701,6 +3015,17 @@ p {
 
   .series-fields {
     grid-template-columns: 1fr;
+  }
+
+  .series-fields.plot-series-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .plot-series-fields .plot-line-name,
+  .plot-series-fields .plot-line-marker,
+  .plot-series-fields .plot-line-style,
+  .plot-series-fields .plot-line-color {
+    grid-column: span 1;
   }
 
   .series-field,

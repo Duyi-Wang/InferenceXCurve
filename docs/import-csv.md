@@ -3,6 +3,10 @@
 This document is the integration contract for projects that generate CSV/TSV
 files for InferenceX Curve's `Import File` workflow.
 
+For the independent Plot Tool workspace and its generic `Line ID` / `X` / `Y`
+format, use [`import-plot-tool-csv.md`](import-plot-tool-csv.md) instead. The two
+CSV contracts are not interchangeable.
+
 The app accepts `.csv`, `.tsv`, `.json`, `.jsonl`, `.ndjson`, and `.zip`
 archives containing those files. For external CSV/TSV integrations, prefer the
 **editor CSV** format below. It is the same shape produced by `Download CSV`,

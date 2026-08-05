@@ -207,6 +207,18 @@ For external integrations or agent-generated files, use
 lists the recommended headers, required fields, optional empty fields, aliases,
 and raw benchmark fallback format.
 
+## Plot Tool CSV
+
+The independent `Plot Tool` workspace imports a smaller generic Pareto CSV
+format with required `Line ID`, `Line Name`, `X`, and `Y` columns plus optional
+color, line type, marker, and layer metadata. Its import preview requires an
+explicit Replace choice for any `Line ID` already in the workspace.
+
+See [`docs/import-plot-tool-csv.md`](docs/import-plot-tool-csv.md) for the full
+column contract, defaults, quoting rules, validation errors, conflict workflow,
+examples, and CSV round-trip behavior. This format is not interchangeable with
+the InferenceX benchmark CSV/TSV contract above.
+
 ## Chart Logic
 
 Reusable chart logic lives in `src/inferenceCurveChart.ts`.
@@ -235,4 +247,5 @@ included.
 - `src/styles.css`: application and chart styling.
 - `vite.config.ts`: Vite base path and dev proxy for `/inferencex-api`.
 - `docs/import-csv.md`: CSV/TSV import contract for external integrations.
+- `docs/import-plot-tool-csv.md`: generic Plot Tool CSV import/export contract.
 - `AGENTS.md`: contributor guidance for coding agents.

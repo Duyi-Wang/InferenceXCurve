@@ -36,8 +36,8 @@ import {
   type InferenceCurveXAxisMetric
 } from './inferenceCurveChart';
 
-const app = document.querySelector<HTMLDivElement>('#app');
-if (!app) throw new Error('Missing #app root');
+const app = document.querySelector<HTMLDivElement>('#inferencex-workspace-root')!;
+if (!app) throw new Error('Missing #inferencex-workspace-root');
 
 type Theme = 'dark' | 'light';
 type CsvExportMode = 'all' | 'visible';
@@ -1415,7 +1415,9 @@ document.querySelector('#download-png')?.addEventListener('click', downloadPng);
 document.querySelector('#download-csv')?.addEventListener('click', () => downloadCsv('all'));
 document.querySelector('#download-visible-csv')?.addEventListener('click', () => downloadCsv('visible'));
 document.querySelector('#reset-zoom')?.addEventListener('click', resetInferenceCurveZoom);
-window.addEventListener('resize', renderAll);
+window.addEventListener('resize', () => {
+  if (!app.hidden) renderAll();
+});
 window.addEventListener('keydown', handleGlobalKeydown);
 document.addEventListener('click', handleDocumentClick);
 document.addEventListener('keydown', handleDocumentKeydown);
@@ -1423,6 +1425,14 @@ window.addEventListener('beforeunload', () => {
   if (skipNextBeforeUnloadSave) return;
   commitSeriesDom();
   saveLocalDataNow();
+});
+window.addEventListener('inferencex-workspace-deactivate', () => {
+  clearAutoRenderTimer();
+  commitSeriesDom();
+  saveLocalDataNow();
+});
+window.addEventListener('inferencex-workspace-activate', () => {
+  renderAll();
 });
 void initializeInferenceXSync();
 
@@ -1526,6 +1536,7 @@ function clearAutoRenderTimer(): void {
 }
 
 function handleGlobalKeydown(event: KeyboardEvent): void {
+  if (app.hidden) return;
   if (event.key !== 'Enter' || (!event.ctrlKey && !event.metaKey)) return;
   event.preventDefault();
   renderDraftData();
@@ -1568,6 +1579,7 @@ function getChartOptions(): InferenceCurveChartOptions {
 }
 
 function renderAll(): void {
+  if (app.hidden) return;
   chartTitleEl.textContent = getChartTitle();
   chartSubtitleEl.textContent = getChartSubtitle();
   renderInferenceCurveChart(chartEl, getFilteredSeriesForChart(), getChartOptions());

@@ -62,7 +62,12 @@ export interface InferenceCurveChartOptions {
   showLineLabels?: boolean;
   showOffloadRings?: boolean;
   highContrast?: boolean;
+  logX?: boolean;
   logY?: boolean;
+  xGoal?: ParetoGoal;
+  yGoal?: ParetoGoal;
+  showGoalIndicators?: boolean;
+  genericTooltip?: boolean;
   theme?: 'dark' | 'light';
   height?: number;
   title?: string;
@@ -71,6 +76,8 @@ export interface InferenceCurveChartOptions {
   xLabel?: string;
   yLabel?: string;
 }
+
+export type ParetoGoal = 'maximize' | 'minimize';
 
 export type InferenceCurveXAxisMetric =
   | 'interactivity'
@@ -303,7 +310,12 @@ const defaultOptions: Required<
   showLineLabels: false,
   showOffloadRings: true,
   highContrast: false,
+  logX: false,
   logY: false,
+  xGoal: 'maximize',
+  yGoal: 'maximize',
+  showGoalIndicators: false,
+  genericTooltip: false,
   theme: 'dark',
   height: 575,
   metricDisplayOverrides: {},
@@ -374,43 +386,43 @@ export function getInferenceCurveColorSourceSeries(
 }
 
 export function paretoFrontUpperLeft<T extends { x: number; y: number }>(input: T[]): T[] {
-  const sorted = [...input].sort((a, b) => {
-    if (a.x === b.x) return b.y - a.y;
-    return a.x - b.x;
-  });
-
-  const front: T[] = [];
-  let bestY = -Infinity;
-  for (const point of sorted) {
-    if (point.y <= bestY) continue;
-    front.push(point);
-    bestY = point.y;
-  }
-
-  return front;
+  return paretoFront(input, 'minimize', 'maximize');
 }
 
 export function paretoFrontUpperRight<T extends { x: number; y: number }>(input: T[]): T[] {
-  const sorted = [...input].sort((a, b) => {
-    if (a.x === b.x) return b.y - a.y;
-    return a.x - b.x;
+  return paretoFront(input, 'maximize', 'maximize');
+}
+
+export function paretoFront<T extends { x: number; y: number }>(
+  input: T[],
+  xGoal: ParetoGoal,
+  yGoal: ParetoGoal
+): T[] {
+  const optimal = input.filter(
+    (candidate, candidateIndex) =>
+      !input.some(
+        (other, otherIndex) =>
+          otherIndex !== candidateIndex &&
+          isAtLeastAsGood(other.x, candidate.x, xGoal) &&
+          isAtLeastAsGood(other.y, candidate.y, yGoal) &&
+          (isStrictlyBetter(other.x, candidate.x, xGoal) ||
+            isStrictlyBetter(other.y, candidate.y, yGoal))
+      )
+  );
+  const byCoordinate = new Map<string, T>();
+  optimal.forEach((point) => {
+    const key = `${point.x}|${point.y}`;
+    if (!byCoordinate.has(key)) byCoordinate.set(key, point);
   });
+  return Array.from(byCoordinate.values()).sort((a, b) => a.x - b.x || a.y - b.y);
+}
 
-  const front: T[] = [];
-  for (const point of sorted) {
-    const last = front.at(-1);
-    if (last && point.x === last.x) {
-      if (point.y > last.y) front[front.length - 1] = point;
-      continue;
-    }
+function isAtLeastAsGood(value: number, other: number, goal: ParetoGoal): boolean {
+  return goal === 'maximize' ? value >= other : value <= other;
+}
 
-    while (front.length > 0 && point.y >= front.at(-1)!.y) {
-      front.pop();
-    }
-    front.push(point);
-  }
-
-  return front;
+function isStrictlyBetter(value: number, other: number, goal: ParetoGoal): boolean {
+  return goal === 'maximize' ? value > other : value < other;
 }
 
 export function prepareInferenceCurveSeries(
@@ -419,7 +431,9 @@ export function prepareInferenceCurveSeries(
   theme: 'dark' | 'light' = 'dark',
   colorSeries: InferenceCurveSeries[] = series,
   xMetric: InferenceCurveXAxisMetric = 'interactivity',
-  enforceEndToEndPareto = false
+  enforceEndToEndPareto = false,
+  xGoal?: ParetoGoal,
+  yGoal: ParetoGoal = 'maximize'
 ): PreparedSeries[] {
   const colors = resolveInferenceCurveColors(series, highContrast, theme, colorSeries);
   return series.map((line, seriesIndex) => {
@@ -455,9 +469,10 @@ export function prepareInferenceCurveSeries(
     const rooflineSeed = e2eWinnerIndexes
       ? points.filter((point) => point.x > 0 && e2eWinnerIndexes.has(point.pointIndex))
       : points;
+    const resolvedXGoal = xGoal ?? (X_AXIS_METRICS[xMetric].higherIsBetter ? 'maximize' : 'minimize');
     const roofline = gateApplies
-      ? getParetoFrontByPrecision(rooflineSeed, xMetric)
-      : getParetoFront(rooflineSeed, xMetric);
+      ? getParetoFrontByPrecision(rooflineSeed, xMetric, resolvedXGoal, yGoal)
+      : getParetoFront(rooflineSeed, xMetric, resolvedXGoal, yGoal);
     if (gateApplies) {
       const roofPointIndexes = new Set(roofline.map((point) => point.pointIndex));
       points.forEach((point) => {
@@ -508,7 +523,9 @@ function getEndToEndParetoPointIndexes(series: InferenceCurveSeries): Set<number
 
 function getParetoFrontByPrecision<T extends { x: number; y: number; precision: string }>(
   points: T[],
-  metric: InferenceCurveXAxisMetric
+  metric: InferenceCurveXAxisMetric,
+  xGoal?: ParetoGoal,
+  yGoal: ParetoGoal = 'maximize'
 ): T[] {
   const pointsByPrecision = new Map<string, T[]>();
   points.forEach((point) => {
@@ -517,17 +534,21 @@ function getParetoFrontByPrecision<T extends { x: number; y: number; precision: 
     pointsByPrecision.set(point.precision, precisionPoints);
   });
   return Array.from(pointsByPrecision.values()).flatMap((precisionPoints) =>
-    getParetoFront(precisionPoints, metric)
+    getParetoFront(precisionPoints, metric, xGoal, yGoal)
   );
 }
 
 function getParetoFront<T extends { x: number; y: number }>(
   points: T[],
-  metric: InferenceCurveXAxisMetric
+  metric: InferenceCurveXAxisMetric,
+  xGoal?: ParetoGoal,
+  yGoal: ParetoGoal = 'maximize'
 ): T[] {
-  return X_AXIS_METRICS[metric].higherIsBetter
-    ? paretoFrontUpperRight(points)
-    : paretoFrontUpperLeft(points);
+  return paretoFront(
+    points,
+    xGoal ?? (X_AXIS_METRICS[metric].higherIsBetter ? 'maximize' : 'minimize'),
+    yGoal
+  );
 }
 
 export function resolveInferenceCurveColors(
@@ -744,7 +765,9 @@ export function renderInferenceCurveChart(
     options.theme,
     colorSeries,
     options.xMetric,
-    options.enforceEndToEndPareto
+    options.enforceEndToEndPareto,
+    userOptions.xGoal,
+    userOptions.yGoal
   );
   const visibleSeries = sortPreparedSeriesForRender(
     prepared.map((series) => ({
@@ -769,7 +792,9 @@ export function renderInferenceCurveChart(
   if (scalePoints.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'chart-empty';
-    empty.innerHTML = '<strong>No data available</strong><span>Change filters or paste valid data.</span>';
+    empty.innerHTML = options.genericTooltip
+      ? '<strong>No plot data</strong><span>Add a line or import valid X/Y points.</span>'
+      : '<strong>No data available</strong><span>Change filters or paste valid data.</span>';
     container.append(empty);
     return;
   }
@@ -779,19 +804,20 @@ export function renderInferenceCurveChart(
   const innerWidth = width - CHART_MARGIN.left - CHART_MARGIN.right;
   const innerHeight = height - CHART_MARGIN.top - CHART_MARGIN.bottom;
 
-  const xMax = d3.max(scalePoints, (point) => point.x) ?? 100;
+  const genericAxes = Boolean(
+    userOptions.xGoal !== undefined || userOptions.yGoal !== undefined || options.genericTooltip
+  );
+  const xExtent = d3.extent(scalePoints, (point) => point.x) as [number, number];
   const yExtent = d3.extent(scalePoints, (point) => point.y) as [number, number];
-  const yRange = yExtent[1] - yExtent[0];
-  const xScale = d3
-    .scaleLinear()
-    .domain([0, Math.max(1, xMax * 1.05)])
-    .range([0, innerWidth])
-    .nice();
-
-  const yMin = options.logY
-    ? Math.max(0.1, yExtent[0] <= 0 ? 0.1 : yExtent[0] * 0.95)
-    : Math.max(0, yExtent[0] - yRange * 0.05);
-  const yDomain: [number, number] = [yMin, Math.max(yExtent[1] * 1.05, yMin + 1)];
+  const xDomain = options.logX
+    ? makeLogDomain(xExtent)
+    : makeLinearDomain(xExtent, genericAxes, true);
+  const yDomain = options.logY
+    ? makeLogDomain(yExtent)
+    : makeLinearDomain(yExtent, genericAxes, false);
+  const xScale: ContinuousScale = options.logX
+    ? d3.scaleLog().domain(xDomain).range([0, innerWidth]).nice()
+    : d3.scaleLinear().domain(xDomain).range([0, innerWidth]).nice();
   const yScale: ContinuousScale = options.logY
     ? d3.scaleLog().domain(yDomain).range([innerHeight, 0]).nice()
     : d3.scaleLinear().domain(yDomain).range([innerHeight, 0]).nice();
@@ -861,6 +887,10 @@ export function renderInferenceCurveChart(
     .attr('y', 14)
     .attr('text-anchor', 'middle')
     .text(options.yLabel);
+
+  if (options.showGoalIndicators) {
+    drawGoalIndicator(plot, innerWidth, innerHeight, options.xGoal, options.yGoal);
+  }
 
   const strategyColor = buildStrategyColorMap(visibleSeries);
   const current = { xScale: xScale as ContinuousScale, yScale };
@@ -934,7 +964,7 @@ export function renderInferenceCurveChart(
       tooltip
         .style('opacity', 1)
         .style('display', 'block')
-        .html(formatTooltip(point, options.xMetric, options.metricDisplayOverrides));
+        .html(formatTooltip(point, options));
       moveTooltip(event, tooltip, container);
       return;
     }
@@ -973,7 +1003,7 @@ export function renderInferenceCurveChart(
   };
 
   const renderGridAxes = (xs: ContinuousScale, ys: ContinuousScale) => {
-    renderGrid(grid, xs, ys, innerWidth, innerHeight, options.logY);
+    renderGrid(grid, xs, ys, innerWidth, innerHeight, options.logX, options.logY);
     renderAxes(xAxisGroup, yAxisGroup, xs, ys, options);
   };
 
@@ -1060,6 +1090,110 @@ export function renderInferenceCurveChart(
   resetZoom = () => {
     svg.transition().duration(180).call(zoom.transform, d3.zoomIdentity);
   };
+}
+
+function drawGoalIndicator(
+  plot: d3.Selection<SVGGElement, unknown, null, undefined>,
+  innerWidth: number,
+  innerHeight: number,
+  xGoal: ParetoGoal,
+  yGoal: ParetoGoal
+): void {
+  const xMaximize = xGoal === 'maximize';
+  const yMaximize = yGoal === 'maximize';
+  const startX = xMaximize ? 10 : 62;
+  const endX = xMaximize ? 62 : 10;
+  const startY = yMaximize ? 48 : 18;
+  const endY = yMaximize ? 8 : 58;
+  const deltaX = endX - startX;
+  const deltaY = endY - startY;
+  const length = Math.hypot(deltaX, deltaY);
+  const unitX = deltaX / length;
+  const unitY = deltaY / length;
+  const perpendicularX = -unitY;
+  const perpendicularY = unitX;
+  const stemHalfWidth = 5;
+  const headHalfWidth = 12;
+  const headLength = 19;
+  const headBaseX = endX - unitX * headLength;
+  const headBaseY = endY - unitY * headLength;
+  const arrowPoints: Array<[number, number]> = [
+    [startX + perpendicularX * stemHalfWidth, startY + perpendicularY * stemHalfWidth],
+    [headBaseX + perpendicularX * stemHalfWidth, headBaseY + perpendicularY * stemHalfWidth],
+    [headBaseX + perpendicularX * headHalfWidth, headBaseY + perpendicularY * headHalfWidth],
+    [endX, endY],
+    [headBaseX - perpendicularX * headHalfWidth, headBaseY - perpendicularY * headHalfWidth],
+    [headBaseX - perpendicularX * stemHalfWidth, headBaseY - perpendicularY * stemHalfWidth],
+    [startX - perpendicularX * stemHalfWidth, startY - perpendicularY * stemHalfWidth]
+  ];
+  const arrowPath = `${arrowPoints
+    .map(([x, y], index) => `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`)
+    .join(' ')} Z`;
+  const labelNormalSign = yMaximize
+    ? Math.sign(perpendicularY) || 1
+    : -(Math.sign(perpendicularY) || 1);
+  const labelX = (startX + endX) / 2 + perpendicularX * labelNormalSign * 19;
+  const labelY = (startY + endY) / 2 + perpendicularY * labelNormalSign * 19;
+  const labelAngle = xMaximize === yMaximize ? -37.6 : 37.6;
+  const group = plot
+    .append('g')
+    .attr('class', 'goal-direction-indicator')
+    .attr(
+      'transform',
+      `translate(${xMaximize ? Math.max(4, innerWidth - 76) : 4},${yMaximize ? 4 : Math.max(4, innerHeight - 70)})`
+    )
+    .attr('pointer-events', 'none')
+    .attr('role', 'img')
+    .attr(
+      'aria-label',
+      `Better direction: X ${xGoal === 'maximize' ? 'increases' : 'decreases'}, Y ${yGoal === 'maximize' ? 'increases' : 'decreases'}`
+    );
+  group.append('title').text(
+    `Better: X ${xGoal === 'maximize' ? 'higher' : 'lower'}, Y ${yGoal === 'maximize' ? 'higher' : 'lower'}`
+  );
+  group
+    .append('path')
+    .attr('class', 'goal-direction-glow')
+    .attr('d', arrowPath);
+  group
+    .append('path')
+    .attr('class', 'goal-direction-arrow')
+    .attr('d', arrowPath);
+  group
+    .append('text')
+    .attr('class', 'goal-direction-label')
+    .attr('x', labelX)
+    .attr('y', labelY)
+    .attr('transform', `rotate(${labelAngle} ${labelX} ${labelY})`)
+    .attr('text-anchor', 'middle')
+    .attr('dominant-baseline', 'middle')
+    .text('BETTER');
+}
+
+function makeLinearDomain(
+  extent: [number, number],
+  genericAxes: boolean,
+  xAxis: boolean
+): [number, number] {
+  const [min, max] = extent;
+  if (!genericAxes) {
+    if (xAxis) return [0, Math.max(1, max * 1.05)];
+    const range = max - min;
+    const lower = Math.max(0, min - range * 0.05);
+    return [lower, Math.max(max * 1.05, lower + 1)];
+  }
+  if (min === max) {
+    const padding = Math.max(Math.abs(min) * 0.05, 1);
+    return [min - padding, max + padding];
+  }
+  const padding = (max - min) * 0.05;
+  return [min - padding, max + padding];
+}
+
+function makeLogDomain(extent: [number, number]): [number, number] {
+  const [min, max] = extent;
+  if (min === max) return [min / 1.1, max * 1.1];
+  return [min / 1.05, max * 1.05];
 }
 
 function drawChartWatermark(
@@ -1239,7 +1373,7 @@ function drawScatterPoints(
       tooltip
         .style('opacity', 1)
         .style('display', 'block')
-        .html(formatTooltip(point, options.xMetric, options.metricDisplayOverrides));
+        .html(formatTooltip(point, options));
       moveTooltip(event, tooltip, container);
     })
     .on('pointermove', (event) => {
@@ -1457,13 +1591,18 @@ function renderGrid(
   yScale: ContinuousScale,
   innerWidth: number,
   innerHeight: number,
+  logX: boolean,
   logY: boolean
 ): void {
   let xGroup = grid.select<SVGGElement>('.grid-v');
   if (xGroup.empty()) xGroup = grid.append('g').attr('class', 'grid-v');
   xGroup
     .selectAll<SVGLineElement, number>('line')
-    .data(xScale.ticks(10))
+    .data(
+      logX
+        ? (xScale as d3.ScaleLogarithmic<number, number>).ticks(10)
+        : (xScale as d3.ScaleLinear<number, number>).ticks(10)
+    )
     .join('line')
     .attr('x1', (tick) => xScale(tick))
     .attr('x2', (tick) => xScale(tick))
@@ -1506,7 +1645,11 @@ function renderAxes(
     d3
       .axisBottom(xScale)
       .ticks(10)
-      .tickFormat((value) => formatNumber(Number(value)))
+      .tickFormat(
+        options.logX
+          ? logTickFormat(xScale as d3.ScaleLogarithmic<number, number>)
+          : (value) => formatNumber(Number(value))
+      )
   );
   const yAxis = d3.axisLeft(yScale).ticks(10);
   if (!options.logY) {
@@ -1944,9 +2087,19 @@ function computeGradientStops(
 
 function formatTooltip(
   point: ChartPoint,
-  metric: InferenceCurveXAxisMetric,
-  overrides?: InferenceCurveXAxisMetricDisplayOverrides
+  options: Required<Omit<InferenceCurveChartOptions, 'activeSeriesIds' | 'selectedPrecisions'>>
 ): string {
+  if (options.genericTooltip) {
+    return [
+      `<strong>${escapeHtml(point.seriesName)}</strong>`,
+      formatTooltipMetricField(options.xLabel, point.x, ''),
+      formatTooltipMetricField(options.yLabel, point.y, '')
+    ]
+      .map((field) => `<div>${field}</div>`)
+      .join('');
+  }
+  const metric = options.xMetric;
+  const overrides = options.metricDisplayOverrides;
   const metricConfig = getXAxisMetricConfig(metric, overrides);
   const fields = [
     `<strong>${escapeHtml(point.seriesName)}</strong>`,
