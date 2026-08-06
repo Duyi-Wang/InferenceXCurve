@@ -31,8 +31,9 @@ import {
   resetInferenceCurveZoom,
   resolveInferenceCurveColors,
   type InferenceCurveChartOptions,
+  type InferenceCurveLatencyPercentile,
+  type InferenceCurveLatencyPercentiles,
   type InferenceCurveSeries,
-  type InferenceCurveXAxisMetricDisplayOverrides,
   type InferenceCurveXAxisMetric
 } from './inferenceCurveChart';
 
@@ -57,6 +58,7 @@ type PointRow = Record<string, string>;
 interface AppState {
   theme: Theme;
   chartMetric: InferenceCurveXAxisMetric;
+  latencyPercentile: InferenceCurveLatencyPercentile;
   activeSeriesIds: Set<string>;
   activeSeriesIdsByView: Map<string, Set<string>>;
   selectedPrecisions: Set<string>;
@@ -134,6 +136,7 @@ interface PendingMergeGroup {
 interface PersistedAppState {
   theme?: Theme;
   chartMetric?: InferenceCurveXAxisMetric;
+  latencyPercentile?: InferenceCurveLatencyPercentile;
   activeSeriesIds?: string[];
   activeSeriesIdsByView?: Record<string, string[]>;
   selectedPrecisions?: string[];
@@ -281,6 +284,8 @@ const MTP_VALUE = 'mtp';
 const NON_MTP_VALUE = 'non-mtp';
 const FIXED_SEQUENCE_SCENARIO = 'fixed-sequence';
 const AGENTIC_SCENARIO = 'agentic';
+const LATENCY_PERCENTILES: InferenceCurveLatencyPercentile[] = ['p50', 'p75', 'p90', 'p95'];
+const DEFAULT_LATENCY_PERCENTILE: InferenceCurveLatencyPercentile = 'p90';
 const DEFAULT_MODEL = 'Default Model';
 const DEFAULT_ISL_OSL = 'Default Scenario';
 const DEFAULT_PRECISION = 'default';
@@ -383,6 +388,40 @@ const pointColumns: TableColumn[] = [
   { key: 'label', label: 'Note' }
 ];
 
+type LatencyMetricKey = 'interactivity' | 'ttft' | 'endToEnd';
+
+const latencyMetricColumns: Record<
+  LatencyMetricKey,
+  { label: string; rowKeys: Record<InferenceCurveLatencyPercentile, string> }
+> = {
+  interactivity: {
+    label: 'Interactivity',
+    rowKeys: {
+      p50: 'interactivityP50',
+      p75: 'interactivityP75',
+      p90: 'interactivityP90',
+      p95: 'interactivityP95'
+    }
+  },
+  ttft: {
+    label: 'TTFT (s)',
+    rowKeys: { p50: 'ttftP50', p75: 'ttftP75', p90: 'ttftP90', p95: 'ttftP95' }
+  },
+  endToEnd: {
+    label: 'End-to-end (s)',
+    rowKeys: {
+      p50: 'endToEndP50',
+      p75: 'endToEndP75',
+      p90: 'endToEndP90',
+      p95: 'endToEndP95'
+    }
+  }
+};
+
+const latencyPercentilePointKeys = Object.values(latencyMetricColumns).flatMap((metric) =>
+  Object.values(metric.rowKeys)
+);
+
 const hiddenPointKeys = [
   'strategy',
   'tp',
@@ -393,7 +432,11 @@ const hiddenPointKeys = [
   'is_multinode',
   'kv_offload'
 ] as const;
-const knownPointKeys = new Set([...pointColumns.map((column) => column.key), ...hiddenPointKeys]);
+const knownPointKeys = new Set([
+  ...pointColumns.map((column) => column.key),
+  ...latencyPercentilePointKeys,
+  ...hiddenPointKeys
+]);
 const xMetricPointKeys: InferenceCurveXAxisMetric[] = [
   'interactivity',
   'endToEnd',
@@ -421,7 +464,8 @@ const DECIMAL_DISPLAY_KEYS = new Set([
   'endToEnd',
   'normalizedEndToEnd',
   'sessionTime',
-  'prefillTpsPerUser'
+  'prefillTpsPerUser',
+  ...latencyPercentilePointKeys
 ]);
 
 const SESSION_TIME_MINUTE_IMPORT_ALIASES = [
@@ -541,24 +585,6 @@ const fixedLengthChartMetrics = new Set<InferenceCurveXAxisMetric>([
   'endToEnd',
   'ttft'
 ]);
-const agenticTraceMetricDisplayOverrides: InferenceCurveXAxisMetricDisplayOverrides = {
-  interactivity: {
-    label: 'P90 Interactivity (tok/s/user)',
-    tooltipLabel: 'P90 Interactivity',
-    title: 'Token Throughput per GPU vs. P90 Interactivity'
-  },
-  endToEnd: {
-    label: 'P90 End-to-end Latency (s)',
-    tooltipLabel: 'P90 End-to-end Latency',
-    title: 'Token Throughput per GPU vs. P90 End-to-end Latency'
-  },
-  ttft: {
-    label: 'P90 Time To First Token (s)',
-    tooltipLabel: 'P90 Time To First Token',
-    title: 'Token Throughput per GPU vs. P90 Time To First Token'
-  }
-};
-
 function createInitialDataState(): InitialDataState {
   const defaultSeries = structuredClone(exampleSeries);
   const persisted = loadPersistedAppData();
@@ -695,28 +721,39 @@ function makeRestoredEmptySeriesDraft(index: number): SeriesDraft {
 
 function restorePersistedSeriesDrafts(value: unknown): SeriesDraft[] {
   if (!Array.isArray(value)) return [];
-  return value.filter(isRecord).map((draft, index) => ({
-    id: readPersistedText(draft, 'id', `line-${index + 1}`),
-    name: readPersistedText(draft, 'name', `Line ${index + 1}`),
-    model: readPersistedText(draft, 'model', DEFAULT_MODEL),
-    islOsl: readPersistedText(draft, 'islOsl', DEFAULT_ISL_OSL),
-    precision: readPersistedText(draft, 'precision', DEFAULT_PRECISION),
-    mtp: normalizeMtpValue(readPersistedText(draft, 'mtp', NON_MTP_VALUE)),
-    marker: normalizePointShapeValue(readPersistedText(draft, 'marker')),
-    title: readPersistedText(draft, 'title'),
-    color: readPersistedText(draft, 'color'),
-    lineStyle: readPersistedText(draft, 'lineStyle', DEFAULT_LINE_STYLE) || DEFAULT_LINE_STYLE,
-    renderOrder: readPersistedNumber(draft, 'renderOrder', index),
-    collapsed: typeof draft.collapsed === 'boolean' ? draft.collapsed : true,
-    points: restorePersistedPointRows(draft.points)
-  }));
+  return value.filter(isRecord).map((draft, index) => {
+    const restored: SeriesDraft = {
+      id: readPersistedText(draft, 'id', `line-${index + 1}`),
+      name: readPersistedText(draft, 'name', `Line ${index + 1}`),
+      model: readPersistedText(draft, 'model', DEFAULT_MODEL),
+      islOsl: readPersistedText(draft, 'islOsl', DEFAULT_ISL_OSL),
+      precision: readPersistedText(draft, 'precision', DEFAULT_PRECISION),
+      mtp: normalizeMtpValue(readPersistedText(draft, 'mtp', NON_MTP_VALUE)),
+      marker: normalizePointShapeValue(readPersistedText(draft, 'marker')),
+      title: readPersistedText(draft, 'title'),
+      color: readPersistedText(draft, 'color'),
+      lineStyle: readPersistedText(draft, 'lineStyle', DEFAULT_LINE_STYLE) || DEFAULT_LINE_STYLE,
+      renderOrder: readPersistedNumber(draft, 'renderOrder', index),
+      collapsed: typeof draft.collapsed === 'boolean' ? draft.collapsed : true,
+      points: restorePersistedPointRows(draft.points)
+    };
+    if (isAgenticTraceSequence(restored.islOsl)) {
+      restored.points.forEach((row) => {
+        (Object.keys(latencyMetricColumns) as LatencyMetricKey[]).forEach((metric) => {
+          const p90Key = latencyMetricColumns[metric].rowKeys.p90;
+          if (!row[p90Key] && row[metric]) row[p90Key] = row[metric];
+        });
+      });
+    }
+    return restored;
+  });
 }
 
 function restorePersistedPointRows(value: unknown): PointRow[] {
   if (!Array.isArray(value)) return [makeEmptyPointRow()];
   const rows = value.filter(isRecord).map((point) => {
     const row = makeEmptyPointRow();
-    [...pointColumns.map((column) => column.key), ...hiddenPointKeys].forEach((key) => {
+    [...pointColumns.map((column) => column.key), ...latencyPercentilePointKeys, ...hiddenPointKeys].forEach((key) => {
       row[key] = formatPointFieldValue(point[key]);
     });
     row.shape = normalizePointShapeValue(row.shape);
@@ -730,6 +767,7 @@ function restorePersistedState(value: unknown): PersistedAppState {
   return {
     theme: value.theme === 'light' || value.theme === 'dark' ? value.theme : undefined,
     chartMetric: normalizeChartMetric(value.chartMetric),
+    latencyPercentile: normalizeLatencyPercentile(value.latencyPercentile),
     activeSeriesIds: readPersistedStringArray(value.activeSeriesIds),
     activeSeriesIdsByView: readPersistedActiveSeriesByView(value.activeSeriesIdsByView),
     selectedPrecisions: readPersistedStringArray(value.selectedPrecisions),
@@ -772,6 +810,7 @@ function restoreAppState(defaults: AppState, saved: PersistedAppState, series: I
   return {
     theme: saved.theme ?? defaults.theme,
     chartMetric: saved.chartMetric ?? defaults.chartMetric,
+    latencyPercentile: saved.latencyPercentile ?? defaults.latencyPercentile,
     activeSeriesIds:
       activeSeriesIds.length > 0 || series.length === 0
         ? new Set(activeSeriesIds)
@@ -807,6 +846,7 @@ function serializeAppState(): PersistedAppState {
   return {
     theme: state.theme,
     chartMetric: state.chartMetric,
+    latencyPercentile: state.latencyPercentile,
     activeSeriesIds: Array.from(state.activeSeriesIds),
     activeSeriesIdsByView: serializeActiveSeriesByView(),
     selectedPrecisions: Array.from(state.selectedPrecisions),
@@ -1066,6 +1106,10 @@ app.innerHTML = `
         <span>MTP</span>
         <select id="mtp-filter"></select>
       </label>
+      <label id="latency-percentile-control" hidden>
+        <span>Latency Percentile</span>
+        <select id="latency-percentile-filter"></select>
+      </label>
     </section>
     <section class="metric-row no-export">
       <div id="metric-switch" class="metric-switch" role="group" aria-label="Chart metric"></div>
@@ -1284,6 +1328,8 @@ const scenarioFilterEl = document.querySelector<HTMLSelectElement>('#scenario-fi
 const islOslFilterEl = document.querySelector<HTMLSelectElement>('#isl-osl-filter')!;
 const precisionFilterEl = document.querySelector<HTMLSelectElement>('#precision-filter')!;
 const mtpFilterEl = document.querySelector<HTMLSelectElement>('#mtp-filter')!;
+const latencyPercentileControlEl = document.querySelector<HTMLElement>('#latency-percentile-control')!;
+const latencyPercentileFilterEl = document.querySelector<HTMLSelectElement>('#latency-percentile-filter')!;
 const metricSwitchEl = document.querySelector<HTMLElement>('#metric-switch')!;
 const chartTitleEl = document.querySelector<HTMLHeadingElement>('#chart-title')!;
 const seriesEditorEl = document.querySelector<HTMLElement>('#series-editor')!;
@@ -1559,10 +1605,12 @@ function handleMetricSwitchClick(event: MouseEvent): void {
 }
 
 function getChartOptions(): InferenceCurveChartOptions {
-  const metricDisplayOverrides = getMetricDisplayOverridesForCurrentView();
+  const latencyPercentile = isAgenticTraceView(currentSeries)
+    ? state.latencyPercentile
+    : undefined;
   return {
     xMetric: state.chartMetric,
-    metricDisplayOverrides,
+    ...(latencyPercentile ? { latencyPercentile } : {}),
     activeSeriesIds: state.activeSeriesIds,
     selectedPrecisions: Array.from(state.selectedPrecisions),
     enforceEndToEndPareto: shouldEnforceEndToEndPareto(),
@@ -1580,7 +1628,7 @@ function getChartOptions(): InferenceCurveChartOptions {
     title: getChartTitle(),
     subtitle: getChartSubtitle(),
     watermark: state.watermark,
-    xLabel: getInferenceCurveXAxisLabel(state.chartMetric, metricDisplayOverrides)
+    xLabel: getInferenceCurveXAxisLabel(state.chartMetric, undefined, latencyPercentile)
   };
 }
 
@@ -2537,6 +2585,12 @@ function renderFilterControls(): void {
   islOslFilterEl.disabled = state.scenarioFilter === AGENTIC_SCENARIO;
   precisionFilterEl.innerHTML = renderPrecisionFilterOptions(precisions);
   mtpFilterEl.innerHTML = renderMtpFilterOptions(mtpValues);
+  latencyPercentileControlEl.hidden = !isAgenticTraceView(currentSeries);
+  latencyPercentileControlEl.parentElement?.classList.toggle(
+    'has-latency-percentile',
+    !latencyPercentileControlEl.hidden
+  );
+  latencyPercentileFilterEl.innerHTML = renderLatencyPercentileOptions();
   metricSwitchEl.innerHTML = renderMetricSwitchOptions();
 
   modelFilterEl.onchange = () => {
@@ -2583,6 +2637,8 @@ function renderFilterControls(): void {
     state.selectedPrecisions =
       precision === ALL_VALUE ? new Set(availablePrecisions) : new Set([precision]);
     restoreActiveSeriesForCurrentView();
+    reconcileLatencyPercentile();
+    renderFilterControls();
     renderSeriesEditor();
     renderAll();
     clearMergePreview();
@@ -2597,6 +2653,16 @@ function renderFilterControls(): void {
     renderSeriesEditor();
     renderAll();
     clearMergePreview();
+    scheduleLocalSave();
+  };
+  latencyPercentileFilterEl.onchange = () => {
+    const percentile = normalizeLatencyPercentile(latencyPercentileFilterEl.value);
+    if (!percentile || percentile === state.latencyPercentile) return;
+    commitSeriesDom();
+    state.latencyPercentile = percentile;
+    renderFilterControls();
+    renderSeriesEditor();
+    renderAll();
     scheduleLocalSave();
   };
 }
@@ -2657,6 +2723,14 @@ function renderMtpFilterOptions(values: string[]): string {
         `<option value="${escapeAttribute(value)}" ${state.mtpFilter === value ? 'selected' : ''}>${escapeHtml(formatMtpFilterLabel(value))}</option>`
     )
   ].join('');
+}
+
+function renderLatencyPercentileOptions(): string {
+  const available = getAvailableLatencyPercentiles(getFilteredSeriesForChart());
+  return LATENCY_PERCENTILES.map((percentile) => {
+    const enabled = available.has(percentile);
+    return `<option value="${percentile}" ${state.latencyPercentile === percentile ? 'selected' : ''} ${enabled ? '' : 'disabled'}>${percentile.toUpperCase()}</option>`;
+  }).join('');
 }
 
 function renderMetricSwitchOptions(): string {
@@ -2979,7 +3053,33 @@ function renderCollapsedPointSummary(seriesIndex: number, pointCount: number): s
   `;
 }
 
+function getEditorPointColumns(): TableColumn[] {
+  if (!isAgenticTraceView(currentSeries)) return pointColumns;
+  const percentileLabel = state.latencyPercentile.toUpperCase();
+  return pointColumns.map((column) => {
+    if (!isLatencyMetricKey(column.key)) return column;
+    const metric = latencyMetricColumns[column.key];
+    return {
+      ...column,
+      key: metric.rowKeys[state.latencyPercentile],
+      label: `${percentileLabel} ${metric.label}`
+    };
+  });
+}
+
+function isLatencyMetricKey(key: string): key is LatencyMetricKey {
+  return Object.prototype.hasOwnProperty.call(latencyMetricColumns, key);
+}
+
+function getPointColumnCssKey(key: string): string {
+  for (const [metricKey, metric] of Object.entries(latencyMetricColumns)) {
+    if (Object.values(metric.rowKeys).includes(key)) return metricKey;
+  }
+  return key;
+}
+
 function renderPointTable(series: SeriesDraft, seriesIndex: number, pointCount: number): string {
+  const editorPointColumns = getEditorPointColumns();
   return `
     <div class="point-table-expanded-head">
       ${renderPointDataToggle(seriesIndex, pointCount, false)}
@@ -2990,10 +3090,10 @@ function renderPointTable(series: SeriesDraft, seriesIndex: number, pointCount: 
           <tr>
             <th class="row-num">#</th>
             <th class="point-actions-head">Actions</th>
-            ${pointColumns
+            ${editorPointColumns
               .map(
                 (column) =>
-                  `<th class="point-cell-${column.key}" title="${column.required ? 'Required' : 'Optional'}">${column.label}${column.required ? ' *' : ''}</th>`
+                  `<th class="point-cell-${getPointColumnCssKey(column.key)}" title="${column.required ? 'Required' : 'Optional'}">${column.label}${column.required ? ' *' : ''}</th>`
               )
               .join('')}
           </tr>
@@ -3066,6 +3166,7 @@ function formatPointCellDisplay(key: string, value: string | undefined): string 
 }
 
 function renderPointRow(row: PointRow, seriesIndex: number, rowIndex: number): string {
+  const editorPointColumns = getEditorPointColumns();
   return `
     <tr>
       <td class="row-num">${rowIndex + 1}</td>
@@ -3093,7 +3194,7 @@ function renderPointRow(row: PointRow, seriesIndex: number, rowIndex: number): s
           ${renderIcon('trash')}
         </button>
       </td>
-      ${pointColumns
+      ${editorPointColumns
         .map((column, colIndex) =>
           column.key === 'shape'
             ? renderPointShapeCell(row, seriesIndex, rowIndex, colIndex)
@@ -3104,7 +3205,7 @@ function renderPointRow(row: PointRow, seriesIndex: number, rowIndex: number): s
                 data-row="${rowIndex}"
                 data-col="${colIndex}"
                 data-key="${column.key}"
-                class="point-cell point-cell-${column.key}${column.required ? ' required-cell' : ''}"
+                class="point-cell point-cell-${getPointColumnCssKey(column.key)}${column.required ? ' required-cell' : ''}"
               >${escapeHtml(formatPointCellDisplay(column.key, row[column.key]))}</td>
             `
         )
@@ -3443,12 +3544,13 @@ function handlePointTablePaste(event: ClipboardEvent): void {
       });
     });
   } else {
+    const editorPointColumns = getEditorPointColumns();
     matrix.forEach((values, rowOffset) => {
       const rowIndex = startRow + rowOffset;
       ensurePointRow(seriesIndex, rowIndex);
       values.forEach((value, colOffset) => {
         const colIndex = startCol + colOffset;
-        const column = pointColumns[colIndex];
+        const column = editorPointColumns[colIndex];
         if (!column) return;
         seriesDrafts[seriesIndex]!.points[rowIndex]![column.key] = value;
       });
@@ -3472,7 +3574,7 @@ function handlePointTableKeydown(event: KeyboardEvent): void {
   const col = Number(cell.dataset.col);
   const nextRow = event.key === 'Enter' ? row + 1 : row;
   const nextCol = event.key === 'Tab' ? col + (event.shiftKey ? -1 : 1) : col;
-  const boundedCol = Math.max(0, Math.min(pointColumns.length - 1, nextCol));
+  const boundedCol = Math.max(0, Math.min(getEditorPointColumns().length - 1, nextCol));
   ensurePointRow(seriesIndex, nextRow);
   renderSeriesEditor();
   focusPointCell(seriesIndex, nextRow, boundedCol);
@@ -3539,7 +3641,12 @@ function renderLegend(): void {
     filteredSeries,
     state.highContrast,
     state.theme,
-    colorSeries
+    colorSeries,
+    state.chartMetric,
+    shouldEnforceEndToEndPareto(),
+    undefined,
+    'maximize',
+    state.latencyPercentile
   );
   const query = state.search.trim().toLowerCase();
   const visibleItems = prepared.filter(
@@ -3945,7 +4052,7 @@ function seriesToDrafts(series: InferenceCurveSeries[]): SeriesDraft[] {
     points: line.points.map((point) => {
       const labelMetadata = parsePointMetadataLabel(point.label);
       const strategyMetadata = parsePointStrategy(point.strategy);
-      return {
+      const row: PointRow = {
         interactivity: formatPointFieldValue(point.interactivity),
         throughput: String(point.throughput),
         ttft: formatPointFieldValue(point.ttft),
@@ -3977,9 +4084,53 @@ function seriesToDrafts(series: InferenceCurveSeries[]): SeriesDraft[] {
         concurrency: formatPointFieldValue(point.concurrency),
         label: point.label ?? ''
       };
+      writePercentilesToDraftRow(
+        row,
+        'interactivity',
+        point.interactivityPercentiles,
+        isAgenticTraceSequence(getSeriesIslOsl(line)) ? point.interactivity : undefined
+      );
+      writePercentilesToDraftRow(
+        row,
+        'ttft',
+        point.ttftPercentiles,
+        isAgenticTraceSequence(getSeriesIslOsl(line)) ? point.ttft : undefined
+      );
+      writePercentilesToDraftRow(
+        row,
+        'endToEnd',
+        point.endToEndPercentiles,
+        isAgenticTraceSequence(getSeriesIslOsl(line)) ? point.endToEnd : undefined
+      );
+      return row;
     })
   }));
   return drafts.length ? drafts : [makeEmptySeriesDraft(0)];
+}
+
+function writePercentilesToDraftRow(
+  row: PointRow,
+  metric: LatencyMetricKey,
+  percentiles: InferenceCurveLatencyPercentiles | undefined,
+  legacyP90Value: unknown
+): void {
+  LATENCY_PERCENTILES.forEach((percentile) => {
+    const value = percentiles?.[percentile] ??
+      (percentiles === undefined && percentile === 'p90' ? legacyP90Value : undefined);
+    row[latencyMetricColumns[metric].rowKeys[percentile]] = formatPointFieldValue(value);
+  });
+}
+
+function readPercentilesFromDraftRow(
+  row: PointRow,
+  metric: LatencyMetricKey
+): InferenceCurveLatencyPercentiles | undefined {
+  const percentiles: InferenceCurveLatencyPercentiles = {};
+  LATENCY_PERCENTILES.forEach((percentile) => {
+    const value = parseNumber(row[latencyMetricColumns[metric].rowKeys[percentile]]);
+    if (value !== null) percentiles[percentile] = value;
+  });
+  return Object.keys(percentiles).length > 0 ? percentiles : undefined;
 }
 
 function draftsToSeries(drafts: SeriesDraft[]): InferenceCurveSeries[] {
@@ -3995,13 +4146,21 @@ function draftsToSeriesAllowEmpty(drafts: SeriesDraft[]): InferenceCurveSeries[]
 function draftsToSeriesInternal(drafts: SeriesDraft[]): InferenceCurveSeries[] {
   const result: InferenceCurveSeries[] = [];
   drafts.forEach((draft, seriesIndex) => {
+    const isAgentic = isAgenticTraceSequence(draft.islOsl);
     const points = draft.points
       .map((row, pointIndex) => {
         if (isEmptyPointRow(row)) return null;
-        const interactivity = parseNumber(row.interactivity);
+        const interactivityPercentiles = isAgentic
+          ? readPercentilesFromDraftRow(row, 'interactivity')
+          : undefined;
+        const ttftPercentiles = isAgentic ? readPercentilesFromDraftRow(row, 'ttft') : undefined;
+        const endToEndPercentiles = isAgentic
+          ? readPercentilesFromDraftRow(row, 'endToEnd')
+          : undefined;
+        const interactivity = interactivityPercentiles?.p90 ?? parseNumber(row.interactivity);
         const throughput = parseNumber(row.throughput);
-        const ttft = parseNumber(row.ttft);
-        const endToEnd = parseNumber(row.endToEnd);
+        const ttft = ttftPercentiles?.p90 ?? parseNumber(row.ttft);
+        const endToEnd = endToEndPercentiles?.p90 ?? parseNumber(row.endToEnd);
         const normalizedEndToEnd = parseNumber(row.normalizedEndToEnd);
         const sessionTime = parseNumber(row.sessionTime);
         const prefillTpsPerUser = parseNumber(row.prefillTpsPerUser);
@@ -4011,7 +4170,10 @@ function draftsToSeriesInternal(drafts: SeriesDraft[]): InferenceCurveSeries[] {
           endToEnd !== null ||
           normalizedEndToEnd !== null ||
           sessionTime !== null ||
-          prefillTpsPerUser !== null;
+          prefillTpsPerUser !== null ||
+          interactivityPercentiles !== undefined ||
+          ttftPercentiles !== undefined ||
+          endToEndPercentiles !== undefined;
         if (throughput === null || !hasXMetric) {
           throw new Error(
             `Line ${seriesIndex + 1}, row ${pointIndex + 1}: Throughput/GPU and at least one X-axis metric must be numbers.`
@@ -4026,6 +4188,7 @@ function draftsToSeriesInternal(drafts: SeriesDraft[]): InferenceCurveSeries[] {
           label: row.label.trim() || undefined
         };
         if (interactivity !== null) point.interactivity = interactivity;
+        if (interactivityPercentiles) point.interactivityPercentiles = interactivityPercentiles;
         const pointShape = normalizePointShapeValue(row.shape);
         if (pointShape) point.shape = pointShape;
         const numPrefillGpu = parseNumber(row.num_prefill_gpu);
@@ -4044,7 +4207,9 @@ function draftsToSeriesInternal(drafts: SeriesDraft[]): InferenceCurveSeries[] {
         const totalGpu =
           numPrefillGpu !== null && numDecodeGpu !== null ? numPrefillGpu + numDecodeGpu : null;
         if (ttft !== null) point.ttft = ttft;
+        if (ttftPercentiles) point.ttftPercentiles = ttftPercentiles;
         if (endToEnd !== null) point.endToEnd = endToEnd;
+        if (endToEndPercentiles) point.endToEndPercentiles = endToEndPercentiles;
         if (normalizedEndToEnd !== null) point.normalizedEndToEnd = normalizedEndToEnd;
         if (sessionTime !== null) point.sessionTime = sessionTime;
         if (prefillTpsPerUser !== null) point.prefillTpsPerUser = prefillTpsPerUser;
@@ -4319,6 +4484,15 @@ function detectPointHeaderMap(headerRow: string[]): Map<number, string> | null {
     ['备注', 'label']
   ]);
 
+  (Object.keys(latencyMetricColumns) as LatencyMetricKey[]).forEach((metric) => {
+    LATENCY_PERCENTILES.forEach((percentile) => {
+      const rowKey = latencyMetricColumns[metric].rowKeys[percentile];
+      getLatencyPercentileImportAliases(metric, percentile).forEach((alias) => {
+        aliases.set(normalizeHeaderName(alias), rowKey);
+      });
+    });
+  });
+
   const map = new Map<number, string>();
   headerRow.forEach((value, sourceIndex) => {
     const normalized = normalizeHeaderName(value);
@@ -4419,6 +4593,7 @@ function makeUniqueLineId(baseId: string): string {
 function makeEmptyPointRow(): PointRow {
   return Object.fromEntries([
     ...pointColumns.map((column) => [column.key, '']),
+    ...latencyPercentilePointKeys.map((key) => [key, '']),
     ...hiddenPointKeys.map((key) => [key, ''])
   ]);
 }
@@ -4430,14 +4605,19 @@ function ensurePointRow(seriesIndex: number, rowIndex: number): void {
 }
 
 function isEmptyPointRow(row: PointRow): boolean {
-  return pointColumns.every((column) => !row[column.key]?.trim());
+  return [...pointColumns.map((column) => column.key), ...latencyPercentilePointKeys].every(
+    (key) => !row[key]?.trim()
+  );
 }
 
 function pointHasAnyXAxisMetric(point: Record<string, unknown>): boolean {
-  return xMetricPointKeys.some((key) => {
+  if (xMetricPointKeys.some((key) => {
     const value = point[key];
     return typeof value === 'number' && Number.isFinite(value);
-  });
+  })) return true;
+  return ['interactivityPercentiles', 'ttftPercentiles', 'endToEndPercentiles'].some(
+    (key) => readNativeLatencyPercentiles(point[key]) !== undefined
+  );
 }
 
 function countPointRows(drafts: SeriesDraft[]): number {
@@ -4531,6 +4711,53 @@ function normalizeChartMetric(value: unknown): InferenceCurveXAxisMetric | undef
     : undefined;
 }
 
+function normalizeLatencyPercentile(value: unknown): InferenceCurveLatencyPercentile | undefined {
+  return typeof value === 'string' && LATENCY_PERCENTILES.includes(value as InferenceCurveLatencyPercentile)
+    ? (value as InferenceCurveLatencyPercentile)
+    : undefined;
+}
+
+function getAvailableLatencyPercentiles(
+  series: InferenceCurveSeries[]
+): Set<InferenceCurveLatencyPercentile> {
+  const available = new Set<InferenceCurveLatencyPercentile>();
+  series.forEach((line) => {
+    line.points.forEach((point) => {
+      LATENCY_PERCENTILES.forEach((percentile) => {
+        if (
+          hasPointLatencyPercentile(point.interactivityPercentiles, point.interactivity, percentile) ||
+          hasPointLatencyPercentile(point.ttftPercentiles, point.ttft, percentile) ||
+          hasPointLatencyPercentile(point.endToEndPercentiles, point.endToEnd, percentile)
+        ) {
+          available.add(percentile);
+        }
+      });
+    });
+  });
+  return available;
+}
+
+function hasPointLatencyPercentile(
+  percentiles: InferenceCurveLatencyPercentiles | undefined,
+  legacyP90Value: unknown,
+  percentile: InferenceCurveLatencyPercentile
+): boolean {
+  if (percentiles && typeof percentiles === 'object') {
+    return typeof percentiles[percentile] === 'number' && Number.isFinite(percentiles[percentile]);
+  }
+  return percentile === 'p90' && typeof legacyP90Value === 'number' && Number.isFinite(legacyP90Value);
+}
+
+function reconcileLatencyPercentile(): void {
+  if (!isAgenticTraceView(currentSeries)) return;
+  const available = getAvailableLatencyPercentiles(getFilteredSeriesForChart());
+  if (available.has(state.latencyPercentile)) return;
+  state.latencyPercentile = available.has(DEFAULT_LATENCY_PERCENTILE)
+    ? DEFAULT_LATENCY_PERCENTILE
+    : LATENCY_PERCENTILES.find((percentile) => available.has(percentile)) ?? DEFAULT_LATENCY_PERCENTILE;
+  scheduleLocalSave();
+}
+
 function getAvailableChartMetricOptions(series: InferenceCurveSeries[] = currentSeries): typeof chartMetricOptions {
   return isAgenticTraceView(series)
     ? chartMetricOptions
@@ -4577,10 +4804,6 @@ function getDefaultSequenceForScenario(series: InferenceCurveSeries[], scenario:
 
 function formatScenarioFilterLabel(value: string): string {
   return value === AGENTIC_SCENARIO ? 'Agentic Traces' : 'Fixed Sequence Length';
-}
-
-function getMetricDisplayOverridesForCurrentView(): InferenceCurveXAxisMetricDisplayOverrides | undefined {
-  return isAgenticTraceView(currentSeries) ? agenticTraceMetricDisplayOverrides : undefined;
 }
 
 function normalizeScenarioKey(value: string): string {
@@ -4716,6 +4939,7 @@ function reconcileFiltersForSeries(series: InferenceCurveSeries[]): void {
 
   ensureSelectedPrecisions(getAvailablePrecisions(getModelSequenceMtpFilteredSeries()));
   ensureChartMetricForCurrentView(series);
+  reconcileLatencyPercentile();
 }
 
 function ensureSelectedPrecisions(precisions: string[]): void {
@@ -4741,6 +4965,7 @@ function createInitialState(series: InferenceCurveSeries[]): AppState {
   return {
     theme: 'dark',
     chartMetric: 'interactivity',
+    latencyPercentile: DEFAULT_LATENCY_PERCENTILE,
     activeSeriesIds: new Set(visibleSeries.map((line) => line.id)),
     activeSeriesIdsByView: new Map(),
     selectedPrecisions: firstPrecisionSelection(visibleSeries),
@@ -4771,6 +4996,7 @@ function setDefaultFiltersForSeries(series: InferenceCurveSeries[]): void {
   state.islOslFilter = defaults.islOslFilter;
   state.mtpFilter = defaults.mtpFilter;
   state.chartMetric = defaults.chartMetric;
+  state.latencyPercentile = defaults.latencyPercentile;
   state.activeSeriesIds = defaults.activeSeriesIds;
   state.activeSeriesIdsByView = defaults.activeSeriesIdsByView;
   state.selectedPrecisions = defaults.selectedPrecisions;
@@ -4844,7 +5070,8 @@ function getChartColorSourceSeries(series: InferenceCurveSeries[]): InferenceCur
     series,
     state.activeSeriesIds,
     Array.from(state.selectedPrecisions),
-    state.chartMetric
+    state.chartMetric,
+    state.latencyPercentile
   );
 }
 
@@ -4976,7 +5203,11 @@ function formatMtpFilterLabel(value: string): string {
 }
 
 function getChartTitle(): string {
-  return getInferenceCurveTitle(state.chartMetric, getMetricDisplayOverridesForCurrentView());
+  return getInferenceCurveTitle(
+    state.chartMetric,
+    undefined,
+    isAgenticTraceView(currentSeries) ? state.latencyPercentile : undefined
+  );
 }
 
 function getChartSubtitle(): string {
@@ -6138,35 +6369,43 @@ function readNativeSeries(value: unknown): InferenceCurveSeries[] {
     title: asOptionalString(line.title),
     points: (line.points as unknown[])
       .filter(isRecord)
-      .map((point) => ({
-        ...point,
-        interactivity: asOptionalNumber(
-          point.interactivity ?? point.median_intvty ?? point.p90_intvty ?? point.p90_interactivity
-        ),
-        throughput: Number(point.throughput),
-        ttft: asOptionalNumber(point.ttft ?? point.median_ttft),
-        endToEnd: asOptionalNumber(
-          point.endToEnd ?? point.end_to_end ?? point.e2el ?? point.median_e2el ?? point.p90_e2el
-        ),
-        normalizedEndToEnd: asOptionalNumber(
-          point.normalizedEndToEnd ??
-            point.normalized_end_to_end ??
-            point.normalized_e2e_400_s ??
-            point.normalized_e2e ??
-            point.normalized_e2el ??
-            point.p90_normalized_e2e_400_s ??
-            point.p75_normalized_e2e_400_s ??
-            point.p90_normalized_e2e ??
-            point.p90_normalized_e2el
-        ),
-        sessionTime: asOptionalSessionTime(point),
-        prefillTpsPerUser: asOptionalNumber(
-          point.prefillTpsPerUser ??
-            point.prefill_tps_per_user ??
-            point.prefill_tps_user ??
-            point.p90_prefill_tps_per_user
-        )
-      }))
+      .map((point) => {
+        const interactivityPercentiles = readNativeLatencyPercentiles(point.interactivityPercentiles);
+        const ttftPercentiles = readNativeLatencyPercentiles(point.ttftPercentiles);
+        const endToEndPercentiles = readNativeLatencyPercentiles(point.endToEndPercentiles);
+        return {
+          ...point,
+          interactivityPercentiles,
+          ttftPercentiles,
+          endToEndPercentiles,
+          interactivity: asOptionalNumber(
+            point.interactivity ?? interactivityPercentiles?.p90 ?? point.median_intvty ??
+              point.p90_intvty ?? point.p90_interactivity
+          ),
+          throughput: Number(point.throughput),
+          ttft: asOptionalNumber(point.ttft ?? ttftPercentiles?.p90 ?? point.median_ttft),
+          endToEnd: asOptionalNumber(
+            point.endToEnd ?? endToEndPercentiles?.p90 ?? point.end_to_end ?? point.e2el ??
+              point.median_e2el ?? point.p90_e2el
+          ),
+          normalizedEndToEnd: asOptionalNumber(
+            point.normalizedEndToEnd ??
+              point.normalized_end_to_end ??
+              point.normalized_e2e_400_s ??
+              point.normalized_e2e ??
+              point.normalized_e2el ??
+              point.p90_normalized_e2e_400_s ??
+              point.p75_normalized_e2e_400_s ??
+              point.p90_normalized_e2e ??
+              point.p90_normalized_e2el
+          ),
+          sessionTime: asOptionalSessionTime(point),
+          prefillTpsPerUser: asOptionalNumber(
+            point.prefillTpsPerUser ?? point.prefill_tps_per_user ?? point.prefill_tps_user ??
+              point.p90_prefill_tps_per_user
+          )
+        };
+      })
       .filter((point) => Number.isFinite(point.throughput) && pointHasAnyXAxisMetric(point))
   }));
 }
@@ -6195,12 +6434,47 @@ function looksLikeBenchmarkRecord(record: Record<string, unknown>): boolean {
 }
 
 function readAnyImportedXAxisMetric(record: Record<string, unknown>): number | null {
-  const metricReadOptions = { preferP90: isAgenticTraceSequence(readImportedScenario(record)) };
+  const isAgentic = isAgenticTraceSequence(readImportedScenario(record));
+  const metricReadOptions = { preferP90: isAgentic };
+  if (isAgentic) {
+    for (const metric of Object.keys(latencyMetricColumns) as LatencyMetricKey[]) {
+      const percentiles = readImportedLatencyPercentiles(record, metric);
+      const firstValue = LATENCY_PERCENTILES.map((percentile) => percentiles?.[percentile])
+        .find((value) => value !== undefined);
+      if (firstValue !== undefined) return firstValue;
+    }
+  }
   for (const key of xMetricPointKeys) {
     const value = readImportedXAxisMetric(record, key, metricReadOptions);
     if (value !== null) return value;
   }
   return null;
+}
+
+function readImportedLatencyPercentiles(
+  record: Record<string, unknown>,
+  metric: LatencyMetricKey
+): InferenceCurveLatencyPercentiles | undefined {
+  const nestedMetric = metric === 'interactivity' ? 'intvty' : metric === 'endToEnd' ? 'e2el' : 'ttft';
+  const snakeMetric = metric === 'interactivity' ? 'intvty' : metric === 'endToEnd' ? 'e2el' : 'ttft';
+  const label = latencyMetricColumns[metric].label.replace(' (s)', '');
+  const result: InferenceCurveLatencyPercentiles = {};
+  LATENCY_PERCENTILES.forEach((percentile) => {
+    const upper = percentile.toUpperCase();
+    const value = readMetricNumber(record, [
+      `request_metrics.latency.${nestedMetric}.${percentile}`,
+      ...(percentile === 'p50'
+        ? [`metrics.median_${snakeMetric}`, `median_${snakeMetric}`]
+        : []),
+      `metrics.${percentile}_${snakeMetric}`,
+      `${percentile}_${snakeMetric}`,
+      `${upper} ${label}`,
+      `${upper} ${label} (s)`,
+      metric === 'interactivity' ? `${upper} Interactivity (tok/s/user)` : ''
+    ].filter(Boolean));
+    if (value !== null) result[percentile] = value;
+  });
+  return Object.keys(result).length > 0 ? result : undefined;
 }
 
 function readImportedXAxisMetric(
@@ -6443,6 +6717,39 @@ const POINT_IMPORT_ALIASES: Record<string, string[]> = {
   ]
 };
 
+(Object.keys(latencyMetricColumns) as LatencyMetricKey[]).forEach((metric) => {
+  LATENCY_PERCENTILES.forEach((percentile) => {
+    POINT_IMPORT_ALIASES[latencyMetricColumns[metric].rowKeys[percentile]] =
+      getLatencyPercentileImportAliases(metric, percentile);
+  });
+});
+
+function getLatencyPercentileImportAliases(
+  metric: LatencyMetricKey,
+  percentile: InferenceCurveLatencyPercentile
+): string[] {
+  const nestedMetric = metric === 'interactivity' ? 'intvty' : metric === 'endToEnd' ? 'e2el' : 'ttft';
+  const upper = percentile.toUpperCase();
+  const label = latencyMetricColumns[metric].label.replace(' (s)', '');
+  return [
+    getLatencyPercentileCsvHeader(metric, percentile),
+    `${upper} ${label}`,
+    `${percentile}_${nestedMetric}`,
+    `metrics.${percentile}_${nestedMetric}`,
+    `request_metrics.latency.${nestedMetric}.${percentile}`
+  ];
+}
+
+function getLatencyPercentileCsvHeader(
+  metric: LatencyMetricKey,
+  percentile: InferenceCurveLatencyPercentile
+): string {
+  const upper = percentile.toUpperCase();
+  if (metric === 'interactivity') return `${upper} Interactivity (tok/s/user)`;
+  if (metric === 'ttft') return `${upper} TTFT (s)`;
+  return `${upper} End-to-end (s)`;
+}
+
 function readEditorColor(record: Record<string, unknown>): string {
   const explicit = readMetricString(record, ['color']);
   if (explicit) return explicit;
@@ -6484,7 +6791,7 @@ function seriesFromEditorRecords(records: Record<string, unknown>[]): InferenceC
       } satisfies SeriesDraft);
 
     const point = makeEmptyPointRow();
-    [...pointColumns.map((column) => column.key), ...hiddenPointKeys].forEach((key) => {
+    [...pointColumns.map((column) => column.key), ...latencyPercentilePointKeys, ...hiddenPointKeys].forEach((key) => {
       if (key === 'sessionTime') {
         const value = readImportedSessionTimeField(record);
         if (value) point[key] = value;
@@ -6569,11 +6876,21 @@ function importedPointFromBenchmarkRecord(
   sourceName: string
 ): ImportedPointRow | null {
   const scenario = readImportedScenario(record);
-  const metricReadOptions = { preferP90: isAgenticTraceSequence(scenario) };
-  const interactivity = readImportedXAxisMetric(record, 'interactivity', metricReadOptions);
+  const isAgentic = isAgenticTraceSequence(scenario);
+  const metricReadOptions = { preferP90: isAgentic };
+  const interactivityPercentiles = isAgentic
+    ? readImportedLatencyPercentiles(record, 'interactivity')
+    : undefined;
+  const ttftPercentiles = isAgentic ? readImportedLatencyPercentiles(record, 'ttft') : undefined;
+  const endToEndPercentiles = isAgentic
+    ? readImportedLatencyPercentiles(record, 'endToEnd')
+    : undefined;
+  const interactivity = interactivityPercentiles?.p90 ??
+    readImportedXAxisMetric(record, 'interactivity', metricReadOptions);
   const throughput = readImportedThroughput(record);
-  const ttft = readImportedXAxisMetric(record, 'ttft', metricReadOptions);
-  const endToEnd = readImportedXAxisMetric(record, 'endToEnd', metricReadOptions);
+  const ttft = ttftPercentiles?.p90 ?? readImportedXAxisMetric(record, 'ttft', metricReadOptions);
+  const endToEnd = endToEndPercentiles?.p90 ??
+    readImportedXAxisMetric(record, 'endToEnd', metricReadOptions);
   const normalizedEndToEnd = readImportedXAxisMetric(record, 'normalizedEndToEnd');
   const sessionTime = readImportedXAxisMetric(record, 'sessionTime');
   const prefillTpsPerUser = readImportedXAxisMetric(record, 'prefillTpsPerUser');
@@ -6585,7 +6902,10 @@ function importedPointFromBenchmarkRecord(
       endToEnd === null &&
       normalizedEndToEnd === null &&
       sessionTime === null &&
-      prefillTpsPerUser === null
+      prefillTpsPerUser === null &&
+      interactivityPercentiles === undefined &&
+      ttftPercentiles === undefined &&
+      endToEndPercentiles === undefined
     )
   ) {
     return null;
@@ -6649,8 +6969,11 @@ function importedPointFromBenchmarkRecord(
     )
   };
   if (interactivity !== null) point.interactivity = interactivity;
+  if (interactivityPercentiles) point.interactivityPercentiles = interactivityPercentiles;
   if (ttft !== null) point.ttft = ttft;
+  if (ttftPercentiles) point.ttftPercentiles = ttftPercentiles;
   if (endToEnd !== null) point.endToEnd = endToEnd;
+  if (endToEndPercentiles) point.endToEndPercentiles = endToEndPercentiles;
   if (normalizedEndToEnd !== null) point.normalizedEndToEnd = normalizedEndToEnd;
   if (sessionTime !== null) point.sessionTime = sessionTime;
   if (prefillTpsPerUser !== null) point.prefillTpsPerUser = prefillTpsPerUser;
@@ -6750,9 +7073,12 @@ function mergeImportedSeries(series: InferenceCurveSeries[]): InferenceCurveSeri
     const points = line.points.filter((point) => {
       const key = JSON.stringify([
         point.interactivity,
+        point.interactivityPercentiles,
         point.throughput,
         point.ttft,
+        point.ttftPercentiles,
         point.endToEnd,
+        point.endToEndPercentiles,
         point.normalizedEndToEnd,
         point.sessionTime,
         point.prefillTpsPerUser,
@@ -7130,6 +7456,18 @@ function asOptionalNumber(value: unknown): number | undefined {
   return undefined;
 }
 
+function readNativeLatencyPercentiles(
+  value: unknown
+): InferenceCurveLatencyPercentiles | undefined {
+  if (!isRecord(value)) return undefined;
+  const result: InferenceCurveLatencyPercentiles = {};
+  LATENCY_PERCENTILES.forEach((percentile) => {
+    const parsed = asOptionalNumber(value[percentile]);
+    if (parsed !== undefined) result[percentile] = parsed;
+  });
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
 function asOptionalSessionTime(point: Record<string, unknown>): number | undefined {
   const minutes = asOptionalNumber(
     point.sessionTime ??
@@ -7299,7 +7637,10 @@ function buildChartCsvRows(mode: CsvExportMode): string[][] {
     state.theme,
     getChartColorSourceSeries(chartSeries),
     state.chartMetric,
-    shouldEnforceEndToEndPareto()
+    shouldEnforceEndToEndPareto(),
+    undefined,
+    'maximize',
+    state.latencyPercentile
   );
   const currentPointByKey = new Map<string, { roof: boolean }>();
   currentPrepared.forEach((series) => {
@@ -7347,6 +7688,7 @@ function buildChartCsvRows(mode: CsvExportMode): string[][] {
       'Throughput/GPU (tok/s/gpu)',
       'TTFT (s)',
       'End-to-end (s)',
+      ...getLatencyPercentileCsvHeaders(),
       'P90 Normalized E2E @ 400 output tokens (s)',
       'Session Time (min)',
       'P90 Prefill TPS/user',
@@ -7416,6 +7758,7 @@ function buildChartCsvRows(mode: CsvExportMode): string[][] {
         formatExportValue(point.throughput),
         formatExportValue(point.ttft),
         formatExportValue(point.endToEnd),
+        ...getLatencyPercentileExportValues(point, line),
         formatExportValue(point.normalizedEndToEnd),
         formatExportValue(point.sessionTime),
         formatExportValue(point.prefillTpsPerUser),
@@ -7442,6 +7785,35 @@ function buildChartCsvRows(mode: CsvExportMode): string[][] {
   });
 
   return rows;
+}
+
+function getLatencyPercentileCsvHeaders(): string[] {
+  return (Object.keys(latencyMetricColumns) as LatencyMetricKey[]).flatMap((metric) =>
+    LATENCY_PERCENTILES.map((percentile) => getLatencyPercentileCsvHeader(metric, percentile))
+  );
+}
+
+function getLatencyPercentileExportValues(
+  point: InferenceCurveSeries['points'][number],
+  line: InferenceCurveSeries
+): string[] {
+  const isAgentic = isAgenticTraceSequence(getSeriesIslOsl(line));
+  const entries: Array<[
+    LatencyMetricKey,
+    InferenceCurveLatencyPercentiles | undefined,
+    unknown
+  ]> = [
+    ['interactivity', point.interactivityPercentiles, point.interactivity],
+    ['ttft', point.ttftPercentiles, point.ttft],
+    ['endToEnd', point.endToEndPercentiles, point.endToEnd]
+  ];
+  return entries.flatMap(([_metric, percentiles, legacyP90Value]) =>
+    LATENCY_PERCENTILES.map((percentile) => {
+      const value = percentiles?.[percentile] ??
+        (isAgentic && percentiles === undefined && percentile === 'p90' ? legacyP90Value : undefined);
+      return formatExportValue(value);
+    })
+  );
 }
 
 function readExportNumber(value: unknown): number | undefined {
@@ -7588,7 +7960,12 @@ function getExportLegendItems(): ExportLegendItem[] {
     filteredSeries,
     state.highContrast,
     state.theme,
-    getChartColorSourceSeries(filteredSeries)
+    getChartColorSourceSeries(filteredSeries),
+    state.chartMetric,
+    shouldEnforceEndToEndPareto(),
+    undefined,
+    'maximize',
+    state.latencyPercentile
   );
   const query = state.search.trim().toLowerCase();
 

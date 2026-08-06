@@ -2,9 +2,12 @@ import * as d3 from 'd3';
 
 export interface InferenceCurvePoint {
   interactivity?: number;
+  interactivityPercentiles?: InferenceCurveLatencyPercentiles;
   throughput: number;
   ttft?: number;
+  ttftPercentiles?: InferenceCurveLatencyPercentiles;
   endToEnd?: number;
+  endToEndPercentiles?: InferenceCurveLatencyPercentiles;
   normalizedEndToEnd?: number;
   sessionTime?: number;
   prefillTpsPerUser?: number;
@@ -52,6 +55,7 @@ export interface InferenceCurveChartOptions {
   activeSeriesIds?: Set<string>;
   selectedPrecisions?: string[];
   xMetric?: InferenceCurveXAxisMetric;
+  latencyPercentile?: InferenceCurveLatencyPercentile;
   metricDisplayOverrides?: InferenceCurveXAxisMetricDisplayOverrides;
   enforceEndToEndPareto?: boolean;
   showNonOptimalPoints?: boolean;
@@ -78,6 +82,12 @@ export interface InferenceCurveChartOptions {
 }
 
 export type ParetoGoal = 'maximize' | 'minimize';
+
+export type InferenceCurveLatencyPercentile = 'p50' | 'p75' | 'p90' | 'p95';
+
+export type InferenceCurveLatencyPercentiles = Partial<
+  Record<InferenceCurveLatencyPercentile, number>
+>;
 
 export type InferenceCurveXAxisMetric =
   | 'interactivity'
@@ -297,10 +307,17 @@ const X_AXIS_METRIC_ORDER: InferenceCurveXAxisMetric[] = [
   'prefillTpsPerUser'
 ];
 
+const LATENCY_METRICS = new Set<InferenceCurveXAxisMetric>([
+  'interactivity',
+  'endToEnd',
+  'ttft'
+]);
+
 const defaultOptions: Required<
   Omit<InferenceCurveChartOptions, 'activeSeriesIds' | 'selectedPrecisions'>
 > = {
   xMetric: 'interactivity',
+  latencyPercentile: 'p90',
   enforceEndToEndPareto: false,
   showNonOptimalPoints: false,
   hidePointLabels: true,
@@ -334,24 +351,56 @@ export function resetInferenceCurveZoom(): void {
 
 export function getInferenceCurveXAxisLabel(
   metric: InferenceCurveXAxisMetric,
-  overrides?: InferenceCurveXAxisMetricDisplayOverrides
+  overrides?: InferenceCurveXAxisMetricDisplayOverrides,
+  latencyPercentile?: InferenceCurveLatencyPercentile
 ): string {
-  return getXAxisMetricConfig(metric, overrides).label;
+  return getXAxisMetricConfig(metric, overrides, latencyPercentile).label;
 }
 
 export function getInferenceCurveTitle(
   metric: InferenceCurveXAxisMetric,
-  overrides?: InferenceCurveXAxisMetricDisplayOverrides
+  overrides?: InferenceCurveXAxisMetricDisplayOverrides,
+  latencyPercentile?: InferenceCurveLatencyPercentile
 ): string {
-  return getXAxisMetricConfig(metric, overrides).title;
+  return getXAxisMetricConfig(metric, overrides, latencyPercentile).title;
 }
 
 function getXAxisMetricConfig(
   metric: InferenceCurveXAxisMetric,
-  overrides?: InferenceCurveXAxisMetricDisplayOverrides
+  overrides?: InferenceCurveXAxisMetricDisplayOverrides,
+  latencyPercentile?: InferenceCurveLatencyPercentile
 ): XAxisMetricConfig {
   const base = X_AXIS_METRICS[metric] ?? X_AXIS_METRICS.interactivity;
-  return { ...base, ...(overrides?.[metric] ?? {}) };
+  const percentileLabel = latencyPercentile?.toUpperCase();
+  const percentileOverrides =
+    percentileLabel && LATENCY_METRICS.has(metric)
+      ? {
+          label: `${percentileLabel} ${base.label}`,
+          tooltipLabel: `${percentileLabel} ${base.tooltipLabel}`,
+          title: base.title.replace(' vs. ', ` vs. ${percentileLabel} `)
+        }
+      : {};
+  return { ...base, ...percentileOverrides, ...(overrides?.[metric] ?? {}) };
+}
+
+function makeLatencyPercentileDisplayOverrides(
+  latencyPercentile: InferenceCurveLatencyPercentile,
+  overrides?: InferenceCurveXAxisMetricDisplayOverrides
+): InferenceCurveXAxisMetricDisplayOverrides {
+  return Object.fromEntries(
+    X_AXIS_METRIC_ORDER.map((metric) => {
+      const config = getXAxisMetricConfig(metric, undefined, latencyPercentile);
+      return [
+        metric,
+        {
+          label: config.label,
+          tooltipLabel: config.tooltipLabel,
+          title: config.title,
+          ...(overrides?.[metric] ?? {})
+        }
+      ];
+    })
+  ) as InferenceCurveXAxisMetricDisplayOverrides;
 }
 
 export function getAvailablePrecisions(series: InferenceCurveSeries[]): string[] {
@@ -366,7 +415,8 @@ export function getInferenceCurveColorSourceSeries(
   series: InferenceCurveSeries[],
   activeSeriesIds?: Set<string>,
   selectedPrecisions?: string[],
-  xMetric: InferenceCurveXAxisMetric = 'interactivity'
+  xMetric: InferenceCurveXAxisMetric = 'interactivity',
+  latencyPercentile: InferenceCurveLatencyPercentile = 'p90'
 ): InferenceCurveSeries[] {
   const activeIds = activeSeriesIds ?? new Set(series.map((line) => line.id));
   const precisionSet = new Set(
@@ -379,7 +429,7 @@ export function getInferenceCurveColorSourceSeries(
       line.points.some(
         (point) =>
           precisionSet.has(String(point.precision ?? 'default')) &&
-          Number.isFinite(getPointXValue(point, xMetric)) &&
+          Number.isFinite(getPointXValue(point, xMetric, latencyPercentile)) &&
           Number.isFinite(point.throughput)
       )
   );
@@ -433,7 +483,8 @@ export function prepareInferenceCurveSeries(
   xMetric: InferenceCurveXAxisMetric = 'interactivity',
   enforceEndToEndPareto = false,
   xGoal?: ParetoGoal,
-  yGoal: ParetoGoal = 'maximize'
+  yGoal: ParetoGoal = 'maximize',
+  latencyPercentile: InferenceCurveLatencyPercentile = 'p90'
 ): PreparedSeries[] {
   const colors = resolveInferenceCurveColors(series, highContrast, theme, colorSeries);
   return series.map((line, seriesIndex) => {
@@ -442,7 +493,7 @@ export function prepareInferenceCurveSeries(
     const lineDasharray = resolveLineDasharray(line.lineStyle);
     const points: ChartPoint[] = [];
     line.points.forEach((point, pointIndex) => {
-      const x = getPointXValue(point, xMetric);
+      const x = getPointXValue(point, xMetric, latencyPercentile);
       const y = point.throughput;
       if (!Number.isFinite(x) || !Number.isFinite(y)) return;
       points.push({
@@ -465,7 +516,9 @@ export function prepareInferenceCurveSeries(
     // non-E2E Pareto curve from only those winners. Keep every raw point in
     // `points` so Show Non-Optimal can still reveal excluded configurations.
     const gateApplies = enforceEndToEndPareto && xMetric !== 'endToEnd';
-    const e2eWinnerIndexes = gateApplies ? getEndToEndParetoPointIndexes(line) : null;
+    const e2eWinnerIndexes = gateApplies
+      ? getEndToEndParetoPointIndexes(line, latencyPercentile)
+      : null;
     const rooflineSeed = e2eWinnerIndexes
       ? points.filter((point) => point.x > 0 && e2eWinnerIndexes.has(point.pointIndex))
       : points;
@@ -498,14 +551,17 @@ export function prepareInferenceCurveSeries(
   });
 }
 
-function getEndToEndParetoPointIndexes(series: InferenceCurveSeries): Set<number> {
+function getEndToEndParetoPointIndexes(
+  series: InferenceCurveSeries,
+  latencyPercentile: InferenceCurveLatencyPercentile
+): Set<number> {
   const candidatesByPrecision = new Map<
     string,
     { x: number; y: number; pointIndex: number }[]
   >();
 
   series.points.forEach((point, pointIndex) => {
-    const x = readFiniteNumber(point.endToEnd);
+    const x = readPointMetricValue(point, 'endToEnd', latencyPercentile);
     const y = readFiniteNumber(point.throughput);
     if (x === undefined || x <= 0 || y === undefined) return;
     const precision = String(point.precision ?? series.precision ?? 'default');
@@ -724,20 +780,46 @@ function sortPreparedSeriesForRender(series: PreparedSeries[]): PreparedSeries[]
     .map(({ line }) => line);
 }
 
-function getPointXValue(point: InferenceCurvePoint, metric: InferenceCurveXAxisMetric): number {
-  return readPointMetricValue(point, metric) ?? Number.NaN;
+function getPointXValue(
+  point: InferenceCurvePoint,
+  metric: InferenceCurveXAxisMetric,
+  latencyPercentile: InferenceCurveLatencyPercentile
+): number {
+  return readPointMetricValue(point, metric, latencyPercentile) ?? Number.NaN;
 }
 
 function readPointMetricValue(
   point: InferenceCurvePoint,
-  metric: InferenceCurveXAxisMetric
+  metric: InferenceCurveXAxisMetric,
+  latencyPercentile: InferenceCurveLatencyPercentile = 'p90'
 ): number | undefined {
-  if (metric === 'interactivity') return readFiniteNumber(point.interactivity);
-  if (metric === 'endToEnd') return readFiniteNumber(point.endToEnd);
-  if (metric === 'ttft') return readFiniteNumber(point.ttft);
+  if (metric === 'interactivity') {
+    return readLatencyPercentileValue(
+      point.interactivityPercentiles,
+      point.interactivity,
+      latencyPercentile
+    );
+  }
+  if (metric === 'endToEnd') {
+    return readLatencyPercentileValue(point.endToEndPercentiles, point.endToEnd, latencyPercentile);
+  }
+  if (metric === 'ttft') {
+    return readLatencyPercentileValue(point.ttftPercentiles, point.ttft, latencyPercentile);
+  }
   if (metric === 'normalizedEndToEnd') return readFiniteNumber(point.normalizedEndToEnd);
   if (metric === 'sessionTime') return readFiniteNumber(point.sessionTime);
   return readFiniteNumber(point.prefillTpsPerUser);
+}
+
+function readLatencyPercentileValue(
+  percentiles: InferenceCurveLatencyPercentiles | undefined,
+  legacyP90Value: unknown,
+  latencyPercentile: InferenceCurveLatencyPercentile
+): number | undefined {
+  if (percentiles && typeof percentiles === 'object') {
+    return readFiniteNumber(percentiles[latencyPercentile]);
+  }
+  return latencyPercentile === 'p90' ? readFiniteNumber(legacyP90Value) : undefined;
 }
 
 export function renderInferenceCurveChart(
@@ -746,6 +828,12 @@ export function renderInferenceCurveChart(
   userOptions: InferenceCurveChartOptions = {}
 ): void {
   const options = { ...defaultOptions, ...userOptions };
+  if (userOptions.latencyPercentile) {
+    options.metricDisplayOverrides = makeLatencyPercentileDisplayOverrides(
+      userOptions.latencyPercentile,
+      userOptions.metricDisplayOverrides
+    );
+  }
   const allPrecisions = getAvailablePrecisions(rawSeries);
   const selectedPrecisions = userOptions.selectedPrecisions?.length
     ? userOptions.selectedPrecisions
@@ -757,7 +845,8 @@ export function renderInferenceCurveChart(
     rawSeries,
     activeSeriesIds,
     selectedPrecisions,
-    options.xMetric
+    options.xMetric,
+    options.latencyPercentile
   );
   const prepared = prepareInferenceCurveSeries(
     rawSeries,
@@ -767,7 +856,8 @@ export function renderInferenceCurveChart(
     options.xMetric,
     options.enforceEndToEndPareto,
     userOptions.xGoal,
-    userOptions.yGoal
+    userOptions.yGoal,
+    options.latencyPercentile
   );
   const visibleSeries = sortPreparedSeriesForRender(
     prepared.map((series) => ({
@@ -2103,6 +2193,7 @@ function formatTooltip(
   }
   const metric = options.xMetric;
   const overrides = options.metricDisplayOverrides;
+  const percentile = options.latencyPercentile;
   const metricConfig = getXAxisMetricConfig(metric, overrides);
   const fields = [
     `<strong>${escapeHtml(point.seriesName)}</strong>`,
@@ -2112,7 +2203,7 @@ function formatTooltip(
   ];
   X_AXIS_METRIC_ORDER.forEach((candidate) => {
     if (candidate === metric) return;
-    const value = readPointMetricValue(point, candidate);
+    const value = readPointMetricValue(point, candidate, percentile);
     if (value === undefined) return;
     const config = getXAxisMetricConfig(candidate, overrides);
     fields.push(formatTooltipMetricField(config.tooltipLabel, value, config.unit));

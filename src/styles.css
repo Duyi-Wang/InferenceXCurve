@@ -513,6 +513,14 @@ p {
   padding: 16px 20px;
 }
 
+.filter-card.has-latency-percentile {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.filter-card [hidden] {
+  display: none;
+}
+
 .filter-card label {
   display: flex;
   min-width: 0;
@@ -2859,7 +2867,8 @@ p {
     padding: 16px;
   }
 
-  .filter-card {
+  .filter-card,
+  .filter-card.has-latency-percentile {
     grid-template-columns: 1fr;
   }
 

@@ -17,7 +17,7 @@ round-trips through the app, and is more deterministic than raw benchmark CSV.
 Use this header order for generated CSV:
 
 ```csv
-Line ID,Line Name,Title,Model,Scenario,Precision,MTP,HW Key,Color Mode,Resolved Color,Line Type,Line Marker,Layer,Included in Chart,Active Line,Point Index,Roofline Point,Point Marker,Interactivity (tok/s/user),Throughput/GPU (tok/s/gpu),TTFT (s),End-to-end (s),P90 Normalized E2E @ 400 output tokens (s),Session Time (min),P90 Prefill TPS/user,Prefill GPUs,Decode GPUs,Total GPUs,Prefill TP,Prefill EP,Prefill DPA,Prefill Workers,Decode TP,Decode EP,Decode DPA,Decode Workers,DPA,Disagg,Multi-node,KV Offload,Concurrency,Strategy,Note
+Line ID,Line Name,Title,Model,Scenario,Precision,MTP,HW Key,Color Mode,Resolved Color,Line Type,Line Marker,Layer,Included in Chart,Active Line,Point Index,Roofline Point,Point Marker,Interactivity (tok/s/user),Throughput/GPU (tok/s/gpu),TTFT (s),End-to-end (s),P50 Interactivity (tok/s/user),P75 Interactivity (tok/s/user),P90 Interactivity (tok/s/user),P95 Interactivity (tok/s/user),P50 TTFT (s),P75 TTFT (s),P90 TTFT (s),P95 TTFT (s),P50 End-to-end (s),P75 End-to-end (s),P90 End-to-end (s),P95 End-to-end (s),P90 Normalized E2E @ 400 output tokens (s),Session Time (min),P90 Prefill TPS/user,Prefill GPUs,Decode GPUs,Total GPUs,Prefill TP,Prefill EP,Prefill DPA,Prefill Workers,Decode TP,Decode EP,Decode DPA,Decode Workers,DPA,Disagg,Multi-node,KV Offload,Concurrency,Strategy,Note
 ```
 
 The importer uses the editor parser when at least one row has a non-empty
@@ -43,6 +43,20 @@ Each point row with data must also include at least one numeric X-axis metric:
 - `P90 Normalized E2E @ 400 output tokens (s)`
 - `Session Time (min)`
 - `P90 Prefill TPS/user`
+
+For `Agentic Traces`, use the twelve canonical latency-percentile columns:
+
+- `P50/P75/P90/P95 Interactivity (tok/s/user)`
+- `P50/P75/P90/P95 TTFT (s)`
+- `P50/P75/P90/P95 End-to-end (s)`
+
+These four percentiles are stored independently. The app's `Latency
+Percentile` selector applies the selected percentile to all three metrics.
+`P99`, `mean`, and `std` are not percentile columns. The unprefixed
+`Interactivity (tok/s/user)`, `TTFT (s)`, and `End-to-end (s)` columns remain
+the P90 compatibility baseline for older agentic files; they do not make P50,
+P75, or P95 available when the corresponding columns are absent. Fixed-length
+rows keep their existing unprefixed metric semantics.
 
 Avoid relying on the app's internal fallbacks for empty `Line ID`, `Line Name`,
 `Model`, `Scenario`, or `Precision`; those defaults depend on current app state
@@ -70,6 +84,7 @@ These fields are optional in editor CSV:
 - `Point Marker`: same marker values as `Line Marker`; empty inherits the line
   marker.
 - `Interactivity (tok/s/user)`, `TTFT (s)`, `End-to-end (s)`,
+  all twelve Agentic `P50/P75/P90/P95` latency columns,
   `P90 Normalized E2E @ 400 output tokens (s)`, `Session Time (min)`, and
   `P90 Prefill TPS/user`: optional numeric X-axis metrics, as long as at least
   one is present for the row. `Session Time (min)` stores the official
@@ -129,6 +144,12 @@ Accepted editor CSV aliases include:
   `End-to-end Latency (s)`, `endToEnd`, `end_to_end`, `E2E`, `E2E Latency`,
   `e2el`, `median_e2el`, `p90_e2el`, `p90_end_to_end`,
   `P90 End-to-end Latency`, `metrics.median_e2el`, `metrics.p90_e2el`
+- Agentic percentile columns also accept lowercase metric aliases such as
+  `p75_intvty`, `p75_ttft`, and `p75_e2el`, their `metrics.*` forms, and the
+  nested JSON/flattened-header aliases
+  `request_metrics.latency.intvty.p50|p75|p90|p95`,
+  `request_metrics.latency.ttft.p50|p75|p90|p95`, and
+  `request_metrics.latency.e2el.p50|p75|p90|p95`.
 - Normalized E2E: `Normalized E2E`, `Normalized E2E (s)`,
   `Normalized E2E @ 400 output tokens`,
   `Normalized E2E @ 400 output tokens (s)`, `P90 Normalized E2E`,
@@ -171,9 +192,9 @@ Accepted editor CSV aliases include:
 ## Example
 
 ```csv
-Line ID,Line Name,Title,Model,Scenario,Precision,MTP,HW Key,Color Mode,Resolved Color,Line Type,Line Marker,Layer,Included in Chart,Active Line,Point Index,Roofline Point,Point Marker,Interactivity (tok/s/user),Throughput/GPU (tok/s/gpu),TTFT (s),End-to-end (s),P90 Normalized E2E @ 400 output tokens (s),Session Time (min),P90 Prefill TPS/user,Prefill GPUs,Decode GPUs,Total GPUs,Prefill TP,Prefill EP,Prefill DPA,Prefill Workers,Decode TP,Decode EP,Decode DPA,Decode Workers,DPA,Disagg,Multi-node,KV Offload,Concurrency,Strategy,Note
-dsr1-8192-fp8-b200-trt,B200 TRT,DeepSeek R1 B200 TRT,DeepSeek-R1-0528,ISL 8192 / OSL 1024,fp8,Non-MTP,,Auto,,solid,precision,1,,,,,,8.42,5220.5,0.12,9.04,,,,4,8,,4,4,true,,8,8,true,,true,true,false,,1024,,run 123
-dsr1-agentic-fp8-b200-trt,B200 TRT Agentic,DeepSeek R1 B200 TRT agentic traces,DeepSeek-R1-0528,Agentic Traces,fp8,Non-MTP,,Auto,,solid,precision,2,,,,,,,4830.2,0.18,37.4,31.073,74.2,168.5,4,8,,4,4,true,,8,8,true,,true,true,false,KV offload off,64,,agentic preview
+Line ID,Line Name,Title,Model,Scenario,Precision,MTP,HW Key,Color Mode,Resolved Color,Line Type,Line Marker,Layer,Included in Chart,Active Line,Point Index,Roofline Point,Point Marker,Interactivity (tok/s/user),Throughput/GPU (tok/s/gpu),TTFT (s),End-to-end (s),P50 Interactivity (tok/s/user),P75 Interactivity (tok/s/user),P90 Interactivity (tok/s/user),P95 Interactivity (tok/s/user),P50 TTFT (s),P75 TTFT (s),P90 TTFT (s),P95 TTFT (s),P50 End-to-end (s),P75 End-to-end (s),P90 End-to-end (s),P95 End-to-end (s),P90 Normalized E2E @ 400 output tokens (s),Session Time (min),P90 Prefill TPS/user,Prefill GPUs,Decode GPUs,Total GPUs,Prefill TP,Prefill EP,Prefill DPA,Prefill Workers,Decode TP,Decode EP,Decode DPA,Decode Workers,DPA,Disagg,Multi-node,KV Offload,Concurrency,Strategy,Note
+dsr1-8192-fp8-b200-trt,B200 TRT,DeepSeek R1 B200 TRT,DeepSeek-R1-0528,ISL 8192 / OSL 1024,fp8,Non-MTP,,Auto,,solid,precision,1,,,,,,8.42,5220.5,0.12,9.04,,,,,,,,,,,,,,,,4,8,,4,4,true,,8,8,true,,true,true,false,,1024,,run 123
+dsr1-agentic-fp8-b200-trt,B200 TRT Agentic,DeepSeek R1 B200 TRT agentic traces,DeepSeek-R1-0528,Agentic Traces,fp8,Non-MTP,,Auto,,solid,precision,2,,,,,,8.5,4830.2,0.18,37.4,12,10,8.5,7.8,0.10,0.14,0.18,0.22,25,31,37.4,42,31.073,74.2,168.5,4,8,,4,4,true,,8,8,true,,true,true,false,KV offload off,64,,agentic preview
 ```
 
 ## Raw Benchmark CSV Fallback
@@ -190,9 +211,8 @@ numeric X-axis metric column. Accepted aliases include:
   `metrics.p90_intvty`, `metrics.p90_interactivity`, `median_intvty`,
   `median_interactivity`, `p90_intvty`, `p90_interactivity`,
   `interactivity`, `P90 Interactivity`, `tok/s/user`, `x`
-- Nested agentic interactivity: `request_metrics.latency.intvty.p90` for
-  agentic rows, with `request_metrics.latency.intvty.p50` as the median
-  fallback when the row is not identified as agentic
+- Nested agentic interactivity:
+  `request_metrics.latency.intvty.p50|p75|p90|p95`
 - Throughput: `metrics.tput_per_gpu`, `tput_per_gpu`, `throughput_per_gpu`,
   `token throughput per gpu`, `token throughput per gpu (tok/s/gpu)`,
   `throughput`, `Throughput/GPU`, `Throughput/GPU (tok/s/gpu)`, `tok/s/gpu`,
@@ -200,13 +220,13 @@ numeric X-axis metric column. Accepted aliases include:
 - TTFT: `metrics.median_ttft`, `metrics.p90_ttft`, `median_ttft`,
   `p90_ttft`, `ttft`, `TTFT`, `TTFT (s)`, `Time To First Token`,
   `Time To First Token (s)`, `P90 TTFT`, `P90 Time To First Token`,
-  `request_metrics.latency.ttft.p50`, `request_metrics.latency.ttft.p90`
+  `request_metrics.latency.ttft.p50|p75|p90|p95`
 - End-to-end: `metrics.median_e2el`, `metrics.p90_e2el`,
   `metrics.p90_end_to_end`, `median_e2el`, `p90_e2el`, `p90_end_to_end`,
   `endToEnd`, `end_to_end`, `end-to-end`, `End-to-end (s)`,
   `End-to-end Latency`, `E2E`, `E2E Latency`, `e2el`,
-  `P90 End-to-end Latency`, `request_metrics.latency.e2el.p50`,
-  `request_metrics.latency.e2el.p90`
+  `P90 End-to-end Latency`,
+  `request_metrics.latency.e2el.p50|p75|p90|p95`
 - Normalized E2E: `metrics.normalized_e2e`, `metrics.normalized_e2el`,
   `metrics.p90_normalized_e2e`, `metrics.p90_normalized_e2el`,
   `normalizedEndToEnd`, `normalized_end_to_end`, `normalized_e2e`,
