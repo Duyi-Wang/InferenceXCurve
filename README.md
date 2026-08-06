@@ -85,6 +85,8 @@ The legend panel includes:
 - `Parallelism Labels`
 - `Gradient Labels`
 - `Line Labels`
+- `Better Direction`, which follows the active X-axis metric and points toward
+  the preferred throughput/metric corner
 
 By default, `Optimal Only` is enabled and `Gradient Labels` / `Line Labels` are
 disabled.

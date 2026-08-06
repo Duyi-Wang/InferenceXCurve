@@ -889,7 +889,10 @@ export function renderInferenceCurveChart(
     .text(options.yLabel);
 
   if (options.showGoalIndicators) {
-    drawGoalIndicator(plot, innerWidth, innerHeight, options.xGoal, options.yGoal);
+    const xGoal = userOptions.xGoal
+      ?? (X_AXIS_METRICS[options.xMetric].higherIsBetter ? 'maximize' : 'minimize');
+    const yGoal = userOptions.yGoal ?? 'maximize';
+    drawGoalIndicator(plot, innerWidth, innerHeight, xGoal, yGoal);
   }
 
   const strategyColor = buildStrategyColorMap(visibleSeries);

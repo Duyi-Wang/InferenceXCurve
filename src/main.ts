@@ -71,6 +71,7 @@ interface AppState {
   useAdvancedLabels: boolean;
   showGradientLabels: boolean;
   showLineLabels: boolean;
+  showGoalDirection: boolean;
   showOffloadRings: boolean;
   highContrast: boolean;
   logY: boolean;
@@ -147,6 +148,7 @@ interface PersistedAppState {
   useAdvancedLabels?: boolean;
   showGradientLabels?: boolean;
   showLineLabels?: boolean;
+  showGoalDirection?: boolean;
   showOffloadRings?: boolean;
   highContrast?: boolean;
   logY?: boolean;
@@ -742,6 +744,7 @@ function restorePersistedState(value: unknown): PersistedAppState {
     useAdvancedLabels: readPersistedBoolean(value.useAdvancedLabels),
     showGradientLabels: readPersistedBoolean(value.showGradientLabels),
     showLineLabels: readPersistedBoolean(value.showLineLabels),
+    showGoalDirection: readPersistedBoolean(value.showGoalDirection),
     showOffloadRings: readPersistedBoolean(value.showOffloadRings),
     highContrast: readPersistedBoolean(value.highContrast),
     logY: readPersistedBoolean(value.logY),
@@ -791,6 +794,7 @@ function restoreAppState(defaults: AppState, saved: PersistedAppState, series: I
     useAdvancedLabels: saved.useAdvancedLabels ?? defaults.useAdvancedLabels,
     showGradientLabels: saved.showGradientLabels ?? defaults.showGradientLabels,
     showLineLabels: saved.showLineLabels ?? defaults.showLineLabels,
+    showGoalDirection: saved.showGoalDirection ?? defaults.showGoalDirection,
     showOffloadRings: saved.showOffloadRings ?? defaults.showOffloadRings,
     highContrast: saved.highContrast ?? defaults.highContrast,
     logY: saved.logY ?? defaults.logY,
@@ -817,6 +821,7 @@ function serializeAppState(): PersistedAppState {
     useAdvancedLabels: state.useAdvancedLabels,
     showGradientLabels: state.showGradientLabels,
     showLineLabels: state.showLineLabels,
+    showGoalDirection: state.showGoalDirection,
     showOffloadRings: state.showOffloadRings,
     highContrast: state.highContrast,
     logY: state.logY,
@@ -1567,6 +1572,7 @@ function getChartOptions(): InferenceCurveChartOptions {
     useAdvancedLabels: state.useAdvancedLabels,
     showGradientLabels: state.showGradientLabels,
     showLineLabels: state.showLineLabels,
+    showGoalIndicators: state.showGoalDirection,
     showOffloadRings: state.showOffloadRings,
     highContrast: state.highContrast,
     logY: state.logY,
@@ -3610,6 +3616,7 @@ function renderLegend(): void {
         }
         ${renderSwitch('logY', 'Log Scale', state.logY)}
         ${renderSwitch('showNonOptimalPoints', 'Optimal Only', !state.showNonOptimalPoints)}
+        ${renderSwitch('showGoalDirection', 'Better Direction', state.showGoalDirection)}
         ${
           state.scenarioFilter === AGENTIC_SCENARIO
             ? renderSwitch(
@@ -4748,6 +4755,7 @@ function createInitialState(series: InferenceCurveSeries[]): AppState {
     useAdvancedLabels: false,
     showGradientLabels: false,
     showLineLabels: false,
+    showGoalDirection: true,
     showOffloadRings: true,
     highContrast: false,
     logY: false,
@@ -7550,6 +7558,10 @@ function buildExportStyle(palette: ExportPalette): string {
       .chart-root .grid .plot-border { stroke: ${palette.border}; }
       .chart-watermark { fill: ${palette.foreground}; font-weight: 800; opacity: 0.055; user-select: none; }
       .y-axis-label, .x-axis-label { fill: ${palette.foreground}; font-size: 12px; }
+      .goal-direction-glow { fill: #fff; stroke: #fff; stroke-width: 8px; stroke-linejoin: round; opacity: 0.14; }
+      .goal-direction-arrow, .goal-direction-label { fill: #fff; }
+      .goal-direction-arrow { stroke: none; }
+      .goal-direction-label { font-size: 14px; font-weight: 900; letter-spacing: 0.08em; paint-order: stroke; stroke: ${palette.background}; stroke-width: 4px; stroke-linejoin: round; }
       .point-label { paint-order: stroke; stroke: ${palette.background}; stroke-width: 3px; fill: ${palette.foreground}; font-size: 10px; font-weight: 700; }
       .parallelism-label text, .line-label text, .pill-text { fill: #fff; font-size: 9px; font-weight: 700; }
       .line-label text { font-size: 11px; }
