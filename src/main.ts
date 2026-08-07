@@ -31,6 +31,8 @@ import {
   resetInferenceCurveZoom,
   resolveInferenceCurveColors,
   type InferenceCurveChartOptions,
+  type InferenceCurveE2ENormalizedInteractivityPercentile,
+  type InferenceCurveE2ENormalizedInteractivityPercentiles,
   type InferenceCurveLatencyPercentile,
   type InferenceCurveLatencyPercentiles,
   type InferenceCurveSeries,
@@ -370,12 +372,14 @@ const MODEL_KEY_PRECISION_SUFFIX = /-(?:fp4|fp8|mxfp4|nvfp4)(?:-.*)?$/iu;
 const pointColumns: TableColumn[] = [
   { key: 'shape', label: 'Marker' },
   { key: 'interactivity', label: 'Interactivity', numeric: true },
+  {
+    key: 'e2eNormalizedInteractivity',
+    label: 'E2E Normalized Interactivity',
+    numeric: true
+  },
   { key: 'throughput', label: 'Throughput/GPU', required: true, numeric: true },
   { key: 'ttft', label: 'TTFT (s)', numeric: true },
   { key: 'endToEnd', label: 'End-to-end (s)', numeric: true },
-  { key: 'normalizedEndToEnd', label: 'P90 Normalized E2E (s)', numeric: true },
-  { key: 'sessionTime', label: 'Session Time (min)', numeric: true },
-  { key: 'prefillTpsPerUser', label: 'P90 Prefill TPS/user', numeric: true },
   { key: 'num_prefill_gpu', label: 'Prefill GPUs', numeric: true },
   { key: 'num_decode_gpu', label: 'Decode GPUs', numeric: true },
   { key: 'prefill_tp', label: 'Prefill TP', numeric: true },
@@ -422,6 +426,21 @@ const latencyPercentilePointKeys = Object.values(latencyMetricColumns).flatMap((
   Object.values(metric.rowKeys)
 );
 
+const E2E_NORMALIZED_INTERACTIVITY_PERCENTILES: InferenceCurveE2ENormalizedInteractivityPercentile[] = [
+  'p75',
+  'p90'
+];
+const e2eNormalizedInteractivityRowKeys: Record<
+  InferenceCurveE2ENormalizedInteractivityPercentile,
+  string
+> = {
+  p75: 'e2eNormalizedInteractivityP75',
+  p90: 'e2eNormalizedInteractivityP90'
+};
+const e2eNormalizedInteractivityPointKeys = Object.values(
+  e2eNormalizedInteractivityRowKeys
+);
+
 const hiddenPointKeys = [
   'strategy',
   'tp',
@@ -435,15 +454,14 @@ const hiddenPointKeys = [
 const knownPointKeys = new Set([
   ...pointColumns.map((column) => column.key),
   ...latencyPercentilePointKeys,
+  ...e2eNormalizedInteractivityPointKeys,
   ...hiddenPointKeys
 ]);
 const xMetricPointKeys: InferenceCurveXAxisMetric[] = [
   'interactivity',
+  'e2eNormalizedInteractivity',
   'endToEnd',
-  'ttft',
-  'normalizedEndToEnd',
-  'sessionTime',
-  'prefillTpsPerUser'
+  'ttft'
 ];
 const pointConfigSplitKeys = [
   'num_prefill_gpu',
@@ -462,65 +480,10 @@ const DECIMAL_DISPLAY_KEYS = new Set([
   'throughput',
   'ttft',
   'endToEnd',
-  'normalizedEndToEnd',
-  'sessionTime',
-  'prefillTpsPerUser',
-  ...latencyPercentilePointKeys
+  'e2eNormalizedInteractivity',
+  ...latencyPercentilePointKeys,
+  ...e2eNormalizedInteractivityPointKeys
 ]);
-
-const SESSION_TIME_MINUTE_IMPORT_ALIASES = [
-  'sessionTime',
-  'session_time',
-  'session_time_min',
-  'session_time_minutes',
-  'Session Time',
-  'Session Time (min)',
-  'Session Time (minutes)',
-  'normalized_session_time',
-  'normalized_session_time_min',
-  'normalized_session_time_minutes',
-  'Normalized Session Time',
-  'Normalized Session Time (min)',
-  'Normalized Session Time (minutes)',
-  'mean_normalized_session_time',
-  'mean_normalized_session_time_min',
-  'mean_normalized_session_time_minutes',
-  'Mean Normalized Session Time',
-  'Mean Normalized Session Time (min)',
-  'Mean Normalized Session Time (minutes)',
-  'stime',
-  'metrics.session_time',
-  'metrics.session_time_min',
-  'metrics.session_time_minutes',
-  'metrics.normalized_session_time',
-  'metrics.normalized_session_time_min',
-  'metrics.normalized_session_time_minutes',
-  'metrics.mean_normalized_session_time',
-  'metrics.mean_normalized_session_time_min',
-  'metrics.mean_normalized_session_time_minutes'
-];
-
-const SESSION_TIME_SECOND_IMPORT_ALIASES = [
-  'session_time_s',
-  'session_time_seconds',
-  'Session Time (s)',
-  'Session Time (seconds)',
-  'normalized_session_time_s',
-  'normalized_session_time_seconds',
-  'Normalized Session Time (s)',
-  'Normalized Session Time (seconds)',
-  'mean_normalized_session_time_s',
-  'mean_normalized_session_time_seconds',
-  'Mean Normalized Session Time (s)',
-  'Mean Normalized Session Time (seconds)',
-  'stime_s',
-  'metrics.session_time_s',
-  'metrics.session_time_seconds',
-  'metrics.normalized_session_time_s',
-  'metrics.normalized_session_time_seconds',
-  'metrics.mean_normalized_session_time_s',
-  'metrics.mean_normalized_session_time_seconds'
-];
 
 const pointShapeOptions = [
   { value: '', label: 'Default', symbol: '●' },
@@ -573,12 +536,10 @@ const lineStyleOptions: LineStyleOption[] = [
 ];
 
 const chartMetricOptions: { value: InferenceCurveXAxisMetric; label: string }[] = [
+  { value: 'e2eNormalizedInteractivity', label: 'E2E Normalized Interactivity' },
   { value: 'interactivity', label: 'Interactivity' },
   { value: 'endToEnd', label: 'End-to-end' },
-  { value: 'ttft', label: 'TTFT' },
-  { value: 'normalizedEndToEnd', label: 'Normalized E2E' },
-  { value: 'sessionTime', label: 'Session Time' },
-  { value: 'prefillTpsPerUser', label: 'Prefill TPS / user' }
+  { value: 'ttft', label: 'TTFT' }
 ];
 const fixedLengthChartMetrics = new Set<InferenceCurveXAxisMetric>([
   'interactivity',
@@ -753,7 +714,12 @@ function restorePersistedPointRows(value: unknown): PointRow[] {
   if (!Array.isArray(value)) return [makeEmptyPointRow()];
   const rows = value.filter(isRecord).map((point) => {
     const row = makeEmptyPointRow();
-    [...pointColumns.map((column) => column.key), ...latencyPercentilePointKeys, ...hiddenPointKeys].forEach((key) => {
+    [
+      ...pointColumns.map((column) => column.key),
+      ...latencyPercentilePointKeys,
+      ...e2eNormalizedInteractivityPointKeys,
+      ...hiddenPointKeys
+    ].forEach((key) => {
       row[key] = formatPointFieldValue(point[key]);
     });
     row.shape = normalizePointShapeValue(row.shape);
@@ -1598,8 +1564,11 @@ function handleMetricSwitchClick(event: MouseEvent): void {
   if (!button || !metricSwitchEl.contains(button)) return;
   const metric = normalizeChartMetric(button.dataset.chartMetric);
   if (!metric || metric === state.chartMetric || !isChartMetricAvailable(metric)) return;
+  commitSeriesDom();
   state.chartMetric = metric;
+  reconcileLatencyPercentile();
   renderFilterControls();
+  renderSeriesEditor();
   renderAll();
   scheduleLocalSave();
 }
@@ -2726,7 +2695,10 @@ function renderMtpFilterOptions(values: string[]): string {
 }
 
 function renderLatencyPercentileOptions(): string {
-  const available = getAvailableLatencyPercentiles(getFilteredSeriesForChart());
+  const available = getAvailableLatencyPercentiles(
+    getFilteredSeriesForChart(),
+    state.chartMetric
+  );
   return LATENCY_PERCENTILES.map((percentile) => {
     const enabled = available.has(percentile);
     return `<option value="${percentile}" ${state.latencyPercentile === percentile ? 'selected' : ''} ${enabled ? '' : 'disabled'}>${percentile.toUpperCase()}</option>`;
@@ -3054,9 +3026,19 @@ function renderCollapsedPointSummary(seriesIndex: number, pointCount: number): s
 }
 
 function getEditorPointColumns(): TableColumn[] {
-  if (!isAgenticTraceView(currentSeries)) return pointColumns;
+  if (!isAgenticTraceView(currentSeries)) {
+    return pointColumns.filter((column) => column.key !== 'e2eNormalizedInteractivity');
+  }
   const percentileLabel = state.latencyPercentile.toUpperCase();
-  return pointColumns.map((column) => {
+  return pointColumns.flatMap((column) => {
+    if (column.key === 'e2eNormalizedInteractivity') {
+      if (!isE2ENormalizedInteractivityPercentile(state.latencyPercentile)) return [];
+      return [{
+        ...column,
+        key: e2eNormalizedInteractivityRowKeys[state.latencyPercentile],
+        label: `${percentileLabel} ${column.label}`
+      }];
+    }
     if (!isLatencyMetricKey(column.key)) return column;
     const metric = latencyMetricColumns[column.key];
     return {
@@ -3072,6 +3054,9 @@ function isLatencyMetricKey(key: string): key is LatencyMetricKey {
 }
 
 function getPointColumnCssKey(key: string): string {
+  if (e2eNormalizedInteractivityPointKeys.includes(key)) {
+    return 'e2eNormalizedInteractivity';
+  }
   for (const [metricKey, metric] of Object.entries(latencyMetricColumns)) {
     if (Object.values(metric.rowKeys).includes(key)) return metricKey;
   }
@@ -4057,9 +4042,6 @@ function seriesToDrafts(series: InferenceCurveSeries[]): SeriesDraft[] {
         throughput: String(point.throughput),
         ttft: formatPointFieldValue(point.ttft),
         endToEnd: formatPointFieldValue(point.endToEnd),
-        normalizedEndToEnd: formatPointFieldValue(point.normalizedEndToEnd),
-        sessionTime: formatPointFieldValue(point.sessionTime),
-        prefillTpsPerUser: formatPointFieldValue(point.prefillTpsPerUser),
         shape: normalizePointShapeValue(formatPointFieldValue(point.shape)),
         strategy: point.strategy ?? '',
         tp: formatPointFieldValue(point.tp),
@@ -4102,6 +4084,10 @@ function seriesToDrafts(series: InferenceCurveSeries[]): SeriesDraft[] {
         point.endToEndPercentiles,
         isAgenticTraceSequence(getSeriesIslOsl(line)) ? point.endToEnd : undefined
       );
+      writeE2ENormalizedInteractivityToDraftRow(
+        row,
+        point.e2eNormalizedInteractivityPercentiles
+      );
       return row;
     })
   }));
@@ -4133,6 +4119,28 @@ function readPercentilesFromDraftRow(
   return Object.keys(percentiles).length > 0 ? percentiles : undefined;
 }
 
+function writeE2ENormalizedInteractivityToDraftRow(
+  row: PointRow,
+  percentiles: InferenceCurveE2ENormalizedInteractivityPercentiles | undefined
+): void {
+  E2E_NORMALIZED_INTERACTIVITY_PERCENTILES.forEach((percentile) => {
+    row[e2eNormalizedInteractivityRowKeys[percentile]] = formatPointFieldValue(
+      percentiles?.[percentile]
+    );
+  });
+}
+
+function readE2ENormalizedInteractivityFromDraftRow(
+  row: PointRow
+): InferenceCurveE2ENormalizedInteractivityPercentiles | undefined {
+  const percentiles: InferenceCurveE2ENormalizedInteractivityPercentiles = {};
+  E2E_NORMALIZED_INTERACTIVITY_PERCENTILES.forEach((percentile) => {
+    const value = parseNumber(row[e2eNormalizedInteractivityRowKeys[percentile]]);
+    if (value !== null) percentiles[percentile] = value;
+  });
+  return Object.keys(percentiles).length > 0 ? percentiles : undefined;
+}
+
 function draftsToSeries(drafts: SeriesDraft[]): InferenceCurveSeries[] {
   const result = draftsToSeriesInternal(drafts);
   if (result.length === 0) throw new Error('No valid line data.');
@@ -4157,23 +4165,21 @@ function draftsToSeriesInternal(drafts: SeriesDraft[]): InferenceCurveSeries[] {
         const endToEndPercentiles = isAgentic
           ? readPercentilesFromDraftRow(row, 'endToEnd')
           : undefined;
+        const e2eNormalizedInteractivityPercentiles = isAgentic
+          ? readE2ENormalizedInteractivityFromDraftRow(row)
+          : undefined;
         const interactivity = interactivityPercentiles?.p90 ?? parseNumber(row.interactivity);
         const throughput = parseNumber(row.throughput);
         const ttft = ttftPercentiles?.p90 ?? parseNumber(row.ttft);
         const endToEnd = endToEndPercentiles?.p90 ?? parseNumber(row.endToEnd);
-        const normalizedEndToEnd = parseNumber(row.normalizedEndToEnd);
-        const sessionTime = parseNumber(row.sessionTime);
-        const prefillTpsPerUser = parseNumber(row.prefillTpsPerUser);
         const hasXMetric =
           interactivity !== null ||
           ttft !== null ||
           endToEnd !== null ||
-          normalizedEndToEnd !== null ||
-          sessionTime !== null ||
-          prefillTpsPerUser !== null ||
           interactivityPercentiles !== undefined ||
           ttftPercentiles !== undefined ||
-          endToEndPercentiles !== undefined;
+          endToEndPercentiles !== undefined ||
+          e2eNormalizedInteractivityPercentiles !== undefined;
         if (throughput === null || !hasXMetric) {
           throw new Error(
             `Line ${seriesIndex + 1}, row ${pointIndex + 1}: Throughput/GPU and at least one X-axis metric must be numbers.`
@@ -4210,9 +4216,10 @@ function draftsToSeriesInternal(drafts: SeriesDraft[]): InferenceCurveSeries[] {
         if (ttftPercentiles) point.ttftPercentiles = ttftPercentiles;
         if (endToEnd !== null) point.endToEnd = endToEnd;
         if (endToEndPercentiles) point.endToEndPercentiles = endToEndPercentiles;
-        if (normalizedEndToEnd !== null) point.normalizedEndToEnd = normalizedEndToEnd;
-        if (sessionTime !== null) point.sessionTime = sessionTime;
-        if (prefillTpsPerUser !== null) point.prefillTpsPerUser = prefillTpsPerUser;
+        if (e2eNormalizedInteractivityPercentiles) {
+          point.e2eNormalizedInteractivityPercentiles =
+            e2eNormalizedInteractivityPercentiles;
+        }
         if (numPrefillGpu !== null) point.num_prefill_gpu = numPrefillGpu;
         if (numDecodeGpu !== null) point.num_decode_gpu = numDecodeGpu;
         if (prefillTp !== null) point.prefill_tp = prefillTp;
@@ -4338,75 +4345,6 @@ function detectPointHeaderMap(headerRow: string[]): Map<number, string> | null {
     ['e2el', 'endToEnd'],
     ['p90 end-to-end latency', 'endToEnd'],
     ['p90 end-to-end latency (s)', 'endToEnd'],
-    ['normalized e2e', 'normalizedEndToEnd'],
-    ['normalized e2e (s)', 'normalizedEndToEnd'],
-    ['normalized e2e @ 400 output tokens', 'normalizedEndToEnd'],
-    ['normalized e2e @ 400 output tokens (s)', 'normalizedEndToEnd'],
-    ['p90 normalized e2e', 'normalizedEndToEnd'],
-    ['p90 normalized e2e (s)', 'normalizedEndToEnd'],
-    ['p90 normalized e2e @ 400 output tokens', 'normalizedEndToEnd'],
-    ['p90 normalized e2e @ 400 output tokens (s)', 'normalizedEndToEnd'],
-    ['p75 normalized e2e @ 400 output tokens', 'normalizedEndToEnd'],
-    ['p75 normalized e2e @ 400 output tokens (s)', 'normalizedEndToEnd'],
-    ['normalized_e2e', 'normalizedEndToEnd'],
-    ['normalized_e2e_400_s', 'normalizedEndToEnd'],
-    ['normalized_end_to_end', 'normalizedEndToEnd'],
-    ['normalized_e2el', 'normalizedEndToEnd'],
-    ['p90_normalized_e2e_400_s', 'normalizedEndToEnd'],
-    ['p75_normalized_e2e_400_s', 'normalizedEndToEnd'],
-    ['p90_normalized_e2e', 'normalizedEndToEnd'],
-    ['p90_normalized_e2el', 'normalizedEndToEnd'],
-    ['metrics.normalized_e2e_400_s', 'normalizedEndToEnd'],
-    ['metrics.normalized_e2e', 'normalizedEndToEnd'],
-    ['metrics.normalized_e2el', 'normalizedEndToEnd'],
-    ['metrics.p90_normalized_e2e_400_s', 'normalizedEndToEnd'],
-    ['metrics.p75_normalized_e2e_400_s', 'normalizedEndToEnd'],
-    ['metrics.p90_normalized_e2e', 'normalizedEndToEnd'],
-    ['metrics.p90_normalized_e2el', 'normalizedEndToEnd'],
-    ['session time', 'sessionTime'],
-    ['session time (min)', 'sessionTime'],
-    ['session time (minutes)', 'sessionTime'],
-    ['session time (s)', 'sessionTime'],
-    ['normalized session time', 'sessionTime'],
-    ['normalized session time (min)', 'sessionTime'],
-    ['normalized session time (minutes)', 'sessionTime'],
-    ['normalized session time (s)', 'sessionTime'],
-    ['mean normalized session time', 'sessionTime'],
-    ['mean normalized session time (min)', 'sessionTime'],
-    ['mean normalized session time (minutes)', 'sessionTime'],
-    ['mean normalized session time (s)', 'sessionTime'],
-    ['session_time', 'sessionTime'],
-    ['session_time_min', 'sessionTime'],
-    ['session_time_minutes', 'sessionTime'],
-    ['normalized_session_time', 'sessionTime'],
-    ['normalized_session_time_min', 'sessionTime'],
-    ['normalized_session_time_minutes', 'sessionTime'],
-    ['mean_normalized_session_time', 'sessionTime'],
-    ['mean_normalized_session_time_min', 'sessionTime'],
-    ['mean_normalized_session_time_minutes', 'sessionTime'],
-    ['stime', 'sessionTime'],
-    ['metrics.session_time', 'sessionTime'],
-    ['metrics.session_time_min', 'sessionTime'],
-    ['metrics.session_time_minutes', 'sessionTime'],
-    ['metrics.normalized_session_time', 'sessionTime'],
-    ['metrics.normalized_session_time_min', 'sessionTime'],
-    ['metrics.normalized_session_time_minutes', 'sessionTime'],
-    ['metrics.mean_normalized_session_time', 'sessionTime'],
-    ['metrics.mean_normalized_session_time_min', 'sessionTime'],
-    ['metrics.mean_normalized_session_time_minutes', 'sessionTime'],
-    ['prefill tps/user', 'prefillTpsPerUser'],
-    ['prefill tps / user', 'prefillTpsPerUser'],
-    ['prefill tps per user', 'prefillTpsPerUser'],
-    ['prefill tps per user (tok/s/user)', 'prefillTpsPerUser'],
-    ['prefill tps per user (tok/s)', 'prefillTpsPerUser'],
-    ['p90 prefill tps / user', 'prefillTpsPerUser'],
-    ['p90 prefill tps per user', 'prefillTpsPerUser'],
-    ['p90 prefill tps per user (tok/s)', 'prefillTpsPerUser'],
-    ['prefill_tps_per_user', 'prefillTpsPerUser'],
-    ['prefill_tps_user', 'prefillTpsPerUser'],
-    ['p90_prefill_tps_per_user', 'prefillTpsPerUser'],
-    ['metrics.prefill_tps_per_user', 'prefillTpsPerUser'],
-    ['metrics.p90_prefill_tps_per_user', 'prefillTpsPerUser'],
     ['marker', 'shape'],
     ['point marker', 'shape'],
     ['point shape', 'shape'],
@@ -4490,6 +4428,12 @@ function detectPointHeaderMap(headerRow: string[]): Map<number, string> | null {
       getLatencyPercentileImportAliases(metric, percentile).forEach((alias) => {
         aliases.set(normalizeHeaderName(alias), rowKey);
       });
+    });
+  });
+  E2E_NORMALIZED_INTERACTIVITY_PERCENTILES.forEach((percentile) => {
+    const rowKey = e2eNormalizedInteractivityRowKeys[percentile];
+    getE2ENormalizedInteractivityImportAliases(percentile).forEach((alias) => {
+      aliases.set(normalizeHeaderName(alias), rowKey);
     });
   });
 
@@ -4594,6 +4538,7 @@ function makeEmptyPointRow(): PointRow {
   return Object.fromEntries([
     ...pointColumns.map((column) => [column.key, '']),
     ...latencyPercentilePointKeys.map((key) => [key, '']),
+    ...e2eNormalizedInteractivityPointKeys.map((key) => [key, '']),
     ...hiddenPointKeys.map((key) => [key, ''])
   ]);
 }
@@ -4605,7 +4550,11 @@ function ensurePointRow(seriesIndex: number, rowIndex: number): void {
 }
 
 function isEmptyPointRow(row: PointRow): boolean {
-  return [...pointColumns.map((column) => column.key), ...latencyPercentilePointKeys].every(
+  return [
+    ...pointColumns.map((column) => column.key),
+    ...latencyPercentilePointKeys,
+    ...e2eNormalizedInteractivityPointKeys
+  ].every(
     (key) => !row[key]?.trim()
   );
 }
@@ -4615,7 +4564,12 @@ function pointHasAnyXAxisMetric(point: Record<string, unknown>): boolean {
     const value = point[key];
     return typeof value === 'number' && Number.isFinite(value);
   })) return true;
-  return ['interactivityPercentiles', 'ttftPercentiles', 'endToEndPercentiles'].some(
+  return [
+    'interactivityPercentiles',
+    'ttftPercentiles',
+    'endToEndPercentiles',
+    'e2eNormalizedInteractivityPercentiles'
+  ].some(
     (key) => readNativeLatencyPercentiles(point[key]) !== undefined
   );
 }
@@ -4717,12 +4671,28 @@ function normalizeLatencyPercentile(value: unknown): InferenceCurveLatencyPercen
     : undefined;
 }
 
+function isE2ENormalizedInteractivityPercentile(
+  value: InferenceCurveLatencyPercentile
+): value is InferenceCurveE2ENormalizedInteractivityPercentile {
+  return E2E_NORMALIZED_INTERACTIVITY_PERCENTILES.includes(
+    value as InferenceCurveE2ENormalizedInteractivityPercentile
+  );
+}
+
 function getAvailableLatencyPercentiles(
-  series: InferenceCurveSeries[]
+  series: InferenceCurveSeries[],
+  metric: InferenceCurveXAxisMetric = state.chartMetric
 ): Set<InferenceCurveLatencyPercentile> {
   const available = new Set<InferenceCurveLatencyPercentile>();
   series.forEach((line) => {
     line.points.forEach((point) => {
+      if (metric === 'e2eNormalizedInteractivity') {
+        E2E_NORMALIZED_INTERACTIVITY_PERCENTILES.forEach((percentile) => {
+          const value = point.e2eNormalizedInteractivityPercentiles?.[percentile];
+          if (typeof value === 'number' && Number.isFinite(value)) available.add(percentile);
+        });
+        return;
+      }
       LATENCY_PERCENTILES.forEach((percentile) => {
         if (
           hasPointLatencyPercentile(point.interactivityPercentiles, point.interactivity, percentile) ||
@@ -4750,7 +4720,10 @@ function hasPointLatencyPercentile(
 
 function reconcileLatencyPercentile(): void {
   if (!isAgenticTraceView(currentSeries)) return;
-  const available = getAvailableLatencyPercentiles(getFilteredSeriesForChart());
+  const available = getAvailableLatencyPercentiles(
+    getFilteredSeriesForChart(),
+    state.chartMetric
+  );
   if (available.has(state.latencyPercentile)) return;
   state.latencyPercentile = available.has(DEFAULT_LATENCY_PERCENTILE)
     ? DEFAULT_LATENCY_PERCENTILE
@@ -5539,12 +5512,13 @@ function validateMergeGroup(group: PendingMergeGroup, lines: PendingMergeLine[])
 
 function comparePointRowsForMerge(a: PointRow, b: PointRow): number {
   return compareNullableNumbers(parseNumber(a.interactivity), parseNumber(b.interactivity)) ||
+    compareNullableNumbers(
+      parseNumber(a[e2eNormalizedInteractivityRowKeys.p90] || a[e2eNormalizedInteractivityRowKeys.p75]),
+      parseNumber(b[e2eNormalizedInteractivityRowKeys.p90] || b[e2eNormalizedInteractivityRowKeys.p75])
+    ) ||
     compareNullableNumbers(parseNumber(a.throughput), parseNumber(b.throughput)) ||
     compareNullableNumbers(parseNumber(a.ttft), parseNumber(b.ttft)) ||
-    compareNullableNumbers(parseNumber(a.endToEnd), parseNumber(b.endToEnd)) ||
-    compareNullableNumbers(parseNumber(a.normalizedEndToEnd), parseNumber(b.normalizedEndToEnd)) ||
-    compareNullableNumbers(parseNumber(a.sessionTime), parseNumber(b.sessionTime)) ||
-    compareNullableNumbers(parseNumber(a.prefillTpsPerUser), parseNumber(b.prefillTpsPerUser));
+    compareNullableNumbers(parseNumber(a.endToEnd), parseNumber(b.endToEnd));
 }
 
 function compareNullableNumbers(a: number | null, b: number | null): number {
@@ -6373,11 +6347,16 @@ function readNativeSeries(value: unknown): InferenceCurveSeries[] {
         const interactivityPercentiles = readNativeLatencyPercentiles(point.interactivityPercentiles);
         const ttftPercentiles = readNativeLatencyPercentiles(point.ttftPercentiles);
         const endToEndPercentiles = readNativeLatencyPercentiles(point.endToEndPercentiles);
+        const e2eNormalizedInteractivityPercentiles =
+          readNativeE2ENormalizedInteractivityPercentiles(
+            point.e2eNormalizedInteractivityPercentiles
+          ) ?? readImportedE2ENormalizedInteractivityPercentiles(point);
         return {
           ...point,
           interactivityPercentiles,
           ttftPercentiles,
           endToEndPercentiles,
+          e2eNormalizedInteractivityPercentiles,
           interactivity: asOptionalNumber(
             point.interactivity ?? interactivityPercentiles?.p90 ?? point.median_intvty ??
               point.p90_intvty ?? point.p90_interactivity
@@ -6387,22 +6366,6 @@ function readNativeSeries(value: unknown): InferenceCurveSeries[] {
           endToEnd: asOptionalNumber(
             point.endToEnd ?? endToEndPercentiles?.p90 ?? point.end_to_end ?? point.e2el ??
               point.median_e2el ?? point.p90_e2el
-          ),
-          normalizedEndToEnd: asOptionalNumber(
-            point.normalizedEndToEnd ??
-              point.normalized_end_to_end ??
-              point.normalized_e2e_400_s ??
-              point.normalized_e2e ??
-              point.normalized_e2el ??
-              point.p90_normalized_e2e_400_s ??
-              point.p75_normalized_e2e_400_s ??
-              point.p90_normalized_e2e ??
-              point.p90_normalized_e2el
-          ),
-          sessionTime: asOptionalSessionTime(point),
-          prefillTpsPerUser: asOptionalNumber(
-            point.prefillTpsPerUser ?? point.prefill_tps_per_user ?? point.prefill_tps_user ??
-              point.p90_prefill_tps_per_user
           )
         };
       })
@@ -6437,6 +6400,14 @@ function readAnyImportedXAxisMetric(record: Record<string, unknown>): number | n
   const isAgentic = isAgenticTraceSequence(readImportedScenario(record));
   const metricReadOptions = { preferP90: isAgentic };
   if (isAgentic) {
+    const normalizedInteractivity =
+      readImportedE2ENormalizedInteractivityPercentiles(record);
+    if (normalizedInteractivity?.p75 !== undefined) {
+      return normalizedInteractivity.p75;
+    }
+    if (normalizedInteractivity?.p90 !== undefined) {
+      return normalizedInteractivity.p90;
+    }
     for (const metric of Object.keys(latencyMetricColumns) as LatencyMetricKey[]) {
       const percentiles = readImportedLatencyPercentiles(record, metric);
       const firstValue = LATENCY_PERCENTILES.map((percentile) => percentiles?.[percentile])
@@ -6477,6 +6448,20 @@ function readImportedLatencyPercentiles(
   return Object.keys(result).length > 0 ? result : undefined;
 }
 
+function readImportedE2ENormalizedInteractivityPercentiles(
+  record: Record<string, unknown>
+): InferenceCurveE2ENormalizedInteractivityPercentiles | undefined {
+  const result: InferenceCurveE2ENormalizedInteractivityPercentiles = {};
+  E2E_NORMALIZED_INTERACTIVITY_PERCENTILES.forEach((percentile) => {
+    const value = readMetricNumber(
+      record,
+      getE2ENormalizedInteractivityImportAliases(percentile)
+    );
+    if (value !== null) result[percentile] = value;
+  });
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
 function readImportedXAxisMetric(
   record: Record<string, unknown>,
   key: InferenceCurveXAxisMetric,
@@ -6502,6 +6487,9 @@ function readImportedXAxisMetric(
       'Median Interactivity (tok/s/user)'
     ];
     return readMetricNumber(record, options.preferP90 ? p90Aliases : medianAliases);
+  }
+  if (key === 'e2eNormalizedInteractivity') {
+    return readImportedE2ENormalizedInteractivityPercentiles(record)?.p90 ?? null;
   }
   if (key === 'ttft') {
     const p90Aliases = [
@@ -6547,41 +6535,7 @@ function readImportedXAxisMetric(
     ];
     return readMetricNumber(record, options.preferP90 ? p90Aliases : medianAliases);
   }
-  if (key === 'normalizedEndToEnd') {
-    return readMetricNumber(record, [
-      'metrics.p90_normalized_e2e_400_s',
-      'p90_normalized_e2e_400_s',
-      'P90 Normalized E2E @ 400 output tokens',
-      'P90 Normalized E2E @ 400 output tokens (s)'
-    ]);
-  }
-  if (key === 'sessionTime') {
-    return readImportedBenchmarkSessionTimeMetric(record);
-  }
-  return readMetricNumber(record, [
-    'metrics.p90_prefill_tps_per_user',
-    'p90_prefill_tps_per_user',
-    'P90 Prefill TPS / user',
-    'P90 Prefill TPS per user',
-    'P90 Prefill TPS per user (tok/s)'
-  ]);
-}
-
-function readImportedBenchmarkSessionTimeMetric(record: Record<string, unknown>): number | null {
-  const seconds = readMetricNumber(record, [
-    'metrics.normalized_session_time_s',
-    'normalized_session_time_s',
-    'Mean Normalized Session Time (s)',
-    'Normalized Session Time (s)'
-  ]);
-  return seconds !== null ? seconds / 60 : null;
-}
-
-function readImportedSessionTimeMetric(record: Record<string, unknown>): number | null {
-  const minutes = readMetricNumber(record, SESSION_TIME_MINUTE_IMPORT_ALIASES);
-  if (minutes !== null) return minutes;
-  const seconds = readMetricNumber(record, SESSION_TIME_SECOND_IMPORT_ALIASES);
-  return seconds !== null ? seconds / 60 : null;
+  return null;
 }
 
 function readImportedThroughput(record: Record<string, unknown>): number | null {
@@ -6652,51 +6606,6 @@ const POINT_IMPORT_ALIASES: Record<string, string[]> = {
     'metrics.p90_e2el',
     'metrics.p90_end_to_end'
   ],
-  normalizedEndToEnd: [
-    'normalizedEndToEnd',
-    'normalized_end_to_end',
-    'normalized_e2e_400_s',
-    'normalized_e2e',
-    'normalized_e2el',
-    'Normalized E2E',
-    'Normalized E2E (s)',
-    'Normalized E2E @ 400 output tokens',
-    'Normalized E2E @ 400 output tokens (s)',
-    'P90 Normalized E2E',
-    'P90 Normalized E2E (s)',
-    'P90 Normalized E2E @ 400 output tokens',
-    'P90 Normalized E2E @ 400 output tokens (s)',
-    'P75 Normalized E2E @ 400 output tokens',
-    'P75 Normalized E2E @ 400 output tokens (s)',
-    'p90_normalized_e2e_400_s',
-    'p75_normalized_e2e_400_s',
-    'p90_normalized_e2e',
-    'p90_normalized_e2el',
-    'metrics.normalized_e2e_400_s',
-    'metrics.normalized_e2e',
-    'metrics.normalized_e2el',
-    'metrics.p90_normalized_e2e_400_s',
-    'metrics.p75_normalized_e2e_400_s',
-    'metrics.p90_normalized_e2e',
-    'metrics.p90_normalized_e2el'
-  ],
-  sessionTime: [...SESSION_TIME_MINUTE_IMPORT_ALIASES, ...SESSION_TIME_SECOND_IMPORT_ALIASES],
-  prefillTpsPerUser: [
-    'prefillTpsPerUser',
-    'prefill_tps_per_user',
-    'prefill_tps_user',
-    'Prefill TPS/user',
-    'Prefill TPS / user',
-    'Prefill TPS per user',
-    'Prefill TPS per user (tok/s/user)',
-    'Prefill TPS per user (tok/s)',
-    'P90 Prefill TPS / user',
-    'P90 Prefill TPS per user',
-    'P90 Prefill TPS per user (tok/s)',
-    'p90_prefill_tps_per_user',
-    'metrics.prefill_tps_per_user',
-    'metrics.p90_prefill_tps_per_user'
-  ],
   shape: ['shape', 'Marker', 'Point Marker'],
   dp_attention: ['dp_attention', 'DPA', 'DP Attention'],
   prefill_num_workers: ['prefill_num_workers', 'Prefill Workers', 'Prefill Worker', 'prefill workers'],
@@ -6723,6 +6632,10 @@ const POINT_IMPORT_ALIASES: Record<string, string[]> = {
       getLatencyPercentileImportAliases(metric, percentile);
   });
 });
+E2E_NORMALIZED_INTERACTIVITY_PERCENTILES.forEach((percentile) => {
+  POINT_IMPORT_ALIASES[e2eNormalizedInteractivityRowKeys[percentile]] =
+    getE2ENormalizedInteractivityImportAliases(percentile);
+});
 
 function getLatencyPercentileImportAliases(
   metric: LatencyMetricKey,
@@ -6748,6 +6661,27 @@ function getLatencyPercentileCsvHeader(
   if (metric === 'interactivity') return `${upper} Interactivity (tok/s/user)`;
   if (metric === 'ttft') return `${upper} TTFT (s)`;
   return `${upper} End-to-end (s)`;
+}
+
+function getE2ENormalizedInteractivityImportAliases(
+  percentile: InferenceCurveE2ENormalizedInteractivityPercentile
+): string[] {
+  const upper = percentile.toUpperCase();
+  return [
+    getE2ENormalizedInteractivityCsvHeader(percentile),
+    `${upper} E2E Normalized Interactivity`,
+    `${percentile}_e2e_norm_intvty`,
+    `metrics.${percentile}_e2e_norm_intvty`,
+    `derived_agentic_metrics.${percentile}_e2e_norm_intvty`,
+    `e2e_normalized_interactivity.${percentile}`,
+    `e2eNormalizedInteractivityPercentiles.${percentile}`
+  ];
+}
+
+function getE2ENormalizedInteractivityCsvHeader(
+  percentile: InferenceCurveE2ENormalizedInteractivityPercentile
+): string {
+  return `${percentile.toUpperCase()} E2E Normalized Interactivity (tok/s/user)`;
 }
 
 function readEditorColor(record: Record<string, unknown>): string {
@@ -6791,12 +6725,12 @@ function seriesFromEditorRecords(records: Record<string, unknown>[]): InferenceC
       } satisfies SeriesDraft);
 
     const point = makeEmptyPointRow();
-    [...pointColumns.map((column) => column.key), ...latencyPercentilePointKeys, ...hiddenPointKeys].forEach((key) => {
-      if (key === 'sessionTime') {
-        const value = readImportedSessionTimeField(record);
-        if (value) point[key] = value;
-        return;
-      }
+    [
+      ...pointColumns.map((column) => column.key),
+      ...latencyPercentilePointKeys,
+      ...e2eNormalizedInteractivityPointKeys,
+      ...hiddenPointKeys
+    ].forEach((key) => {
       const column = pointColumns.find((item) => item.key === key);
       const aliases = POINT_IMPORT_ALIASES[key] ?? [key, column?.label ?? key];
       const value = readMetricString(record, aliases);
@@ -6814,11 +6748,6 @@ function readEditorSequence(record: Record<string, unknown>): string {
   if (explicitSequence) return explicitSequence;
   const scenario = readMetricString(record, ['scenario']);
   return isImportedAgenticScenario(scenario) ? 'Agentic Traces' : scenario;
-}
-
-function readImportedSessionTimeField(record: Record<string, unknown>): string {
-  const value = readImportedSessionTimeMetric(record);
-  return value !== null ? formatPointFieldValue(value) : '';
 }
 
 function seriesFromBenchmarkRecords(
@@ -6861,11 +6790,14 @@ function seriesFromBenchmarkRecords(
     points: line.points.sort(
       (a, b) =>
         compareOptionalNumbers(a.interactivity, b.interactivity) ||
+        compareOptionalNumbers(
+          a.e2eNormalizedInteractivityPercentiles?.p90 ??
+            a.e2eNormalizedInteractivityPercentiles?.p75,
+          b.e2eNormalizedInteractivityPercentiles?.p90 ??
+            b.e2eNormalizedInteractivityPercentiles?.p75
+        ) ||
         compareOptionalNumbers(a.endToEnd, b.endToEnd) ||
         compareOptionalNumbers(a.ttft, b.ttft) ||
-        compareOptionalNumbers(a.normalizedEndToEnd, b.normalizedEndToEnd) ||
-        compareOptionalNumbers(a.sessionTime, b.sessionTime) ||
-        compareOptionalNumbers(a.prefillTpsPerUser, b.prefillTpsPerUser) ||
         a.throughput - b.throughput
     )
   }));
@@ -6885,27 +6817,25 @@ function importedPointFromBenchmarkRecord(
   const endToEndPercentiles = isAgentic
     ? readImportedLatencyPercentiles(record, 'endToEnd')
     : undefined;
+  const e2eNormalizedInteractivityPercentiles = isAgentic
+    ? readImportedE2ENormalizedInteractivityPercentiles(record)
+    : undefined;
   const interactivity = interactivityPercentiles?.p90 ??
     readImportedXAxisMetric(record, 'interactivity', metricReadOptions);
   const throughput = readImportedThroughput(record);
   const ttft = ttftPercentiles?.p90 ?? readImportedXAxisMetric(record, 'ttft', metricReadOptions);
   const endToEnd = endToEndPercentiles?.p90 ??
     readImportedXAxisMetric(record, 'endToEnd', metricReadOptions);
-  const normalizedEndToEnd = readImportedXAxisMetric(record, 'normalizedEndToEnd');
-  const sessionTime = readImportedXAxisMetric(record, 'sessionTime');
-  const prefillTpsPerUser = readImportedXAxisMetric(record, 'prefillTpsPerUser');
   if (
     throughput === null ||
     (
       interactivity === null &&
       ttft === null &&
       endToEnd === null &&
-      normalizedEndToEnd === null &&
-      sessionTime === null &&
-      prefillTpsPerUser === null &&
       interactivityPercentiles === undefined &&
       ttftPercentiles === undefined &&
-      endToEndPercentiles === undefined
+      endToEndPercentiles === undefined &&
+      e2eNormalizedInteractivityPercentiles === undefined
     )
   ) {
     return null;
@@ -6974,9 +6904,10 @@ function importedPointFromBenchmarkRecord(
   if (ttftPercentiles) point.ttftPercentiles = ttftPercentiles;
   if (endToEnd !== null) point.endToEnd = endToEnd;
   if (endToEndPercentiles) point.endToEndPercentiles = endToEndPercentiles;
-  if (normalizedEndToEnd !== null) point.normalizedEndToEnd = normalizedEndToEnd;
-  if (sessionTime !== null) point.sessionTime = sessionTime;
-  if (prefillTpsPerUser !== null) point.prefillTpsPerUser = prefillTpsPerUser;
+  if (e2eNormalizedInteractivityPercentiles) {
+    point.e2eNormalizedInteractivityPercentiles =
+      e2eNormalizedInteractivityPercentiles;
+  }
   if (prefillGpu !== null) point.num_prefill_gpu = prefillGpu;
   if (decodeGpu !== null) point.num_decode_gpu = decodeGpu;
   if (prefillTp !== null) point.prefill_tp = prefillTp;
@@ -7079,9 +7010,7 @@ function mergeImportedSeries(series: InferenceCurveSeries[]): InferenceCurveSeri
         point.ttftPercentiles,
         point.endToEnd,
         point.endToEndPercentiles,
-        point.normalizedEndToEnd,
-        point.sessionTime,
-        point.prefillTpsPerUser,
+        point.e2eNormalizedInteractivityPercentiles,
         point.kv_offload,
         point.precision,
         point.concurrency,
@@ -7468,30 +7397,16 @@ function readNativeLatencyPercentiles(
   return Object.keys(result).length > 0 ? result : undefined;
 }
 
-function asOptionalSessionTime(point: Record<string, unknown>): number | undefined {
-  const minutes = asOptionalNumber(
-    point.sessionTime ??
-      point.session_time ??
-      point.session_time_min ??
-      point.session_time_minutes ??
-      point.normalized_session_time ??
-      point.normalized_session_time_min ??
-      point.normalized_session_time_minutes ??
-      point.mean_normalized_session_time ??
-      point.mean_normalized_session_time_min ??
-      point.mean_normalized_session_time_minutes
-  );
-  if (minutes !== undefined) return minutes;
-
-  const seconds = asOptionalNumber(
-    point.session_time_s ??
-      point.session_time_seconds ??
-      point.normalized_session_time_s ??
-      point.normalized_session_time_seconds ??
-      point.mean_normalized_session_time_s ??
-      point.mean_normalized_session_time_seconds
-  );
-  return seconds !== undefined ? seconds / 60 : undefined;
+function readNativeE2ENormalizedInteractivityPercentiles(
+  value: unknown
+): InferenceCurveE2ENormalizedInteractivityPercentiles | undefined {
+  if (!isRecord(value)) return undefined;
+  const result: InferenceCurveE2ENormalizedInteractivityPercentiles = {};
+  E2E_NORMALIZED_INTERACTIVITY_PERCENTILES.forEach((percentile) => {
+    const parsed = asOptionalNumber(value[percentile]);
+    if (parsed !== undefined) result[percentile] = parsed;
+  });
+  return Object.keys(result).length > 0 ? result : undefined;
 }
 
 async function formatFetchError(response: Response): Promise<string> {
@@ -7689,9 +7604,7 @@ function buildChartCsvRows(mode: CsvExportMode): string[][] {
       'TTFT (s)',
       'End-to-end (s)',
       ...getLatencyPercentileCsvHeaders(),
-      'P90 Normalized E2E @ 400 output tokens (s)',
-      'Session Time (min)',
-      'P90 Prefill TPS/user',
+      ...getE2ENormalizedInteractivityCsvHeaders(),
       'Prefill GPUs',
       'Decode GPUs',
       'Total GPUs',
@@ -7759,9 +7672,7 @@ function buildChartCsvRows(mode: CsvExportMode): string[][] {
         formatExportValue(point.ttft),
         formatExportValue(point.endToEnd),
         ...getLatencyPercentileExportValues(point, line),
-        formatExportValue(point.normalizedEndToEnd),
-        formatExportValue(point.sessionTime),
-        formatExportValue(point.prefillTpsPerUser),
+        ...getE2ENormalizedInteractivityExportValues(point),
         formatExportValue(point.num_prefill_gpu),
         formatExportValue(point.num_decode_gpu),
         formatExportValue(totalGpus),
@@ -7793,6 +7704,12 @@ function getLatencyPercentileCsvHeaders(): string[] {
   );
 }
 
+function getE2ENormalizedInteractivityCsvHeaders(): string[] {
+  return E2E_NORMALIZED_INTERACTIVITY_PERCENTILES.map((percentile) =>
+    getE2ENormalizedInteractivityCsvHeader(percentile)
+  );
+}
+
 function getLatencyPercentileExportValues(
   point: InferenceCurveSeries['points'][number],
   line: InferenceCurveSeries
@@ -7813,6 +7730,14 @@ function getLatencyPercentileExportValues(
         (isAgentic && percentiles === undefined && percentile === 'p90' ? legacyP90Value : undefined);
       return formatExportValue(value);
     })
+  );
+}
+
+function getE2ENormalizedInteractivityExportValues(
+  point: InferenceCurveSeries['points'][number]
+): string[] {
+  return E2E_NORMALIZED_INTERACTIVITY_PERCENTILES.map((percentile) =>
+    formatExportValue(point.e2eNormalizedInteractivityPercentiles?.[percentile])
   );
 }
 

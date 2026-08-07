@@ -8,9 +8,7 @@ export interface InferenceCurvePoint {
   ttftPercentiles?: InferenceCurveLatencyPercentiles;
   endToEnd?: number;
   endToEndPercentiles?: InferenceCurveLatencyPercentiles;
-  normalizedEndToEnd?: number;
-  sessionTime?: number;
-  prefillTpsPerUser?: number;
+  e2eNormalizedInteractivityPercentiles?: InferenceCurveE2ENormalizedInteractivityPercentiles;
   strategy?: string;
   precision?: string;
   tp?: number;
@@ -89,13 +87,20 @@ export type InferenceCurveLatencyPercentiles = Partial<
   Record<InferenceCurveLatencyPercentile, number>
 >;
 
+export type InferenceCurveE2ENormalizedInteractivityPercentile = Extract<
+  InferenceCurveLatencyPercentile,
+  'p75' | 'p90'
+>;
+
+export type InferenceCurveE2ENormalizedInteractivityPercentiles = Partial<
+  Record<InferenceCurveE2ENormalizedInteractivityPercentile, number>
+>;
+
 export type InferenceCurveXAxisMetric =
   | 'interactivity'
+  | 'e2eNormalizedInteractivity'
   | 'endToEnd'
-  | 'ttft'
-  | 'normalizedEndToEnd'
-  | 'sessionTime'
-  | 'prefillTpsPerUser';
+  | 'ttft';
 
 export type InferenceCurveXAxisMetricDisplayOverrides = Partial<
   Record<InferenceCurveXAxisMetric, Partial<Pick<XAxisMetricConfig, 'label' | 'tooltipLabel' | 'title'>>>
@@ -261,6 +266,13 @@ const X_AXIS_METRICS: Record<InferenceCurveXAxisMetric, XAxisMetricConfig> = {
     title: 'Token Throughput per GPU vs. Interactivity',
     higherIsBetter: true
   },
+  e2eNormalizedInteractivity: {
+    label: 'E2E Normalized Interactivity (tok/s/user)',
+    tooltipLabel: 'E2E Normalized Interactivity',
+    unit: 'tok/s/user',
+    title: 'Token Throughput per GPU vs. E2E Normalized Interactivity',
+    higherIsBetter: true
+  },
   endToEnd: {
     label: 'End-to-end Latency (s)',
     tooltipLabel: 'End-to-end Latency',
@@ -275,39 +287,17 @@ const X_AXIS_METRICS: Record<InferenceCurveXAxisMetric, XAxisMetricConfig> = {
     title: 'Token Throughput per GPU vs. TTFT',
     higherIsBetter: false
   },
-  normalizedEndToEnd: {
-    label: 'P90 Normalized E2E @ 400 output tokens (s)',
-    tooltipLabel: 'P90 Normalized E2E @ 400 output tokens',
-    unit: 's',
-    title: 'Token Throughput per GPU vs. Normalized E2E',
-    higherIsBetter: false
-  },
-  sessionTime: {
-    label: 'Mean Normalized Session Time (min)',
-    tooltipLabel: 'Mean Normalized Session Time',
-    unit: 'min',
-    title: 'Token Throughput per GPU vs. Session Time',
-    higherIsBetter: false
-  },
-  prefillTpsPerUser: {
-    label: 'P90 Prefill TPS per user (tok/s)',
-    tooltipLabel: 'P90 Prefill TPS per user',
-    unit: 'tok/s',
-    title: 'Token Throughput per GPU vs. Prefill TPS / user',
-    higherIsBetter: true
-  }
 };
 
 const X_AXIS_METRIC_ORDER: InferenceCurveXAxisMetric[] = [
+  'e2eNormalizedInteractivity',
   'interactivity',
   'endToEnd',
-  'ttft',
-  'normalizedEndToEnd',
-  'sessionTime',
-  'prefillTpsPerUser'
+  'ttft'
 ];
 
 const LATENCY_METRICS = new Set<InferenceCurveXAxisMetric>([
+  'e2eNormalizedInteractivity',
   'interactivity',
   'endToEnd',
   'ttft'
@@ -800,15 +790,17 @@ function readPointMetricValue(
       latencyPercentile
     );
   }
+  if (metric === 'e2eNormalizedInteractivity') {
+    if (latencyPercentile !== 'p75' && latencyPercentile !== 'p90') return undefined;
+    return readFiniteNumber(point.e2eNormalizedInteractivityPercentiles?.[latencyPercentile]);
+  }
   if (metric === 'endToEnd') {
     return readLatencyPercentileValue(point.endToEndPercentiles, point.endToEnd, latencyPercentile);
   }
   if (metric === 'ttft') {
     return readLatencyPercentileValue(point.ttftPercentiles, point.ttft, latencyPercentile);
   }
-  if (metric === 'normalizedEndToEnd') return readFiniteNumber(point.normalizedEndToEnd);
-  if (metric === 'sessionTime') return readFiniteNumber(point.sessionTime);
-  return readFiniteNumber(point.prefillTpsPerUser);
+  return undefined;
 }
 
 function readLatencyPercentileValue(

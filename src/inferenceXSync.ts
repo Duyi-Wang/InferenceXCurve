@@ -1,4 +1,7 @@
-import type { InferenceCurveSeries } from './inferenceCurveChart';
+import type {
+  InferenceCurveLatencyPercentiles,
+  InferenceCurveSeries
+} from './inferenceCurveChart';
 
 export interface InferenceXSyncConfig {
   id: string;
@@ -112,15 +115,6 @@ const E2E_P90_METRIC_KEYS = [
   'p90_e2el',
   'p90_end_to_end'
 ] as const;
-const NORMALIZED_E2E_METRIC_KEYS = [
-  'p90_normalized_e2e_400_s'
-] as const;
-const SESSION_TIME_SECOND_METRIC_KEYS = [
-  'normalized_session_time_s'
-] as const;
-const PREFILL_TPS_PER_USER_METRIC_KEYS = [
-  'p90_prefill_tps_per_user'
-] as const;
 
 const MODEL_DISPLAY_NAMES: Record<string, string> = {
   dsr1: 'DeepSeek-R1-0528',
@@ -159,6 +153,11 @@ const DEFAULT_SYNC_MATRIX = {
 } as const;
 
 type InferenceXBenchmarkRecord = Record<string, unknown>;
+
+interface InferenceXDerivedAgenticMetrics {
+  p75?: number;
+  p90?: number;
+}
 
 export function createDefaultInferenceXSyncConfigs(): InferenceXSyncConfig[] {
   const configs: InferenceXSyncConfig[] = [];
@@ -283,7 +282,7 @@ export async function fetchInferenceXSyncSeries(
   const missingConfigIds: string[] = [];
   const summary: InferenceXSyncSummaryItem[] = [];
 
-  enabledConfigs.forEach((config) => {
+  const preparedConfigs = enabledConfigs.map((config) => {
     const normalized = normalizeInferenceXSyncConfig(config);
     const records = recordsByModel.get(resolveModelKey(normalized.model)) ?? [];
     const matched = records.filter((record) => benchmarkRecordMatchesConfig(record, normalized));
@@ -291,13 +290,20 @@ export async function fetchInferenceXSyncSeries(
     const lineId = makeInferenceXSyncLineId(normalized);
     lineIdsByConfigKey[normalized.id] = lineId;
     matchedCounts[normalized.id] = latestMatched.length;
+    return { normalized, latestMatched };
+  });
+  const derivedAgenticMetrics = await fetchDerivedAgenticMetrics(
+    preparedConfigs.flatMap(({ latestMatched }) => latestMatched),
+    signal
+  );
 
+  preparedConfigs.forEach(({ normalized, latestMatched }) => {
     if (latestMatched.length === 0) {
       missingConfigIds.push(normalized.id);
       return;
     }
 
-    const line = benchmarkRecordsToSeries(normalized, latestMatched);
+    const line = benchmarkRecordsToSeries(normalized, latestMatched, derivedAgenticMetrics);
     if (!line) {
       missingConfigIds.push(normalized.id);
       return;
@@ -321,12 +327,14 @@ export function fingerprintInferenceCurveSeries(line: InferenceCurveSeries): str
     mtp: line.mtp ?? '',
     points: line.points.map((point) => ({
       interactivity: point.interactivity,
+      interactivityPercentiles: point.interactivityPercentiles ?? '',
       throughput: point.throughput,
       ttft: point.ttft ?? '',
+      ttftPercentiles: point.ttftPercentiles ?? '',
       endToEnd: point.endToEnd ?? '',
-      normalizedEndToEnd: point.normalizedEndToEnd ?? '',
-      sessionTime: point.sessionTime ?? '',
-      prefillTpsPerUser: point.prefillTpsPerUser ?? '',
+      endToEndPercentiles: point.endToEndPercentiles ?? '',
+      e2eNormalizedInteractivityPercentiles:
+        point.e2eNormalizedInteractivityPercentiles ?? '',
       strategy: point.strategy ?? '',
       precision: point.precision ?? '',
       tp: point.tp ?? '',
@@ -428,6 +436,51 @@ async function fetchBenchmarkRecordsByModel(
   return new Map(entries);
 }
 
+async function fetchDerivedAgenticMetrics(
+  records: InferenceXBenchmarkRecord[],
+  signal?: AbortSignal
+): Promise<Map<number, InferenceXDerivedAgenticMetrics>> {
+  const ids = Array.from(
+    new Set(
+      records
+        .filter((record) => isAgenticScenario(readRecordScenario(record)))
+        .map((record) => readNumber(record, 'id'))
+        .filter((id): id is number => id !== null)
+    )
+  );
+  if (ids.length === 0) return new Map();
+
+  const batches: number[][] = [];
+  for (let index = 0; index < ids.length; index += 200) {
+    batches.push(ids.slice(index, index + 200));
+  }
+  const responses = await Promise.all(
+    batches.map((batch) =>
+      fetchInferenceXJson(
+        `${INFERENCEX_API_BASE}/derived-agentic-metrics?ids=${batch.join(',')}`,
+        signal
+      )
+    )
+  );
+  const result = new Map<number, InferenceXDerivedAgenticMetrics>();
+  responses.forEach((response) => {
+    if (!isRecord(response)) return;
+    Object.values(response).forEach((value) => {
+      if (!isRecord(value)) return;
+      const id = readNumber(value, 'id');
+      if (id === null) return;
+      const p75 = readNumber(value, 'p75_e2e_norm_intvty');
+      const p90 = readNumber(value, 'p90_e2e_norm_intvty');
+      if (p75 === null && p90 === null) return;
+      result.set(id, {
+        ...(p75 !== null ? { p75 } : {}),
+        ...(p90 !== null ? { p90 } : {})
+      });
+    });
+  });
+  return result;
+}
+
 async function fetchInferenceXJson(url: string, signal?: AbortSignal): Promise<unknown> {
   let response: Response;
   try {
@@ -510,19 +563,21 @@ function readBenchmarkDate(record: InferenceXBenchmarkRecord): string {
 
 function benchmarkRecordsToSeries(
   config: InferenceXSyncConfig,
-  records: InferenceXBenchmarkRecord[]
+  records: InferenceXBenchmarkRecord[],
+  derivedAgenticMetrics: Map<number, InferenceXDerivedAgenticMetrics>
 ): InferenceCurveSeries | null {
   const points = records
-    .map((record) => benchmarkRecordToPoint(config, record))
+    .map((record) => benchmarkRecordToPoint(config, record, derivedAgenticMetrics))
     .filter((point): point is InferenceCurveSeries['points'][number] => point !== null)
     .sort(
       (a, b) =>
         compareOptionalNumbers(a.interactivity, b.interactivity) ||
+        compareOptionalNumbers(
+          a.e2eNormalizedInteractivityPercentiles?.p90,
+          b.e2eNormalizedInteractivityPercentiles?.p90
+        ) ||
         compareOptionalNumbers(a.endToEnd, b.endToEnd) ||
         compareOptionalNumbers(a.ttft, b.ttft) ||
-        compareOptionalNumbers(a.normalizedEndToEnd, b.normalizedEndToEnd) ||
-        compareOptionalNumbers(a.sessionTime, b.sessionTime) ||
-        compareOptionalNumbers(a.prefillTpsPerUser, b.prefillTpsPerUser) ||
         b.throughput - a.throughput ||
         Number(a.concurrency ?? 0) - Number(b.concurrency ?? 0)
     );
@@ -548,35 +603,44 @@ function benchmarkRecordsToSeries(
 
 function benchmarkRecordToPoint(
   config: InferenceXSyncConfig,
-  record: InferenceXBenchmarkRecord
+  record: InferenceXBenchmarkRecord,
+  derivedAgenticMetrics: Map<number, InferenceXDerivedAgenticMetrics>
 ): InferenceCurveSeries['points'][number] | null {
   const metrics = readMetrics(record);
   const preferP90Metrics = shouldPreferP90Metrics(record, config);
-  const interactivity = readMetricNumber(
+  const interactivityPercentiles = preferP90Metrics
+    ? readAgenticLatencyPercentiles(metrics, 'intvty')
+    : undefined;
+  const ttftPercentiles = preferP90Metrics
+    ? readAgenticLatencyPercentiles(metrics, 'ttft')
+    : undefined;
+  const endToEndPercentiles = preferP90Metrics
+    ? readAgenticLatencyPercentiles(metrics, 'e2el')
+    : undefined;
+  const benchmarkId = readNumber(record, 'id');
+  const e2eNormalizedInteractivityPercentiles = benchmarkId === null
+    ? undefined
+    : derivedAgenticMetrics.get(benchmarkId);
+  const interactivity = interactivityPercentiles?.p90 ?? readMetricNumber(
     metrics,
     preferP90Metrics ? INTERACTIVITY_P90_METRIC_KEYS : INTERACTIVITY_METRIC_KEYS
   );
   const throughput = readMetricNumber(metrics, THROUGHPUT_METRIC_KEYS);
-  const ttft = readMetricNumber(
+  const ttft = ttftPercentiles?.p90 ?? readMetricNumber(
     metrics,
     preferP90Metrics ? TTFT_P90_METRIC_KEYS : TTFT_METRIC_KEYS
   );
-  const endToEnd = readMetricNumber(
+  const endToEnd = endToEndPercentiles?.p90 ?? readMetricNumber(
     metrics,
     preferP90Metrics ? E2E_P90_METRIC_KEYS : E2E_METRIC_KEYS
   );
-  const normalizedEndToEnd = readMetricNumber(metrics, NORMALIZED_E2E_METRIC_KEYS);
-  const sessionTime = readSessionTimeMetric(metrics);
-  const prefillTpsPerUser = readMetricNumber(metrics, PREFILL_TPS_PER_USER_METRIC_KEYS);
   if (
     throughput === null ||
     (
       interactivity === null &&
       ttft === null &&
       endToEnd === null &&
-      normalizedEndToEnd === null &&
-      sessionTime === null &&
-      prefillTpsPerUser === null
+      e2eNormalizedInteractivityPercentiles === undefined
     )
   ) {
     return null;
@@ -603,11 +667,15 @@ function benchmarkRecordToPoint(
   };
 
   if (interactivity !== null) point.interactivity = interactivity;
+  if (interactivityPercentiles) point.interactivityPercentiles = interactivityPercentiles;
   if (ttft !== null) point.ttft = ttft;
+  if (ttftPercentiles) point.ttftPercentiles = ttftPercentiles;
   if (endToEnd !== null) point.endToEnd = endToEnd;
-  if (normalizedEndToEnd !== null) point.normalizedEndToEnd = normalizedEndToEnd;
-  if (sessionTime !== null) point.sessionTime = sessionTime;
-  if (prefillTpsPerUser !== null) point.prefillTpsPerUser = prefillTpsPerUser;
+  if (endToEndPercentiles) point.endToEndPercentiles = endToEndPercentiles;
+  if (e2eNormalizedInteractivityPercentiles) {
+    point.e2eNormalizedInteractivityPercentiles =
+      e2eNormalizedInteractivityPercentiles;
+  }
   if (prefillTp !== null) point.prefill_tp = prefillTp;
   if (prefillEp !== null) point.prefill_ep = prefillEp;
   if (decodeTp !== null) point.decode_tp = decodeTp;
@@ -890,9 +958,22 @@ function readMetricNumber(record: Record<string, unknown>, keys: readonly string
   return null;
 }
 
-function readSessionTimeMetric(record: Record<string, unknown>): number | null {
-  const seconds = readMetricNumber(record, SESSION_TIME_SECOND_METRIC_KEYS);
-  return seconds !== null ? seconds / 60 : null;
+function readAgenticLatencyPercentiles(
+  metrics: Record<string, unknown>,
+  metric: 'intvty' | 'ttft' | 'e2el'
+): InferenceCurveLatencyPercentiles | undefined {
+  const result: InferenceCurveLatencyPercentiles = {};
+  const entries = [
+    ['p50', `median_${metric}`],
+    ['p75', `p75_${metric}`],
+    ['p90', `p90_${metric}`],
+    ['p95', `p95_${metric}`]
+  ] as const;
+  entries.forEach(([percentile, key]) => {
+    const value = readNumber(metrics, key);
+    if (value !== null) result[percentile] = value;
+  });
+  return Object.keys(result).length > 0 ? result : undefined;
 }
 
 function getXAxisMetricKeySetsForRecord(
@@ -903,10 +984,7 @@ function getXAxisMetricKeySetsForRecord(
   return [
     useP90 ? INTERACTIVITY_P90_METRIC_KEYS : INTERACTIVITY_METRIC_KEYS,
     useP90 ? TTFT_P90_METRIC_KEYS : TTFT_METRIC_KEYS,
-    useP90 ? E2E_P90_METRIC_KEYS : E2E_METRIC_KEYS,
-    NORMALIZED_E2E_METRIC_KEYS,
-    SESSION_TIME_SECOND_METRIC_KEYS,
-    PREFILL_TPS_PER_USER_METRIC_KEYS
+    useP90 ? E2E_P90_METRIC_KEYS : E2E_METRIC_KEYS
   ];
 }
 

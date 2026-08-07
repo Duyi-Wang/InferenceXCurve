@@ -2643,12 +2643,8 @@ p {
 .point-table td.point-cell-ttft,
 .point-table th.point-cell-endToEnd,
 .point-table td.point-cell-endToEnd,
-.point-table th.point-cell-normalizedEndToEnd,
-.point-table td.point-cell-normalizedEndToEnd,
-.point-table th.point-cell-sessionTime,
-.point-table td.point-cell-sessionTime,
-.point-table th.point-cell-prefillTpsPerUser,
-.point-table td.point-cell-prefillTpsPerUser {
+.point-table th.point-cell-e2eNormalizedInteractivity,
+.point-table td.point-cell-e2eNormalizedInteractivity {
   width: 110px;
 }
 
@@ -2656,9 +2652,7 @@ p {
 .point-table td.point-cell-throughput,
 .point-table td.point-cell-ttft,
 .point-table td.point-cell-endToEnd,
-.point-table td.point-cell-normalizedEndToEnd,
-.point-table td.point-cell-sessionTime,
-.point-table td.point-cell-prefillTpsPerUser {
+.point-table td.point-cell-e2eNormalizedInteractivity {
   text-align: right;
 }
 
