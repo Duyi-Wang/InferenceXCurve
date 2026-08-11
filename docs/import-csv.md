@@ -154,7 +154,8 @@ Accepted editor CSV aliases include:
 - E2E Normalized Interactivity: `P75 E2E Normalized Interactivity`,
   `P90 E2E Normalized Interactivity`, their canonical `(tok/s/user)` headers,
   `p75_e2e_norm_intvty`, `p90_e2e_norm_intvty`, their `metrics.*` and
-  `derived_agentic_metrics.*` forms, plus nested
+  `derived_agentic_metrics.*` forms, the upstream Agentic aggregate paths
+  `request_metrics.latency.e2e_norm_intvty.p75|p90`, plus nested
   `e2e_normalized_interactivity.p75|p90` and
   `e2eNormalizedInteractivityPercentiles.p75|p90`.
 - Point metadata: `shape`, `Marker`, `Point Marker`; snake_case point keys such
@@ -202,7 +203,9 @@ numeric X-axis metric column. Accepted aliases include:
   `request_metrics.latency.e2el.p50|p75|p90|p95`
 - E2E Normalized Interactivity: `p75_e2e_norm_intvty`,
   `p90_e2e_norm_intvty`, their `metrics.*` and
-  `derived_agentic_metrics.*` forms, the canonical P75/P90 headers, and nested
+  `derived_agentic_metrics.*` forms,
+  `request_metrics.latency.e2e_norm_intvty.p75|p90`, the canonical P75/P90
+  headers, and nested
   `e2e_normalized_interactivity.p75|p90` or
   `e2eNormalizedInteractivityPercentiles.p75|p90`
 

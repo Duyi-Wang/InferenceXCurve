@@ -6673,6 +6673,7 @@ function getE2ENormalizedInteractivityImportAliases(
     `${percentile}_e2e_norm_intvty`,
     `metrics.${percentile}_e2e_norm_intvty`,
     `derived_agentic_metrics.${percentile}_e2e_norm_intvty`,
+    `request_metrics.latency.e2e_norm_intvty.${percentile}`,
     `e2e_normalized_interactivity.${percentile}`,
     `e2eNormalizedInteractivityPercentiles.${percentile}`
   ];
