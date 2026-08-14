@@ -2194,6 +2194,10 @@ p {
   grid-column: span 6;
 }
 
+.series-field-note {
+  grid-column: span 20;
+}
+
 .series-field-precision {
   grid-column: span 2;
 }
@@ -2225,12 +2229,19 @@ p {
 }
 
 .series-field input[type="text"],
-.series-field select {
+.series-field select,
+.series-field textarea {
   width: 100%;
   min-height: 34px;
   padding: 6px 9px;
   background: color-mix(in srgb, var(--background) 86%, transparent);
   font-size: 13px;
+}
+
+.series-field textarea {
+  min-height: 72px;
+  resize: vertical;
+  line-height: 1.45;
 }
 
 .line-style-controls {
@@ -2813,6 +2824,7 @@ p {
   }
 
   .series-field-title,
+  .series-field-note,
   .line-style-field,
   .color-field {
     grid-column: span 2;
@@ -3039,6 +3051,7 @@ p {
   .series-field-mtp,
   .series-field-marker,
   .series-field-title,
+  .series-field-note,
   .line-style-field,
   .color-field {
     grid-column: span 1;

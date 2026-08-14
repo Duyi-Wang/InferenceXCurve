@@ -53,6 +53,7 @@ type SeriesField =
   | 'mtp'
   | 'marker'
   | 'title'
+  | 'note'
   | 'color'
   | 'lineStyle';
 type PointRow = Record<string, string>;
@@ -99,6 +100,7 @@ interface SeriesDraft {
   mtp: string;
   marker: string;
   title: string;
+  note: string;
   color: string;
   lineStyle: string;
   renderOrder: number;
@@ -672,6 +674,7 @@ function makeRestoredEmptySeriesDraft(index: number): SeriesDraft {
     mtp: NON_MTP_VALUE,
     marker: '',
     title: '',
+    note: '',
     color: '',
     lineStyle: DEFAULT_LINE_STYLE,
     renderOrder: index,
@@ -692,6 +695,7 @@ function restorePersistedSeriesDrafts(value: unknown): SeriesDraft[] {
       mtp: normalizeMtpValue(readPersistedText(draft, 'mtp', NON_MTP_VALUE)),
       marker: normalizePointShapeValue(readPersistedText(draft, 'marker')),
       title: readPersistedText(draft, 'title'),
+      note: readPersistedText(draft, 'note'),
       color: readPersistedText(draft, 'color'),
       lineStyle: readPersistedText(draft, 'lineStyle', DEFAULT_LINE_STYLE) || DEFAULT_LINE_STYLE,
       renderOrder: readPersistedNumber(draft, 'renderOrder', index),
@@ -1388,6 +1392,7 @@ document.querySelector('#add-series')?.addEventListener('click', () => {
     mtp: defaultMtp,
     marker: '',
     title: '',
+    note: '',
     color: '',
     lineStyle: DEFAULT_LINE_STYLE,
     renderOrder: getNextDraftRenderOrder(),
@@ -2214,6 +2219,7 @@ function applyExistingSyncLineStyle(
   const color = draft?.color ?? existingLine?.color ?? '';
   const lineStyle = draft?.lineStyle ?? existingLine?.lineStyle ?? '';
   const marker = draft?.marker ?? String(existingLine?.marker ?? '');
+  const note = draft?.note ?? existingLine?.note ?? '';
   const renderOrder = draft
     ? draft.renderOrder
     : existingLine?.renderOrder;
@@ -2221,6 +2227,7 @@ function applyExistingSyncLineStyle(
   if (color.trim()) styled.color = color.trim();
   if (lineStyle.trim()) styled.lineStyle = lineStyle.trim();
   if (marker.trim()) styled.marker = marker.trim();
+  if (note.trim()) styled.note = note.trim();
   if (typeof renderOrder === 'number' && Number.isFinite(renderOrder)) styled.renderOrder = renderOrder;
   return styled;
 }
@@ -2817,6 +2824,7 @@ function renderSeriesCard(series: SeriesDraft, seriesIndex: number, autoColor: s
         ${renderLineMarkerField(seriesIndex, series.marker)}
         ${renderLineStyleField(seriesIndex, series.lineStyle)}
         ${renderColorField(seriesIndex, series.color, color)}
+        ${renderSeriesNoteField(seriesIndex, series.note)}
       </div>
 
       ${collapsed ? renderCollapsedPointSummary(seriesIndex, pointCount) : renderPointTable(series, seriesIndex, pointCount)}
@@ -2868,6 +2876,20 @@ function renderSeriesInput(
 function getSeriesFieldClassName(field: SeriesField): string {
   const fieldClass = field.replace(/[A-Z]/gu, (match) => `-${match.toLowerCase()}`);
   return `series-field series-field-${fieldClass}`;
+}
+
+function renderSeriesNoteField(seriesIndex: number, value: string): string {
+  return `
+    <label class="series-field series-field-note">
+      <span>Line Note</span>
+      <textarea
+        data-series-index="${seriesIndex}"
+        data-series-field="note"
+        rows="3"
+        placeholder="Editor-only notes about this line"
+      >${escapeHtml(value)}</textarea>
+    </label>
+  `;
 }
 
 function renderSeriesMtpField(seriesIndex: number, value: string): string {
@@ -3237,7 +3259,9 @@ function attachSeriesEditorEvents(): void {
   attachSeriesDragEvents();
 
   seriesEditorEl
-    .querySelectorAll<HTMLInputElement | HTMLSelectElement>('input[data-series-field], select[data-series-field]')
+    .querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
+      'input[data-series-field], select[data-series-field], textarea[data-series-field]'
+    )
     .forEach((input) => {
     input.addEventListener('input', () => {
       const seriesIndex = Number(input.dataset.seriesIndex);
@@ -3249,7 +3273,7 @@ function attachSeriesEditorEvents(): void {
         syncColorPicker(seriesIndex, draft.color || getEditorResolvedColor(seriesIndex), draft.color);
       }
       scheduleLocalSave();
-      markChartDirty();
+      if (field !== 'note') markChartDirty();
     });
   });
 
@@ -3576,7 +3600,9 @@ function focusPointCell(seriesIndex: number, rowIndex: number, colIndex: number)
 
 function commitSeriesDom(): void {
   seriesEditorEl
-    .querySelectorAll<HTMLInputElement | HTMLSelectElement>('input[data-series-field], select[data-series-field]')
+    .querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
+      'input[data-series-field], select[data-series-field], textarea[data-series-field]'
+    )
     .forEach((input) => {
       const seriesIndex = Number(input.dataset.seriesIndex);
       const field = input.dataset.seriesField as SeriesField;
@@ -4030,6 +4056,7 @@ function seriesToDrafts(series: InferenceCurveSeries[]): SeriesDraft[] {
     mtp: getSeriesMtpFilter(line),
     marker: normalizePointShapeValue(String(line.marker ?? '')),
     title: line.title ?? '',
+    note: line.note ?? '',
     color: line.color ?? '',
     lineStyle: line.lineStyle ?? DEFAULT_LINE_STYLE,
     renderOrder: getSeriesRenderOrder(line, index),
@@ -4275,6 +4302,7 @@ function draftsToSeriesInternal(drafts: SeriesDraft[]): InferenceCurveSeries[] {
     if (draft.color.trim()) line.color = draft.color.trim();
     if (draft.lineStyle.trim()) line.lineStyle = draft.lineStyle.trim();
     if (draft.title.trim()) line.title = draft.title.trim();
+    if (draft.note.trim()) line.note = draft.note.trim();
     result.push(line);
   });
 
@@ -4460,6 +4488,7 @@ function makeEmptySeriesDraft(index: number): SeriesDraft {
     mtp: NON_MTP_VALUE,
     marker: '',
     title: '',
+    note: '',
     color: '',
     lineStyle: DEFAULT_LINE_STYLE,
     renderOrder: index,
@@ -4946,7 +4975,7 @@ function createInitialState(series: InferenceCurveSeries[]): AppState {
     scenarioFilter,
     islOslFilter,
     mtpFilter,
-    enforceEndToEndPareto: true,
+    enforceEndToEndPareto: false,
     showNonOptimalPoints: false,
     hidePointLabels: true,
     showConcurrencyLabels: false,
@@ -6341,6 +6370,7 @@ function readNativeSeries(value: unknown): InferenceCurveSeries[] {
     lineStyle: asOptionalString(line.lineStyle),
     renderOrder: asOptionalNumber(line.renderOrder),
     title: asOptionalString(line.title),
+    note: asOptionalString(line.note),
     points: (line.points as unknown[])
       .filter(isRecord)
       .map((point) => {
@@ -6704,6 +6734,7 @@ function seriesFromEditorRecords(records: Record<string, unknown>[]): InferenceC
     const id = readMetricString(record, ['series_id', 'line id', 'line_id']) || `imported-line-${rowIndex + 1}`;
     const name = readMetricString(record, ['series_name', 'line name', 'name']) || id;
     const title = readMetricString(record, ['title']);
+    const note = readMetricString(record, ['line note', 'line_note', 'series note', 'series_note']);
     const rawMtp = readMetricString(record, ['mtp', 'MTP']);
     const draft =
       drafts.get(id) ??
@@ -6718,6 +6749,7 @@ function seriesFromEditorRecords(records: Record<string, unknown>[]): InferenceC
           readMetricString(record, ['line_marker', 'line marker', 'series_marker', 'series marker'])
         ),
         title,
+        note,
         color: readEditorColor(record),
         lineStyle: readMetricString(record, ['lineStyle', 'line type', 'linestyle']) || DEFAULT_LINE_STYLE,
         renderOrder: readMetricNumber(record, ['renderOrder', 'render order', 'layer', 'z-index', 'z index']) ?? rowIndex,
@@ -7585,6 +7617,7 @@ function buildChartCsvRows(mode: CsvExportMode): string[][] {
       'Line ID',
       'Line Name',
       'Title',
+      'Line Note',
       'Model',
       'Scenario',
       'Precision',
@@ -7653,6 +7686,7 @@ function buildChartCsvRows(mode: CsvExportMode): string[][] {
         line.id,
         line.name,
         line.title ?? '',
+        line.note ?? '',
         getSeriesModel(line),
         getSeriesIslOsl(line),
         getSeriesPrecision(line),

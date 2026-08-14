@@ -46,6 +46,7 @@ export interface InferenceCurveSeries {
   lineStyle?: string;
   renderOrder?: number;
   title?: string;
+  note?: string;
   points: InferenceCurvePoint[];
 }
 
