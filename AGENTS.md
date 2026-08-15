@@ -100,10 +100,10 @@ The app now treats the public InferenceX API as the primary source for default b
 - App startup with no saved browser data should fetch default sync configs and render the API result; if that fails, keep the bundled `exampleSeries`.
 - App startup with saved browser data should check for updates only once and should not overwrite chart data until the user clicks `Update`.
 - `Check Updates` fetches enabled configs and stages changed series; `Update` applies staged series.
-- `benchmarks?model=...` returns historical rows. For each concrete sync config, keep only rows from the newest `date` that matches that exact model / ISL / OSL / precision / hardware / framework / MTP / disagg combination; do not chart all historical rows as the latest line.
+- `benchmarks?model=...` returns historical rows. `disagg` is point-level metadata rather than a config or curve dimension. Reduce the `disagg=true` and `disagg=false` branches to their respective newest dates, then merge both branches into the combined model / sequence or scenario / precision / hardware / framework / MTP curve. Do not chart older historical rows as part of the latest line.
 - `Add Config` only creates sync configs, then automatically runs a staged update check. It must not apply chart data directly.
-- The Add Config UI defaults `ISL/OSL`, `Precision`, `Framework`, and `MTP` to `All`. These are UI-only selections: never persist `__all__` in an `InferenceXSyncConfig`. Expand All selections from availability rows into concrete `isl`, `osl`, `precision`, `hardware`, `framework`, `specMethod`, and `disagg` configs.
-- Sync-generated line ids are stable and derived from model, ISL/OSL, precision, hardware, framework, MTP, and disagg. Updating a sync line should replace data/source fields while preserving user style fields such as `color`, `lineStyle`, `marker`, `renderOrder`, and `collapsed`.
+- The Add Config UI defaults `ISL/OSL`, `Precision`, `Framework`, and `MTP` to `All`. These are UI-only selections: never persist `__all__` in an `InferenceXSyncConfig`. Expand All selections from availability rows into concrete `isl`, `osl`, `precision`, `hardware`, `framework`, and `specMethod` configs. Never persist `disagg` on an `InferenceXSyncConfig`.
+- Sync-generated line ids are stable and derived from model, ISL/OSL or scenario, precision, hardware, framework, and MTP. They never include disagg, so mixed aggregated/disaggregated points stay on one curve. Updating a sync line should replace data/source fields while preserving user style fields such as `color`, `lineStyle`, `marker`, `renderOrder`, and `collapsed`.
 - Match hardware strictly. Do not alias `b200` to `gb200` or vice versa.
 
 ### CORS: dev works, deployed GitHub Pages does not

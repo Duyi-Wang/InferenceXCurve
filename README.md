@@ -141,8 +141,10 @@ the current chart until you click `Update`.
 
 For each enabled sync config, the API may return historical rows across many
 dates. Sync mirrors the upstream chart behavior by keeping only the newest
-available `date` for that exact model / ISL / OSL / precision / hardware /
-framework / MTP / disagg combination.
+source rows. Curves group by model / sequence or scenario / precision /
+hardware / framework / MTP. `disagg` is point-level metadata, so aggregated and
+disaggregated rows for the same config are combined into one curve after each
+disagg branch is reduced to its newest available `date`.
 
 The panel actions are:
 
@@ -157,6 +159,10 @@ form defaults `ISL/OSL`, `Precision`, `Framework`, and `MTP` to `All`; clicking
 `Add Config` expands those selections into only the real combinations returned
 by availability, then automatically runs `Check Updates`. The user still needs
 to click `Update` before the new data is applied to the chart.
+
+`Disagg` is not a config selector. Availability rows that differ only by
+`disagg=true` or `disagg=false` create one sync config and one stable line id;
+the original value remains available on every imported point.
 
 Sync configs, fingerprints, timestamps, and staged status metadata are saved in
 the normal browser data payload under `localStorage` key

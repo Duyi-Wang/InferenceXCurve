@@ -13,7 +13,6 @@ export interface InferenceXSyncConfig {
   hardware: string;
   framework: string;
   specMethod: string;
-  disagg: boolean;
   enabled: boolean;
 }
 
@@ -43,7 +42,6 @@ export interface InferenceXSyncSummaryItem {
   isl: number;
   osl: number;
   specMethod: string;
-  disagg: boolean;
   pointCount: number;
   latestDate: string;
 }
@@ -173,7 +171,6 @@ export function createDefaultInferenceXSyncConfigs(): InferenceXSyncConfig[] {
             hardware: target.hardware,
             framework: target.framework,
             specMethod,
-            disagg: true,
             enabled: true
           });
           configs.push(config);
@@ -186,11 +183,21 @@ export function createDefaultInferenceXSyncConfigs(): InferenceXSyncConfig[] {
 
 export function normalizeInferenceXSyncConfigs(value: unknown): InferenceXSyncConfig[] {
   if (!Array.isArray(value)) return createDefaultInferenceXSyncConfigs();
-  const configs = Array.from(new Map(value
+  const configsByLineId = new Map<string, InferenceXSyncConfig>();
+  value
     .filter(isRecord)
     .map((item) => normalizeInferenceXSyncConfig(item))
     .filter((config) => config.model && config.precision && config.hardware && config.framework)
-    .map((config) => [makeInferenceXSyncLineId(config), config])).values());
+    .forEach((config) => {
+      const lineId = makeInferenceXSyncLineId(config);
+      const existing = configsByLineId.get(lineId);
+      if (existing) {
+        existing.enabled ||= config.enabled;
+        return;
+      }
+      configsByLineId.set(lineId, config);
+    });
+  const configs = Array.from(configsByLineId.values());
   return configs.length > 0 ? configs : createDefaultInferenceXSyncConfigs();
 }
 
@@ -203,7 +210,6 @@ export function normalizeInferenceXSyncConfig(value: Partial<InferenceXSyncConfi
   const hardware = normalizeText(value.hardware).toLowerCase() || 'mi355x';
   const framework = normalizeText(value.framework).toLowerCase() || 'mori-sglang';
   const specMethod = normalizeSpecMethod(value.specMethod);
-  const disagg = typeof value.disagg === 'boolean' ? value.disagg : true;
   const enabled = typeof value.enabled === 'boolean' ? value.enabled : true;
   const normalized = {
     model,
@@ -214,12 +220,13 @@ export function normalizeInferenceXSyncConfig(value: Partial<InferenceXSyncConfi
     hardware,
     framework,
     specMethod,
-    disagg,
     enabled
   };
+  const canonicalId = makeInferenceXSyncConfigId(normalized);
+  const savedId = normalizeText(value.id);
   return {
     ...normalized,
-    id: normalizeText(value.id) || makeInferenceXSyncConfigId(normalized)
+    id: savedId && savedId !== `${canonicalId}-agg` ? savedId : canonicalId
   };
 }
 
@@ -240,8 +247,7 @@ export function makeInferenceXSyncLineId(
     config.precision,
     config.hardware,
     config.framework,
-    normalizeSpecMethod(config.specMethod) === MTP_SPEC ? MTP_SPEC : '',
-    config.disagg ? '' : 'agg'
+    normalizeSpecMethod(config.specMethod) === MTP_SPEC ? MTP_SPEC : ''
   ]
     .filter(Boolean)
     .join('-')
@@ -366,8 +372,7 @@ export function formatInferenceXConfigLabel(config: InferenceXSyncConfig): strin
     formatSequenceLabel(config),
     config.precision.toUpperCase(),
     `${formatHardwareLabel(config.hardware)} / ${formatFrameworkLabel(config.framework)}`,
-    normalizeSpecMethod(config.specMethod) === MTP_SPEC ? 'MTP' : 'Non-MTP',
-    config.disagg ? 'disagg' : 'aggregated'
+    normalizeSpecMethod(config.specMethod) === MTP_SPEC ? 'MTP' : 'Non-MTP'
   ].filter(Boolean).join(' • ');
 }
 
@@ -381,8 +386,7 @@ export function inferenceXAvailabilityRowMatchesConfig(
     row.precision.toLowerCase() === config.precision.toLowerCase() &&
     hardwareMatches(row.hardware, config.hardware) &&
     row.framework.toLowerCase() === config.framework.toLowerCase() &&
-    normalizeSpecMethod(row.specMethod) === normalizeSpecMethod(config.specMethod) &&
-    row.disagg === config.disagg
+    normalizeSpecMethod(row.specMethod) === normalizeSpecMethod(config.specMethod)
   );
 }
 
@@ -526,7 +530,6 @@ function benchmarkRecordMatchesConfig(
   const hardware = readString(record, 'hardware').toLowerCase();
   const framework = readString(record, 'framework').toLowerCase();
   const specMethod = normalizeSpecMethod(readString(record, 'spec_method'));
-  const disagg = readBoolean(record, 'disagg') ?? false;
   const metrics = readMetrics(record);
   const throughput = readMetricNumber(metrics, THROUGHPUT_METRIC_KEYS);
   const metricKeySets = getXAxisMetricKeySetsForRecord(record, config);
@@ -539,13 +542,23 @@ function benchmarkRecordMatchesConfig(
     hardwareMatches(hardware, config.hardware) &&
     framework === config.framework.toLowerCase() &&
     specMethod === normalizeSpecMethod(config.specMethod) &&
-    disagg === config.disagg &&
     throughput !== null &&
     hasXMetric
   );
 }
 
 function filterLatestBenchmarkRecords(records: InferenceXBenchmarkRecord[]): InferenceXBenchmarkRecord[] {
+  const recordsByDisagg = new Map<boolean, InferenceXBenchmarkRecord[]>();
+  records.forEach((record) => {
+    const disagg = readBoolean(record, 'disagg') ?? false;
+    const group = recordsByDisagg.get(disagg) ?? [];
+    group.push(record);
+    recordsByDisagg.set(disagg, group);
+  });
+  return Array.from(recordsByDisagg.values()).flatMap((group) => filterLatestDatedRecords(group));
+}
+
+function filterLatestDatedRecords(records: InferenceXBenchmarkRecord[]): InferenceXBenchmarkRecord[] {
   if (records.length <= 1) return records;
   const latestDate = records
     .map((record) => readBenchmarkDate(record))
@@ -688,7 +701,7 @@ function benchmarkRecordToPoint(
   if (offload.label) point.kv_offload = offload.label;
   point.prefill_num_workers = readNumber(record, 'prefill_num_workers') ?? undefined;
   point.decode_num_workers = readNumber(record, 'decode_num_workers') ?? undefined;
-  point.disagg = config.disagg;
+  point.disagg = readBoolean(record, 'disagg') ?? false;
   point.is_multinode = readBoolean(record, 'is_multinode') ?? undefined;
 
   return point;
@@ -710,7 +723,6 @@ function makeSummaryItem(
     isl: config.isl,
     osl: config.osl,
     specMethod: normalizeSpecMethod(config.specMethod),
-    disagg: config.disagg,
     pointCount: line.points.length,
     latestDate: latestPointDate(line)
   };

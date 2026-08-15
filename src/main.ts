@@ -655,8 +655,7 @@ function createInferenceXSyncAddDraft(config: InferenceXSyncConfig): InferenceXS
     precision: config.precision,
     hardware: config.hardware,
     framework: config.framework,
-    specMethod: config.specMethod,
-    disagg: config.disagg
+    specMethod: config.specMethod
   };
 }
 
@@ -1795,17 +1794,6 @@ function renderInferenceXSyncAddConfig(): string {
           ${renderInferenceXSpecMethodOptions(options.specMethods, inferenceXSync.addSpecMethodSelection)}
         </select>
       </label>
-      <label>
-        <span>Disagg</span>
-        <select data-sync-add-field="disagg">
-          ${options.disaggValues
-            .map((value) => {
-              const raw = value ? 'true' : 'false';
-              return `<option value="${raw}" ${inferenceXSync.addDraft.disagg === value ? 'selected' : ''}>${value ? 'true' : 'false'}</option>`;
-            })
-            .join('')}
-        </select>
-      </label>
       <button type="button" class="primary action-button" data-sync-action="add-config">
         ${renderIcon('plus')}
         <span>Add Config</span>
@@ -1902,7 +1890,6 @@ function getInferenceXAddOptions(): {
   hardware: string[];
   frameworks: string[];
   specMethods: string[];
-  disaggValues: boolean[];
 } {
   const rows = getInferenceXOptionRows();
   const modelRows = rows.filter((row) => row.modelDisplay === inferenceXSync.addDraft.model);
@@ -1924,20 +1911,13 @@ function getInferenceXAddOptions(): {
       ? sequenceScopedRows
       : sequenceScopedRows.filter((row) => row.precision === inferenceXSync.addDraft.precision);
   const precisionScopedRows = precisionRows.length ? precisionRows : sequenceScopedRows;
-  const specRows =
-    inferenceXSync.addSpecMethodSelection === ALL_VALUE
-      ? precisionScopedRows
-      : precisionScopedRows.filter((row) => row.specMethod === inferenceXSync.addDraft.specMethod);
-  const specScopedRows = specRows.length ? specRows : precisionScopedRows;
-
   return {
     models: uniqueSorted(rows.map((row) => row.modelDisplay)),
     shapes: uniqueShapes(targetScopedRows),
     precisions: uniqueSorted(sequenceScopedRows.map((row) => row.precision)),
     hardware: uniqueSorted(modelScopedRows.map((row) => row.hardware)),
     frameworks: uniqueSorted(hardwareScopedRows.map((row) => row.framework)),
-    specMethods: uniqueSorted(precisionScopedRows.map((row) => row.specMethod)),
-    disaggValues: uniqueBooleans(specScopedRows.map((row) => row.disagg))
+    specMethods: uniqueSorted(precisionScopedRows.map((row) => row.specMethod))
   };
 }
 
@@ -1953,7 +1933,7 @@ function getInferenceXOptionRows(): InferenceXAvailabilityRow[] {
     hardware: config.hardware,
     framework: config.framework,
     specMethod: config.specMethod,
-    disagg: config.disagg,
+    disagg: true,
     date: ''
   }));
 }
@@ -1975,11 +1955,6 @@ function uniqueShapes(rows: InferenceXAvailabilityRow[]): InferenceXSequenceOpti
         b.osl - a.osl ||
         a.scenario.localeCompare(b.scenario)
     );
-}
-
-function uniqueBooleans(values: boolean[]): boolean[] {
-  const result = Array.from(new Set(values));
-  return result.length ? result.sort((a, b) => Number(b) - Number(a)) : [true, false];
 }
 
 function formatInferenceXSyncStatus(): string {
@@ -2149,6 +2124,13 @@ function applyInferenceXSyncResult(result: InferenceXSyncResult, options: { init
   clearAutoRenderTimer();
   const appliedAt = new Date().toISOString();
   const syncLineIds = new Set(result.series.map((line) => line.id));
+  const legacyLineIdByLineId = new Map<string, string>();
+  const replacedSyncLineIds = new Set(syncLineIds);
+  result.summary.forEach((item) => {
+    const legacyLineId = `${item.lineId}-agg`;
+    legacyLineIdByLineId.set(item.lineId, legacyLineId);
+    replacedSyncLineIds.add(legacyLineId);
+  });
   const changedLineIds = new Set(getInferenceXChangedSummaryItems().map((item) => item.lineId));
   const collapsedById = new Map(seriesDrafts.map((draft) => [draft.id, draft.collapsed]));
 
@@ -2163,20 +2145,25 @@ function applyInferenceXSyncResult(result: InferenceXSyncResult, options: { init
     const existingLineById = new Map(existingSeries.map((line) => [line.id, line]));
     let nextRenderOrder = getNextDraftRenderOrder() + result.series.length;
     const styledSyncSeries = result.series.map((line) => {
-      const existingDraft = existingDraftById.get(line.id);
-      const existingLine = existingLineById.get(line.id);
+      const legacyLineId = legacyLineIdByLineId.get(line.id);
+      const existingDraft = existingDraftById.get(line.id) ??
+        (legacyLineId ? existingDraftById.get(legacyLineId) : undefined);
+      const existingLine = existingLineById.get(line.id) ??
+        (legacyLineId ? existingLineById.get(legacyLineId) : undefined);
       const styled = applyExistingSyncLineStyle(line, existingDraft, existingLine);
       if (existingDraft || existingLine) return styled;
       nextRenderOrder -= 1;
       return { ...styled, renderOrder: nextRenderOrder };
     });
     currentSeries = [
-      ...existingSeries.filter((line) => !syncLineIds.has(line.id)),
+      ...existingSeries.filter((line) => !replacedSyncLineIds.has(line.id)),
       ...styledSyncSeries
     ];
     seriesDrafts = seriesToDrafts(currentSeries);
     seriesDrafts.forEach((draft) => {
-      const collapsed = collapsedById.get(draft.id);
+      const legacyLineId = legacyLineIdByLineId.get(draft.id);
+      const collapsed = collapsedById.get(draft.id) ??
+        (legacyLineId ? collapsedById.get(legacyLineId) : undefined);
       if (collapsed !== undefined) draft.collapsed = collapsed;
     });
     const newSyncSeries = styledSyncSeries.filter((line) => !existingLineById.has(line.id));
@@ -2311,8 +2298,6 @@ function updateInferenceXAddDraft(field: string, value: string): void {
     if (value !== ALL_VALUE) {
       inferenceXSync.addDraft.specMethod = value;
     }
-  } else if (field === 'disagg') {
-    inferenceXSync.addDraft.disagg = value === 'true';
   }
   alignInferenceXAddDraft(field);
 }
@@ -2332,8 +2317,7 @@ function alignInferenceXAddDraft(preferredField = ''): void {
     precision: candidate.precision,
     hardware: candidate.hardware,
     framework: candidate.framework,
-    specMethod: candidate.specMethod,
-    disagg: candidate.disagg
+    specMethod: candidate.specMethod
   };
   if (inferenceXSync.addShapeSelection !== ALL_VALUE) {
     inferenceXSync.addShapeSelection = makeInferenceXShapeValue(candidate);
@@ -2373,7 +2357,6 @@ function pickBestInferenceXAddRow(
     if (shouldScoreSpecMethod && row.specMethod === desired.specMethod) {
       score += preferredField === 'specMethod' ? 1000 : 30;
     }
-    if (row.disagg === desired.disagg) score += preferredField === 'disagg' ? 1000 : 20;
     return score;
   };
 
@@ -2489,8 +2472,7 @@ function inferenceXAvailabilityRowMatchesAddDraft(row: InferenceXAvailabilityRow
       row.framework === inferenceXSync.addFrameworkSelection
     ) &&
     (inferenceXSync.addSpecMethodSelection === ALL_VALUE ||
-      row.specMethod === inferenceXSync.addSpecMethodSelection) &&
-    row.disagg === draft.disagg
+      row.specMethod === inferenceXSync.addSpecMethodSelection)
   );
 }
 
