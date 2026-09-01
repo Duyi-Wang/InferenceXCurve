@@ -6466,7 +6466,13 @@ function extractBenchmarkRecords(value: unknown): Record<string, unknown>[] {
       node.slice(0, 20).forEach((child) => walk(child, depth + 1));
       return;
     }
-    if (isRecord(node)) Object.values(node).forEach((child) => walk(child, depth + 1));
+    if (isRecord(node)) {
+      if (looksLikeBenchmarkRecord(node)) {
+        records.push(node);
+        return;
+      }
+      Object.values(node).forEach((child) => walk(child, depth + 1));
+    }
   };
   walk(value, 0);
   return records.filter(looksLikeBenchmarkRecord);
@@ -6706,16 +6712,28 @@ const POINT_IMPORT_ALIASES: Record<string, string[]> = {
   ],
   server_gpu_cache_hit_rate: [
     'server_gpu_cache_hit_rate',
+    'server_metrics.cache.gpu_cache_hit_rate',
+    'server_metrics.cache.server_gpu_cache_hit_rate',
+    'request_metrics.cache.gpu_cache_hit_rate',
     'Chip Cache Hit Rate',
     'GPU Cache Hit Rate'
   ],
   server_external_cache_hit_rate: [
     'server_external_cache_hit_rate',
+    'server_metrics.cache.external_cache_hit_rate',
+    'request_metrics.cache.external_cache_hit_rate',
     'External Cache Hit Rate'
   ],
-  server_cpu_cache_hit_rate: ['server_cpu_cache_hit_rate', 'CPU Cache Hit Rate'],
+  server_cpu_cache_hit_rate: [
+    'server_cpu_cache_hit_rate',
+    'server_metrics.cache.cpu_cache_hit_rate',
+    'request_metrics.cache.cpu_cache_hit_rate',
+    'CPU Cache Hit Rate'
+  ],
   theoretical_cache_hit_rate: [
     'theoretical_cache_hit_rate',
+    'request_metrics.cache.theoretical_cache_hit_rate',
+    'derived_agentic_metrics.cache.theoretical_cache_hit_rate',
     'Theoretical Cache Hit Rate'
   ]
 };
@@ -6997,22 +7015,31 @@ function importedPointFromBenchmarkRecord(
   const serverGpuCacheHitRate = readMetricNumber(record, [
     'server_gpu_cache_hit_rate',
     'metrics.server_gpu_cache_hit_rate',
+    'server_metrics.cache.gpu_cache_hit_rate',
+    'server_metrics.cache.server_gpu_cache_hit_rate',
+    'request_metrics.cache.gpu_cache_hit_rate',
     'chip cache hit rate',
     'gpu cache hit rate'
   ]);
   const serverExternalCacheHitRate = readMetricNumber(record, [
     'server_external_cache_hit_rate',
     'metrics.server_external_cache_hit_rate',
+    'server_metrics.cache.external_cache_hit_rate',
+    'request_metrics.cache.external_cache_hit_rate',
     'external cache hit rate'
   ]);
   const serverCpuCacheHitRate = readMetricNumber(record, [
     'server_cpu_cache_hit_rate',
     'metrics.server_cpu_cache_hit_rate',
+    'server_metrics.cache.cpu_cache_hit_rate',
+    'request_metrics.cache.cpu_cache_hit_rate',
     'cpu cache hit rate'
   ]);
   const theoreticalCacheHitRate = readMetricNumber(record, [
     'theoretical_cache_hit_rate',
     'metrics.theoretical_cache_hit_rate',
+    'request_metrics.cache.theoretical_cache_hit_rate',
+    'derived_agentic_metrics.cache.theoretical_cache_hit_rate',
     'theoretical cache hit rate'
   ]);
 

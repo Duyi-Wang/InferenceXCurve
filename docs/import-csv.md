@@ -256,6 +256,9 @@ Optional raw benchmark aliases include:
 - Cache hit rates: `server_gpu_cache_hit_rate`,
   `server_external_cache_hit_rate`, `server_cpu_cache_hit_rate`, and
   `theoretical_cache_hit_rate`, either top-level or nested under `metrics`.
+  Native Agentic Trace artifacts are also supported: server-observed rates are
+  read from `server_metrics.cache`, while the theoretical rate is read from
+  `request_metrics.cache.theoretical_cache_hit_rate`.
 
 In raw benchmark CSV, optional metadata may be empty. Agentic scenario/workload
 values such as `agentic_traces` become `Agentic Traces`. Fixed-run values such
