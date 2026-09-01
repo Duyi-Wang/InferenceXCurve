@@ -2198,6 +2198,49 @@ p {
   grid-column: span 20;
 }
 
+.series-field-note > summary {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--background) 86%, transparent);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  list-style: none;
+}
+
+.series-field-note > summary::-webkit-details-marker {
+  display: none;
+}
+
+.series-field-note > summary::before {
+  content: '›';
+  font-size: 16px;
+  line-height: 1;
+  transition: transform 120ms ease;
+}
+
+.series-field-note[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.series-note-state {
+  margin-left: auto;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.8;
+}
+
+.series-field-note[open] > summary {
+  margin-bottom: 6px;
+}
+
 .series-field-precision {
   grid-column: span 2;
 }
@@ -2239,8 +2282,9 @@ p {
 }
 
 .series-field textarea {
-  min-height: 72px;
-  resize: vertical;
+  min-height: 34px;
+  overflow-y: hidden;
+  resize: none;
   line-height: 1.45;
 }
 

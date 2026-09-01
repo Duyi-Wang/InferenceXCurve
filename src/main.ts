@@ -2872,16 +2872,21 @@ function getSeriesFieldClassName(field: SeriesField): string {
 }
 
 function renderSeriesNoteField(seriesIndex: number, value: string): string {
+  const hasNote = Boolean(value.trim());
   return `
-    <label class="series-field series-field-note">
-      <span>Line Note</span>
+    <details class="series-field series-field-note" ${hasNote ? 'open' : ''}>
+      <summary>
+        <span>Line Note</span>
+        <span class="series-note-state">${hasNote ? 'Added' : 'Empty'}</span>
+      </summary>
       <textarea
         data-series-index="${seriesIndex}"
         data-series-field="note"
-        rows="3"
+        rows="1"
+        aria-label="Line Note"
         placeholder="Editor-only notes about this line"
       >${escapeHtml(value)}</textarea>
-    </label>
+    </details>
   `;
 }
 
@@ -3252,6 +3257,10 @@ function attachSeriesEditorEvents(): void {
   attachSeriesDragEvents();
 
   seriesEditorEl
+    .querySelectorAll<HTMLTextAreaElement>('textarea[data-series-field="note"]')
+    .forEach(autoResizeSeriesNote);
+
+  seriesEditorEl
     .querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
       'input[data-series-field], select[data-series-field], textarea[data-series-field]'
     )
@@ -3264,6 +3273,11 @@ function attachSeriesEditorEvents(): void {
       draft[field] = normalizeCellText(input.value);
       if (field === 'color') {
         syncColorPicker(seriesIndex, draft.color || getEditorResolvedColor(seriesIndex), draft.color);
+      }
+      if (field === 'note' && input instanceof HTMLTextAreaElement) {
+        autoResizeSeriesNote(input);
+        const stateLabel = input.closest('.series-field-note')?.querySelector<HTMLElement>('.series-note-state');
+        if (stateLabel) stateLabel.textContent = draft.note ? 'Added' : 'Empty';
       }
       scheduleLocalSave();
       if (field !== 'note') markChartDirty();
@@ -3451,6 +3465,11 @@ function attachSeriesEditorEvents(): void {
     cell.addEventListener('paste', handlePointTablePaste);
     cell.addEventListener('keydown', handlePointTableKeydown);
   });
+}
+
+function autoResizeSeriesNote(textarea: HTMLTextAreaElement): void {
+  textarea.style.height = 'auto';
+  textarea.style.height = `${textarea.scrollHeight}px`;
 }
 
 function attachSeriesDragEvents(): void {
