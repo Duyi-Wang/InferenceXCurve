@@ -23,6 +23,7 @@ import {
   DEFAULT_CHART_WATERMARK,
   getAvailablePrecisions,
   getInferenceCurveColorSourceSeries,
+  getInferenceCurvePointGpuCount,
   getInferenceCurveTitle,
   getInferenceCurveXAxisLabel,
   INFERENCE_CURVE_MARGIN,
@@ -240,6 +241,7 @@ interface ParsedPointMetadata {
   num_decode_gpu?: number;
   prefill_tp?: number;
   prefill_ep?: number;
+  prefill_dcp_size?: number;
   prefill_dp_attention?: boolean;
   decode_dp_attention?: boolean;
 }
@@ -247,6 +249,7 @@ interface ParsedPointMetadata {
 interface ParsedStrategyMetadata {
   decode_tp?: number;
   decode_ep?: number;
+  decode_dcp_size?: number;
 }
 
 interface GitHubRunRef {
@@ -372,6 +375,7 @@ const MODEL_PATH_TO_DB_KEY: Record<string, string> = {
 const MODEL_KEY_PRECISION_SUFFIX = /-(?:fp4|fp8|mxfp4|nvfp4)(?:-.*)?$/iu;
 
 const pointColumns: TableColumn[] = [
+  { key: 'concurrency', label: 'Concurrency', numeric: true },
   { key: 'shape', label: 'Marker' },
   { key: 'interactivity', label: 'Interactivity', numeric: true },
   {
@@ -386,11 +390,12 @@ const pointColumns: TableColumn[] = [
   { key: 'num_decode_gpu', label: 'Decode GPUs', numeric: true },
   { key: 'prefill_tp', label: 'Prefill TP', numeric: true },
   { key: 'prefill_ep', label: 'Prefill EP', numeric: true },
+  { key: 'prefill_dcp_size', label: 'Prefill DCP', numeric: true },
   { key: 'prefill_dp_attention', label: 'Prefill DPA' },
   { key: 'decode_tp', label: 'Decode TP', numeric: true },
   { key: 'decode_ep', label: 'Decode EP', numeric: true },
+  { key: 'decode_dcp_size', label: 'Decode DCP', numeric: true },
   { key: 'decode_dp_attention', label: 'Decode DPA' },
-  { key: 'concurrency', label: 'Concurrency', numeric: true },
   { key: 'label', label: 'Note' }
 ];
 
@@ -451,7 +456,11 @@ const hiddenPointKeys = [
   'decode_num_workers',
   'disagg',
   'is_multinode',
-  'kv_offload'
+  'kv_offload',
+  'server_gpu_cache_hit_rate',
+  'server_external_cache_hit_rate',
+  'server_cpu_cache_hit_rate',
+  'theoretical_cache_hit_rate'
 ] as const;
 const knownPointKeys = new Set([
   ...pointColumns.map((column) => column.key),
@@ -470,11 +479,13 @@ const pointConfigSplitKeys = [
   'num_decode_gpu',
   'prefill_tp',
   'prefill_ep',
+  'prefill_dcp_size',
   'prefill_dp_attention',
   'decode_tp',
   'decode_ep',
+  'decode_dcp_size',
   'decode_dp_attention',
-  ...hiddenPointKeys
+  ...hiddenPointKeys.filter((key) => !key.includes('cache_hit_rate'))
 ] as const;
 // Point columns whose data-panel display is normalized to two decimal places.
 const DECIMAL_DISPLAY_KEYS = new Set([
@@ -2770,7 +2781,7 @@ function renderSeriesCard(series: SeriesDraft, seriesIndex: number, autoColor: s
             <span class="help-tip-bubble" aria-hidden="true">
               <strong class="help-tip-title">Copy and split by config.</strong>
               <span class="help-tip-row">
-                Groups points by Prefill/Decode GPUs, TP, EP, DPA, KV Offload, and hidden strategy fields.
+                Groups points by Prefill/Decode GPUs, TP, EP, DCP, DPA, KV Offload, and hidden strategy fields.
               </span>
               <span class="help-tip-row">
                 Ignores concurrency, interactivity, throughput, point marker, and note.
@@ -4058,11 +4069,17 @@ function seriesToDrafts(series: InferenceCurveSeries[]): SeriesDraft[] {
         num_decode_gpu: formatPointFieldValue(point.num_decode_gpu ?? labelMetadata.num_decode_gpu),
         prefill_tp: formatPointFieldValue(point.prefill_tp ?? labelMetadata.prefill_tp),
         prefill_ep: formatPointFieldValue(point.prefill_ep ?? labelMetadata.prefill_ep),
+        prefill_dcp_size: formatPointFieldValue(
+          point.prefill_dcp_size ?? labelMetadata.prefill_dcp_size
+        ),
         prefill_dp_attention: formatPointFieldValue(
           point.prefill_dp_attention ?? point.dp_attention ?? labelMetadata.prefill_dp_attention
         ),
         decode_tp: formatPointFieldValue(point.decode_tp ?? strategyMetadata.decode_tp),
         decode_ep: formatPointFieldValue(point.decode_ep ?? strategyMetadata.decode_ep),
+        decode_dcp_size: formatPointFieldValue(
+          point.decode_dcp_size ?? strategyMetadata.decode_dcp_size
+        ),
         decode_dp_attention: formatPointFieldValue(
           point.decode_dp_attention ?? point.dp_attention ?? labelMetadata.decode_dp_attention
         ),
@@ -4072,6 +4089,14 @@ function seriesToDrafts(series: InferenceCurveSeries[]): SeriesDraft[] {
         disagg: formatPointFieldValue(point.disagg),
         is_multinode: formatPointFieldValue(point.is_multinode),
         kv_offload: formatPointFieldValue(point.kv_offload),
+        server_gpu_cache_hit_rate: formatPointFieldValue(point.server_gpu_cache_hit_rate),
+        server_external_cache_hit_rate: formatPointFieldValue(
+          point.server_external_cache_hit_rate
+        ),
+        server_cpu_cache_hit_rate: formatPointFieldValue(point.server_cpu_cache_hit_rate),
+        theoretical_cache_hit_rate: formatPointFieldValue(
+          point.theoretical_cache_hit_rate
+        ),
         concurrency: formatPointFieldValue(point.concurrency),
         label: point.label ?? ''
       };
@@ -4210,17 +4235,21 @@ function draftsToSeriesInternal(drafts: SeriesDraft[]): InferenceCurveSeries[] {
         const numDecodeGpu = parseNumber(row.num_decode_gpu);
         const prefillTp = parseNumber(row.prefill_tp);
         const prefillEp = parseNumber(row.prefill_ep);
+        const prefillDcp = parseNumber(row.prefill_dcp_size);
         const prefillDpAttention = parseBoolean(row.prefill_dp_attention) ?? parseBoolean(row.dp_attention);
         const decodeTp = parseNumber(row.decode_tp);
         const decodeEp = parseNumber(row.decode_ep);
+        const decodeDcp = parseNumber(row.decode_dcp_size);
         const decodeDpAttention = parseBoolean(row.decode_dp_attention) ?? parseBoolean(row.dp_attention);
         const prefillNumWorkers = parseNumber(row.prefill_num_workers);
         const decodeNumWorkers = parseNumber(row.decode_num_workers);
         const disagg = parseBoolean(row.disagg);
         const isMultinode = parseBoolean(row.is_multinode);
         const kvOffload = (row.kv_offload ?? '').trim();
-        const totalGpu =
-          numPrefillGpu !== null && numDecodeGpu !== null ? numPrefillGpu + numDecodeGpu : null;
+        const serverGpuCacheHitRate = parseNumber(row.server_gpu_cache_hit_rate);
+        const serverExternalCacheHitRate = parseNumber(row.server_external_cache_hit_rate);
+        const serverCpuCacheHitRate = parseNumber(row.server_cpu_cache_hit_rate);
+        const theoreticalCacheHitRate = parseNumber(row.theoretical_cache_hit_rate);
         if (ttft !== null) point.ttft = ttft;
         if (ttftPercentiles) point.ttftPercentiles = ttftPercentiles;
         if (endToEnd !== null) point.endToEnd = endToEnd;
@@ -4233,9 +4262,11 @@ function draftsToSeriesInternal(drafts: SeriesDraft[]): InferenceCurveSeries[] {
         if (numDecodeGpu !== null) point.num_decode_gpu = numDecodeGpu;
         if (prefillTp !== null) point.prefill_tp = prefillTp;
         if (prefillEp !== null) point.prefill_ep = prefillEp;
+        if (prefillDcp !== null) point.prefill_dcp_size = prefillDcp;
         if (prefillDpAttention !== null) point.prefill_dp_attention = prefillDpAttention;
         if (decodeTp !== null) point.decode_tp = decodeTp;
         if (decodeEp !== null) point.decode_ep = decodeEp;
+        if (decodeDcp !== null) point.decode_dcp_size = decodeDcp;
         if (decodeDpAttention !== null) point.decode_dp_attention = decodeDpAttention;
         if (prefillNumWorkers !== null) point.prefill_num_workers = prefillNumWorkers;
         if (decodeNumWorkers !== null) point.decode_num_workers = decodeNumWorkers;
@@ -4246,12 +4277,25 @@ function draftsToSeriesInternal(drafts: SeriesDraft[]): InferenceCurveSeries[] {
         ) {
           point.dp_attention = prefillDpAttention;
         }
-        point.tp = totalGpu ?? parseNumber(row.tp) ?? decodeTp ?? undefined;
-        point.strategy = (row.strategy ?? '').trim() || makeStrategyLabel(decodeTp, decodeEp);
         if (disagg !== null) point.disagg = disagg;
-        else if (numPrefillGpu !== null && numDecodeGpu !== null) point.disagg = true;
         if (isMultinode !== null) point.is_multinode = isMultinode;
         if (kvOffload) point.kv_offload = kvOffload;
+        if (serverGpuCacheHitRate !== null) {
+          point.server_gpu_cache_hit_rate = serverGpuCacheHitRate;
+        }
+        if (serverExternalCacheHitRate !== null) {
+          point.server_external_cache_hit_rate = serverExternalCacheHitRate;
+        }
+        if (serverCpuCacheHitRate !== null) {
+          point.server_cpu_cache_hit_rate = serverCpuCacheHitRate;
+        }
+        if (theoreticalCacheHitRate !== null) {
+          point.theoretical_cache_hit_rate = theoreticalCacheHitRate;
+        }
+        point.tp =
+          getInferenceCurvePointGpuCount(point) ?? parseNumber(row.tp) ?? decodeTp ?? undefined;
+        point.strategy =
+          (row.strategy ?? '').trim() || makeStrategyLabel(decodeTp, decodeEp, decodeDcp ?? prefillDcp);
         return point;
       })
       .filter((point): point is NonNullable<typeof point> => point !== null);
@@ -4385,12 +4429,20 @@ function detectPointHeaderMap(headerRow: string[]): Map<number, string> | null {
     ['prefill ep', 'prefill_ep'],
     ['prefill_ep', 'prefill_ep'],
     ['预填充ep', 'prefill_ep'],
+    ['prefill dcp', 'prefill_dcp_size'],
+    ['prefill_dcp_size', 'prefill_dcp_size'],
+    ['预填充dcp', 'prefill_dcp_size'],
     ['decode tp', 'decode_tp'],
     ['decode_tp', 'decode_tp'],
     ['解码tp', 'decode_tp'],
     ['decode ep', 'decode_ep'],
     ['decode_ep', 'decode_ep'],
     ['解码ep', 'decode_ep'],
+    ['decode dcp', 'decode_dcp_size'],
+    ['decode_dcp_size', 'decode_dcp_size'],
+    ['dcp', 'decode_dcp_size'],
+    ['dcp_size', 'decode_dcp_size'],
+    ['解码dcp', 'decode_dcp_size'],
     ['prefill dpa', 'prefill_dp_attention'],
     ['prefill dp attention', 'prefill_dp_attention'],
     ['prefill_dp_attention', 'prefill_dp_attention'],
@@ -4424,6 +4476,15 @@ function detectPointHeaderMap(headerRow: string[]): Map<number, string> | null {
     ['offload', 'kv_offload'],
     ['offload mode', 'kv_offload'],
     ['offload_mode', 'kv_offload'],
+    ['chip cache hit rate', 'server_gpu_cache_hit_rate'],
+    ['gpu cache hit rate', 'server_gpu_cache_hit_rate'],
+    ['server_gpu_cache_hit_rate', 'server_gpu_cache_hit_rate'],
+    ['external cache hit rate', 'server_external_cache_hit_rate'],
+    ['server_external_cache_hit_rate', 'server_external_cache_hit_rate'],
+    ['cpu cache hit rate', 'server_cpu_cache_hit_rate'],
+    ['server_cpu_cache_hit_rate', 'server_cpu_cache_hit_rate'],
+    ['theoretical cache hit rate', 'theoretical_cache_hit_rate'],
+    ['theoretical_cache_hit_rate', 'theoretical_cache_hit_rate'],
     ['concurrency', 'concurrency'],
     ['conc', 'concurrency'],
     ['并发', 'concurrency'],
@@ -4612,6 +4673,7 @@ function parsePointMetadataLabel(label: string | undefined): ParsedPointMetadata
     num_decode_gpu: parseNumberFromText(label, /\bdecode\s+GPUs?\s*:?\s*(\d+(?:\.\d+)?)/iu),
     prefill_tp: prefillMatch ? Number(prefillMatch[1]) : undefined,
     prefill_ep: prefillMatch ? Number(prefillMatch[2]) : undefined,
+    prefill_dcp_size: parseNumberFromText(label, /\bprefill\s+DCP\s*:?\s*(\d+(?:\.\d+)?)/iu),
     prefill_dp_attention: legacyDpAttention,
     decode_dp_attention: legacyDpAttention
   };
@@ -4620,15 +4682,21 @@ function parsePointMetadataLabel(label: string | undefined): ParsedPointMetadata
 function parsePointStrategy(strategy: string | undefined): ParsedStrategyMetadata {
   return {
     decode_tp: parseNumberFromText(strategy, /\bTP\s*(\d+(?:\.\d+)?)/iu),
-    decode_ep: parseNumberFromText(strategy, /\bEP\s*(\d+(?:\.\d+)?)/iu)
+    decode_ep: parseNumberFromText(strategy, /\bEP\s*(\d+(?:\.\d+)?)/iu),
+    decode_dcp_size: parseNumberFromText(strategy, /\bDCP\s*(\d+(?:\.\d+)?)/iu)
   };
 }
 
-function makeStrategyLabel(tp: number | null, ep: number | null): string | undefined {
-  if (tp === null && ep === null) return undefined;
-  if (tp !== null && ep !== null) return `TP${tp}/EP${ep}`;
-  if (tp !== null) return `TP${tp}`;
-  return `EP${ep}`;
+function makeStrategyLabel(
+  tp: number | null,
+  ep: number | null,
+  dcp: number | null = null
+): string | undefined {
+  const parts: string[] = [];
+  if (tp !== null) parts.push(`TP${tp}`);
+  if (ep !== null) parts.push(`EP${ep}`);
+  if (dcp !== null && dcp > 1) parts.push(`DCP${dcp}`);
+  return parts.length > 0 ? parts.join('/') : undefined;
 }
 
 function parseNumberFromText(value: string | undefined, pattern: RegExp): number | undefined {
@@ -6635,6 +6703,20 @@ const POINT_IMPORT_ALIASES: Record<string, string[]> = {
     'offload_mode',
     'Offload Mode',
     'offload mode'
+  ],
+  server_gpu_cache_hit_rate: [
+    'server_gpu_cache_hit_rate',
+    'Chip Cache Hit Rate',
+    'GPU Cache Hit Rate'
+  ],
+  server_external_cache_hit_rate: [
+    'server_external_cache_hit_rate',
+    'External Cache Hit Rate'
+  ],
+  server_cpu_cache_hit_rate: ['server_cpu_cache_hit_rate', 'CPU Cache Hit Rate'],
+  theoretical_cache_hit_rate: [
+    'theoretical_cache_hit_rate',
+    'Theoretical Cache Hit Rate'
   ]
 };
 
@@ -6880,8 +6962,19 @@ function importedPointFromBenchmarkRecord(
   const decodeGpu = readMetricNumber(record, ['num_decode_gpu', 'decode gpus', 'decode_gpu']);
   const prefillTp = readMetricNumber(record, ['prefill_tp', 'prefill tp']);
   const prefillEp = readMetricNumber(record, ['prefill_ep', 'prefill ep']);
+  const commonDcp = readMetricNumber(record, ['dcp_size', 'dcp size', 'metrics.dcp_size']);
+  const prefillDcp = readMetricNumber(record, [
+    'prefill_dcp_size',
+    'prefill dcp',
+    'metrics.prefill_dcp_size'
+  ]) ?? commonDcp;
   const decodeTp = readMetricNumber(record, ['decode_tp', 'decode tp', 'tp']);
   const decodeEp = readMetricNumber(record, ['decode_ep', 'decode ep', 'ep']);
+  const decodeDcp = readMetricNumber(record, [
+    'decode_dcp_size',
+    'decode dcp',
+    'metrics.decode_dcp_size'
+  ]) ?? commonDcp;
   const prefillDpa =
     readMetricBoolean(record, ['prefill_dp_attention', 'prefill dpa']) ??
     readMetricBoolean(record, ['dp_attention', 'dpa']);
@@ -6893,13 +6986,42 @@ function importedPointFromBenchmarkRecord(
   const shape = normalizePointShapeValue(
     readMetricString(record, ['shape', 'marker', 'point_shape', 'point shape'])
   );
-  const totalGpu = prefillGpu !== null && decodeGpu !== null ? prefillGpu + decodeGpu : null;
+  const disagg = readMetricBoolean(record, ['disagg']) ?? false;
+  const totalGpu = getInferenceCurvePointGpuCount({
+    throughput,
+    num_prefill_gpu: prefillGpu ?? undefined,
+    num_decode_gpu: decodeGpu ?? undefined,
+    disagg,
+    tp: decodeTp ?? undefined
+  });
+  const serverGpuCacheHitRate = readMetricNumber(record, [
+    'server_gpu_cache_hit_rate',
+    'metrics.server_gpu_cache_hit_rate',
+    'chip cache hit rate',
+    'gpu cache hit rate'
+  ]);
+  const serverExternalCacheHitRate = readMetricNumber(record, [
+    'server_external_cache_hit_rate',
+    'metrics.server_external_cache_hit_rate',
+    'external cache hit rate'
+  ]);
+  const serverCpuCacheHitRate = readMetricNumber(record, [
+    'server_cpu_cache_hit_rate',
+    'metrics.server_cpu_cache_hit_rate',
+    'cpu cache hit rate'
+  ]);
+  const theoreticalCacheHitRate = readMetricNumber(record, [
+    'theoretical_cache_hit_rate',
+    'metrics.theoretical_cache_hit_rate',
+    'theoretical cache hit rate'
+  ]);
 
   const point: InferenceCurveSeries['points'][number] = {
     throughput,
     precision,
-    strategy: makeStrategyLabel(decodeTp, decodeEp),
+    strategy: makeStrategyLabel(decodeTp, decodeEp, decodeDcp ?? prefillDcp),
     tp: totalGpu ?? decodeTp ?? undefined,
+    disagg,
     concurrency: concurrency ?? undefined,
     label: makeImportedPointLabel(
       date,
@@ -6927,16 +7049,25 @@ function importedPointFromBenchmarkRecord(
   if (decodeGpu !== null) point.num_decode_gpu = decodeGpu;
   if (prefillTp !== null) point.prefill_tp = prefillTp;
   if (prefillEp !== null) point.prefill_ep = prefillEp;
+  if (prefillDcp !== null) point.prefill_dcp_size = prefillDcp;
   if (decodeTp !== null) point.decode_tp = decodeTp;
   if (decodeEp !== null) point.decode_ep = decodeEp;
+  if (decodeDcp !== null) point.decode_dcp_size = decodeDcp;
   if (prefillDpa !== undefined) point.prefill_dp_attention = prefillDpa;
   if (decodeDpa !== undefined) point.decode_dp_attention = decodeDpa;
   if (prefillDpa !== undefined && prefillDpa === decodeDpa) point.dp_attention = prefillDpa;
   if (offload.label) point.kv_offload = offload.label;
+  if (serverGpuCacheHitRate !== null) point.server_gpu_cache_hit_rate = serverGpuCacheHitRate;
+  if (serverExternalCacheHitRate !== null) {
+    point.server_external_cache_hit_rate = serverExternalCacheHitRate;
+  }
+  if (serverCpuCacheHitRate !== null) point.server_cpu_cache_hit_rate = serverCpuCacheHitRate;
+  if (theoreticalCacheHitRate !== null) {
+    point.theoretical_cache_hit_rate = theoreticalCacheHitRate;
+  }
   if (shape) point.shape = shape;
   point.prefill_num_workers = readMetricNumber(record, ['prefill_num_workers', 'prefill workers']) ?? undefined;
   point.decode_num_workers = readMetricNumber(record, ['decode_num_workers', 'decode workers']) ?? undefined;
-  point.disagg = readMetricBoolean(record, ['disagg']) ?? (prefillGpu !== null && decodeGpu !== null);
   point.is_multinode = readMetricBoolean(record, ['is_multinode', 'multi_node', 'multinode']) ?? undefined;
 
   return {
@@ -7027,6 +7158,12 @@ function mergeImportedSeries(series: InferenceCurveSeries[]): InferenceCurveSeri
         point.endToEndPercentiles,
         point.e2eNormalizedInteractivityPercentiles,
         point.kv_offload,
+        point.prefill_dcp_size,
+        point.decode_dcp_size,
+        point.server_gpu_cache_hit_rate,
+        point.server_external_cache_hit_rate,
+        point.server_cpu_cache_hit_rate,
+        point.theoretical_cache_hit_rate,
         point.precision,
         point.concurrency,
         point.label
@@ -7626,16 +7763,22 @@ function buildChartCsvRows(mode: CsvExportMode): string[][] {
       'Total GPUs',
       'Prefill TP',
       'Prefill EP',
+      'Prefill DCP',
       'Prefill DPA',
       'Prefill Workers',
       'Decode TP',
       'Decode EP',
+      'Decode DCP',
       'Decode DPA',
       'Decode Workers',
       'DPA',
       'Disagg',
       'Multi-node',
       'KV Offload',
+      'Chip Cache Hit Rate',
+      'External Cache Hit Rate',
+      'CPU Cache Hit Rate',
+      'Theoretical Cache Hit Rate',
       'Concurrency',
       'Strategy',
       'Note'
@@ -7651,10 +7794,7 @@ function buildChartCsvRows(mode: CsvExportMode): string[][] {
     series.points.forEach(({ point, pointIndex }) => {
       const currentPoint = currentPointByKey.get(`${series.id}|${pointIndex}`);
       const pointPrecision = String(point.precision ?? getSeriesPrecision(line));
-      const prefillGpus = readExportNumber(point.num_prefill_gpu);
-      const decodeGpus = readExportNumber(point.num_decode_gpu);
-      const totalGpus =
-        prefillGpus !== undefined && decodeGpus !== undefined ? prefillGpus + decodeGpus : point.tp;
+      const totalGpus = getInferenceCurvePointGpuCount(point);
       const includedInChart =
         filteredLine &&
         activeLine &&
@@ -7695,16 +7835,22 @@ function buildChartCsvRows(mode: CsvExportMode): string[][] {
         formatExportValue(totalGpus),
         formatExportValue(point.prefill_tp),
         formatExportValue(point.prefill_ep),
+        formatExportValue(point.prefill_dcp_size),
         formatExportValue(point.prefill_dp_attention),
         formatExportValue(point.prefill_num_workers),
         formatExportValue(point.decode_tp),
         formatExportValue(point.decode_ep),
+        formatExportValue(point.decode_dcp_size),
         formatExportValue(point.decode_dp_attention),
         formatExportValue(point.decode_num_workers),
         formatExportValue(point.dp_attention),
         formatExportValue(point.disagg),
         formatExportValue(point.is_multinode),
         formatExportValue(point.kv_offload),
+        formatExportValue(point.server_gpu_cache_hit_rate),
+        formatExportValue(point.server_external_cache_hit_rate),
+        formatExportValue(point.server_cpu_cache_hit_rate),
+        formatExportValue(point.theoretical_cache_hit_rate),
         formatExportValue(point.concurrency),
         String(point.strategy ?? ''),
         String(point.label ?? '')
@@ -7756,10 +7902,6 @@ function getE2ENormalizedInteractivityExportValues(
   return E2E_NORMALIZED_INTERACTIVITY_PERCENTILES.map((percentile) =>
     formatExportValue(point.e2eNormalizedInteractivityPercentiles?.[percentile])
   );
-}
-
-function readExportNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
 function formatExportValue(value: unknown): string {

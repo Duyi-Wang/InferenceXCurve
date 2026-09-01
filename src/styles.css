@@ -2672,9 +2672,11 @@ p {
 .point-table td.point-cell-num_decode_gpu,
 .point-table td.point-cell-prefill_tp,
 .point-table td.point-cell-prefill_ep,
+.point-table td.point-cell-prefill_dcp_size,
 .point-table td.point-cell-prefill_dp_attention,
 .point-table td.point-cell-decode_tp,
 .point-table td.point-cell-decode_ep,
+.point-table td.point-cell-decode_dcp_size,
 .point-table td.point-cell-decode_dp_attention,
 .point-table td.point-cell-concurrency {
   text-align: center;
@@ -2721,10 +2723,14 @@ p {
 .point-table td.point-cell-prefill_tp,
 .point-table th.point-cell-prefill_ep,
 .point-table td.point-cell-prefill_ep,
+.point-table th.point-cell-prefill_dcp_size,
+.point-table td.point-cell-prefill_dcp_size,
 .point-table th.point-cell-decode_tp,
 .point-table td.point-cell-decode_tp,
 .point-table th.point-cell-decode_ep,
-.point-table td.point-cell-decode_ep {
+.point-table td.point-cell-decode_ep,
+.point-table th.point-cell-decode_dcp_size,
+.point-table td.point-cell-decode_dcp_size {
   width: 58px;
 }
 

@@ -1,6 +1,7 @@
-import type {
-  InferenceCurveLatencyPercentiles,
-  InferenceCurveSeries
+import {
+  getInferenceCurvePointGpuCount,
+  type InferenceCurveLatencyPercentiles,
+  type InferenceCurveSeries
 } from './inferenceCurveChart';
 
 export interface InferenceXSyncConfig {
@@ -350,15 +351,21 @@ export function fingerprintInferenceCurveSeries(line: InferenceCurveSeries): str
       num_decode_gpu: point.num_decode_gpu ?? '',
       prefill_tp: point.prefill_tp ?? '',
       prefill_ep: point.prefill_ep ?? '',
+      prefill_dcp_size: point.prefill_dcp_size ?? '',
       prefill_dp_attention: point.prefill_dp_attention ?? '',
       prefill_num_workers: point.prefill_num_workers ?? '',
       decode_tp: point.decode_tp ?? '',
       decode_ep: point.decode_ep ?? '',
+      decode_dcp_size: point.decode_dcp_size ?? '',
       decode_dp_attention: point.decode_dp_attention ?? '',
       decode_num_workers: point.decode_num_workers ?? '',
       disagg: point.disagg ?? '',
       is_multinode: point.is_multinode ?? '',
       kv_offload: point.kv_offload ?? '',
+      server_gpu_cache_hit_rate: point.server_gpu_cache_hit_rate ?? '',
+      server_external_cache_hit_rate: point.server_external_cache_hit_rate ?? '',
+      server_cpu_cache_hit_rate: point.server_cpu_cache_hit_rate ?? '',
+      theoretical_cache_hit_rate: point.theoretical_cache_hit_rate ?? '',
       concurrency: point.concurrency ?? '',
       label: point.label ?? ''
     }))
@@ -661,20 +668,31 @@ function benchmarkRecordToPoint(
 
   const prefillTp = readNumber(record, 'prefill_tp');
   const prefillEp = readNumber(record, 'prefill_ep');
+  const commonDcp = readNumber(metrics, 'dcp_size');
+  const prefillDcp = readNumber(metrics, 'prefill_dcp_size') ?? commonDcp;
   const decodeTp = readNumber(record, 'decode_tp');
   const decodeEp = readNumber(record, 'decode_ep');
+  const decodeDcp = readNumber(metrics, 'decode_dcp_size') ?? commonDcp;
   const numPrefillGpu = readNumber(record, 'num_prefill_gpu');
   const numDecodeGpu = readNumber(record, 'num_decode_gpu');
   const prefillDpa = readBoolean(record, 'prefill_dp_attention');
   const decodeDpa = readBoolean(record, 'decode_dp_attention');
-  const totalGpu = numPrefillGpu !== null && numDecodeGpu !== null ? numPrefillGpu + numDecodeGpu : null;
+  const disagg = readBoolean(record, 'disagg') ?? false;
+  const totalGpu = getInferenceCurvePointGpuCount({
+    throughput,
+    num_prefill_gpu: numPrefillGpu ?? undefined,
+    num_decode_gpu: numDecodeGpu ?? undefined,
+    disagg,
+    tp: decodeTp ?? undefined
+  });
   const offload = readRecordOffloadConfig(record);
 
   const point: InferenceCurveSeries['points'][number] = {
     throughput,
     precision: config.precision.toLowerCase(),
-    strategy: makeStrategyLabel(decodeTp, decodeEp),
+    strategy: makeStrategyLabel(decodeTp, decodeEp, decodeDcp ?? prefillDcp),
     tp: totalGpu ?? decodeTp ?? undefined,
+    disagg,
     concurrency: readNumber(record, 'conc') ?? undefined,
     label: makePointLabel(readString(record, 'date'), readString(record, 'run_url'), offload.label)
   };
@@ -691,17 +709,30 @@ function benchmarkRecordToPoint(
   }
   if (prefillTp !== null) point.prefill_tp = prefillTp;
   if (prefillEp !== null) point.prefill_ep = prefillEp;
+  if (prefillDcp !== null) point.prefill_dcp_size = prefillDcp;
   if (decodeTp !== null) point.decode_tp = decodeTp;
   if (decodeEp !== null) point.decode_ep = decodeEp;
+  if (decodeDcp !== null) point.decode_dcp_size = decodeDcp;
   if (numPrefillGpu !== null) point.num_prefill_gpu = numPrefillGpu;
   if (numDecodeGpu !== null) point.num_decode_gpu = numDecodeGpu;
   if (prefillDpa !== undefined) point.prefill_dp_attention = prefillDpa;
   if (decodeDpa !== undefined) point.decode_dp_attention = decodeDpa;
   if (prefillDpa !== undefined && prefillDpa === decodeDpa) point.dp_attention = prefillDpa;
   if (offload.label) point.kv_offload = offload.label;
+  const serverGpuCacheHitRate = readNumber(metrics, 'server_gpu_cache_hit_rate');
+  const serverExternalCacheHitRate = readNumber(metrics, 'server_external_cache_hit_rate');
+  const serverCpuCacheHitRate = readNumber(metrics, 'server_cpu_cache_hit_rate');
+  const theoreticalCacheHitRate = readNumber(metrics, 'theoretical_cache_hit_rate');
+  if (serverGpuCacheHitRate !== null) point.server_gpu_cache_hit_rate = serverGpuCacheHitRate;
+  if (serverExternalCacheHitRate !== null) {
+    point.server_external_cache_hit_rate = serverExternalCacheHitRate;
+  }
+  if (serverCpuCacheHitRate !== null) point.server_cpu_cache_hit_rate = serverCpuCacheHitRate;
+  if (theoreticalCacheHitRate !== null) {
+    point.theoretical_cache_hit_rate = theoreticalCacheHitRate;
+  }
   point.prefill_num_workers = readNumber(record, 'prefill_num_workers') ?? undefined;
   point.decode_num_workers = readNumber(record, 'decode_num_workers') ?? undefined;
-  point.disagg = readBoolean(record, 'disagg') ?? false;
   point.is_multinode = readBoolean(record, 'is_multinode') ?? undefined;
 
   return point;
@@ -906,11 +937,16 @@ function formatFrameworkLabel(value: string): string {
     .join(' ');
 }
 
-function makeStrategyLabel(tp: number | null, ep: number | null): string | undefined {
-  if (tp === null && ep === null) return undefined;
-  if (tp !== null && ep !== null) return `TP${tp}/EP${ep}`;
-  if (tp !== null) return `TP${tp}`;
-  return `EP${ep}`;
+function makeStrategyLabel(
+  tp: number | null,
+  ep: number | null,
+  dcp: number | null = null
+): string | undefined {
+  const parts: string[] = [];
+  if (tp !== null) parts.push(`TP${tp}`);
+  if (ep !== null) parts.push(`EP${ep}`);
+  if (dcp !== null && dcp > 1) parts.push(`DCP${dcp}`);
+  return parts.length > 0 ? parts.join('/') : undefined;
 }
 
 function makePointLabel(date: string, runUrl: string, offloadLabel = ''): string {

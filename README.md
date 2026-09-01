@@ -46,18 +46,18 @@ paste. Required point columns:
 Optional point columns:
 
 - `Marker`: per-point marker override. `Default` inherits the line marker.
-- `Prefill GPUs`, `Decode GPUs`: used for split GPU labels.
-- `Prefill TP`, `Prefill EP`, `Prefill DPA`
-- `Decode TP`, `Decode EP`, `Decode DPA`
 - `Concurrency`: shown in tooltip and used for point identity.
+- `Prefill GPUs`, `Decode GPUs`: used for split GPU labels.
+- `Prefill TP`, `Prefill EP`, `Prefill DCP`, `Prefill DPA`
+- `Decode TP`, `Decode EP`, `Decode DCP`, `Decode DPA`
 - `Note`: tooltip/source metadata.
 
 Example TSV:
 
 ```tsv
-Marker	Interactivity	Throughput/GPU	Prefill GPUs	Decode GPUs	Prefill TP	Prefill EP	Prefill DPA	Decode TP	Decode EP	Decode DPA	Concurrency	Note
-Default	11.75	7397.06	4	8	4	4	true	8	8	true	4096	date 2026-05-07
-Star	15.51	4893.40	4	8	4	4	true	8	8	true	2048	highlighted point
+Concurrency	Marker	Interactivity	Throughput/GPU	Prefill GPUs	Decode GPUs	Prefill TP	Prefill EP	Prefill DCP	Prefill DPA	Decode TP	Decode EP	Decode DCP	Decode DPA	Note
+4096	Default	11.75	7397.06	4	8	4	4	1	true	8	8	1	true	date 2026-05-07
+2048	Star	15.51	4893.40	4	8	4	4	1	true	8	8	1	true	highlighted point
 ```
 
 Line and point edits are auto-rendered after a short debounce, so the chart
@@ -206,7 +206,7 @@ files are unpacked in the browser, so a downloaded GitHub Actions artifact zip
 can be imported directly. This round-trips a file produced by `Download CSV`:
 line fields, point `Interactivity` / `Throughput/GPU`, markers, custom colors
 (from the `Color Mode` / `Resolved Color` columns), concurrency, parallelism,
-and notes are restored. Derived columns (`Total GPUs`, `Included in Chart`,
+KV cache hit rates, and notes are restored. Derived columns (`Total GPUs`, `Included in Chart`,
 `Active Line`, `Point Index`, `Roofline Point`) are ignored on import. The same
 parser also accepts raw benchmark JSON/CSV exports.
 

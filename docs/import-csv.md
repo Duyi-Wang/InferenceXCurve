@@ -17,7 +17,7 @@ round-trips through the app, and is more deterministic than raw benchmark CSV.
 Use this header order for generated CSV:
 
 ```csv
-Line ID,Line Name,Title,Line Note,Model,Scenario,Precision,MTP,HW Key,Color Mode,Resolved Color,Line Type,Line Marker,Layer,Included in Chart,Active Line,Point Index,Roofline Point,Point Marker,Interactivity (tok/s/user),Throughput/GPU (tok/s/gpu),TTFT (s),End-to-end (s),P50 Interactivity (tok/s/user),P75 Interactivity (tok/s/user),P90 Interactivity (tok/s/user),P95 Interactivity (tok/s/user),P50 TTFT (s),P75 TTFT (s),P90 TTFT (s),P95 TTFT (s),P50 End-to-end (s),P75 End-to-end (s),P90 End-to-end (s),P95 End-to-end (s),P75 E2E Normalized Interactivity (tok/s/user),P90 E2E Normalized Interactivity (tok/s/user),Prefill GPUs,Decode GPUs,Total GPUs,Prefill TP,Prefill EP,Prefill DPA,Prefill Workers,Decode TP,Decode EP,Decode DPA,Decode Workers,DPA,Disagg,Multi-node,KV Offload,Concurrency,Strategy,Note
+Line ID,Line Name,Title,Line Note,Model,Scenario,Precision,MTP,HW Key,Color Mode,Resolved Color,Line Type,Line Marker,Layer,Included in Chart,Active Line,Point Index,Roofline Point,Point Marker,Interactivity (tok/s/user),Throughput/GPU (tok/s/gpu),TTFT (s),End-to-end (s),P50 Interactivity (tok/s/user),P75 Interactivity (tok/s/user),P90 Interactivity (tok/s/user),P95 Interactivity (tok/s/user),P50 TTFT (s),P75 TTFT (s),P90 TTFT (s),P95 TTFT (s),P50 End-to-end (s),P75 End-to-end (s),P90 End-to-end (s),P95 End-to-end (s),P75 E2E Normalized Interactivity (tok/s/user),P90 E2E Normalized Interactivity (tok/s/user),Prefill GPUs,Decode GPUs,Total GPUs,Prefill TP,Prefill EP,Prefill DCP,Prefill DPA,Prefill Workers,Decode TP,Decode EP,Decode DCP,Decode DPA,Decode Workers,DPA,Disagg,Multi-node,KV Offload,Chip Cache Hit Rate,External Cache Hit Rate,CPU Cache Hit Rate,Theoretical Cache Hit Rate,Concurrency,Strategy,Note
 ```
 
 The importer uses the editor parser when at least one row has a non-empty
@@ -94,8 +94,8 @@ These fields are optional in editor CSV:
   all twelve Agentic `P50/P75/P90/P95` latency columns,
   and `P75/P90 E2E Normalized Interactivity (tok/s/user)`: optional numeric
   X-axis metrics, as long as at least one is present for the row.
-- `Prefill GPUs`, `Decode GPUs`, `Prefill TP`, `Prefill EP`,
-  `Prefill Workers`, `Decode TP`, `Decode EP`, `Decode Workers`, and
+- `Prefill GPUs`, `Decode GPUs`, `Prefill TP`, `Prefill EP`, `Prefill DCP`,
+  `Prefill Workers`, `Decode TP`, `Decode EP`, `Decode DCP`, `Decode Workers`, and
   `Concurrency`: numeric when present.
 - `Prefill DPA`, `Decode DPA`, `DPA`, `Disagg`, and `Multi-node`: boolean when
   present. Accepted values are `true`, `false`, `1`, `0`, `yes`, `no`, `y`,
@@ -105,6 +105,10 @@ These fields are optional in editor CSV:
 - `KV Offload`: optional point metadata such as `KV offload off` or
   `KV offload DRAM via LMCache`. It is not a line grouping dimension, but it is
   preserved for tooltips/export and is included in Copy and split by config.
+- `Chip Cache Hit Rate`, `External Cache Hit Rate`, `CPU Cache Hit Rate`, and
+  `Theoretical Cache Hit Rate`: optional raw ratios in the `0`–`1` range. The
+  tooltip formats them as percentages; external hit rate is preserved for data
+  compatibility but is not displayed separately.
 - `Note`: optional point-level tooltip/source text; it is distinct from `Line Note`.
 
 Rows where all point columns are empty are skipped. A row with any point data
@@ -122,6 +126,10 @@ when round-tripping, but they are ignored on import:
 - `Point Index`
 - `Roofline Point`
 - `Total GPUs`
+
+`Total GPUs` is recomputed from point metadata: disaggregated deployments add
+prefill and decode GPU counts, while non-disaggregated deployments treat them
+as the same shared pool and use the larger count.
 
 ### Header Aliases
 
@@ -164,15 +172,19 @@ Accepted editor CSV aliases include:
   `e2eNormalizedInteractivityPercentiles.p75|p90`.
 - Point metadata: `shape`, `Marker`, `Point Marker`; snake_case point keys such
   as `num_prefill_gpu`, `decode_tp`, and `prefill_dp_attention`; display labels
-  such as `Prefill GPUs`, `Decode TP`, `Prefill Workers`, `DPA`, `Disagg`,
-  `Multi-node`, and `KV Offload`
+  such as `Prefill GPUs`, `Prefill DCP`, `Decode TP`, `Decode DCP`,
+  `Prefill Workers`, `DPA`, `Disagg`, `Multi-node`, and `KV Offload`
+- Cache hit rates: `server_gpu_cache_hit_rate`, `Chip Cache Hit Rate`,
+  `server_external_cache_hit_rate`, `External Cache Hit Rate`,
+  `server_cpu_cache_hit_rate`, `CPU Cache Hit Rate`,
+  `theoretical_cache_hit_rate`, and `Theoretical Cache Hit Rate`
 
 ## Example
 
 ```csv
-Line ID,Line Name,Title,Line Note,Model,Scenario,Precision,MTP,HW Key,Color Mode,Resolved Color,Line Type,Line Marker,Layer,Included in Chart,Active Line,Point Index,Roofline Point,Point Marker,Interactivity (tok/s/user),Throughput/GPU (tok/s/gpu),TTFT (s),End-to-end (s),P50 Interactivity (tok/s/user),P75 Interactivity (tok/s/user),P90 Interactivity (tok/s/user),P95 Interactivity (tok/s/user),P50 TTFT (s),P75 TTFT (s),P90 TTFT (s),P95 TTFT (s),P50 End-to-end (s),P75 End-to-end (s),P90 End-to-end (s),P95 End-to-end (s),P75 E2E Normalized Interactivity (tok/s/user),P90 E2E Normalized Interactivity (tok/s/user),Prefill GPUs,Decode GPUs,Total GPUs,Prefill TP,Prefill EP,Prefill DPA,Prefill Workers,Decode TP,Decode EP,Decode DPA,Decode Workers,DPA,Disagg,Multi-node,KV Offload,Concurrency,Strategy,Note
-dsr1-8192-fp8-b200-trt,B200 TRT,DeepSeek R1 B200 TRT,Production candidate,DeepSeek-R1-0528,ISL 8192 / OSL 1024,fp8,Non-MTP,,Auto,,solid,precision,1,,,,,,8.42,5220.5,0.12,9.04,,,,,,,,,,,,,,,4,8,,4,4,true,,8,8,true,,true,true,false,,1024,,run 123
-dsr1-agentic-fp8-b200-trt,B200 TRT Agentic,DeepSeek R1 B200 TRT agentic traces,Agentic validation run,DeepSeek-R1-0528,Agentic Traces,fp8,Non-MTP,,Auto,,solid,precision,2,,,,,,8.5,4830.2,0.18,37.4,12,10,8.5,7.8,0.10,0.14,0.18,0.22,25,31,37.4,42,19.78,11.24,4,8,,4,4,true,,8,8,true,,true,true,false,KV offload off,64,,agentic preview
+Line ID,Line Name,Title,Line Note,Model,Scenario,Precision,MTP,HW Key,Color Mode,Resolved Color,Line Type,Line Marker,Layer,Included in Chart,Active Line,Point Index,Roofline Point,Point Marker,Interactivity (tok/s/user),Throughput/GPU (tok/s/gpu),TTFT (s),End-to-end (s),P50 Interactivity (tok/s/user),P75 Interactivity (tok/s/user),P90 Interactivity (tok/s/user),P95 Interactivity (tok/s/user),P50 TTFT (s),P75 TTFT (s),P90 TTFT (s),P95 TTFT (s),P50 End-to-end (s),P75 End-to-end (s),P90 End-to-end (s),P95 End-to-end (s),P75 E2E Normalized Interactivity (tok/s/user),P90 E2E Normalized Interactivity (tok/s/user),Prefill GPUs,Decode GPUs,Total GPUs,Prefill TP,Prefill EP,Prefill DCP,Prefill DPA,Prefill Workers,Decode TP,Decode EP,Decode DCP,Decode DPA,Decode Workers,DPA,Disagg,Multi-node,KV Offload,Chip Cache Hit Rate,External Cache Hit Rate,CPU Cache Hit Rate,Theoretical Cache Hit Rate,Concurrency,Strategy,Note
+dsr1-8192-fp8-b200-trt,B200 TRT,DeepSeek R1 B200 TRT,Production candidate,DeepSeek-R1-0528,ISL 8192 / OSL 1024,fp8,Non-MTP,,Auto,,solid,precision,1,,,,,,8.42,5220.5,0.12,9.04,,,,,,,,,,,,,,,4,8,,4,4,,true,,8,8,,true,,true,true,false,,,,,,1024,,run 123
+dsr1-agentic-fp8-b200-trt,B200 TRT Agentic,DeepSeek R1 B200 TRT agentic traces,Agentic validation run,DeepSeek-R1-0528,Agentic Traces,fp8,Non-MTP,,Auto,,solid,precision,2,,,,,,8.5,4830.2,0.18,37.4,12,10,8.5,7.8,0.10,0.14,0.18,0.22,25,31,37.4,42,19.78,11.24,4,8,,4,4,8,true,,8,8,8,true,,true,false,false,KV offload off,0.92,0,0,0.97,64,,agentic preview
 ```
 
 ## Raw Benchmark CSV Fallback
@@ -235,11 +247,15 @@ Optional raw benchmark aliases include:
   non-offload rows. Object-shaped backends such as
   `kv_offload_backend.name=hicache` are also supported.
 - Parallelism/source: `num_prefill_gpu`, `num_decode_gpu`, `prefill_tp`,
-  `prefill_ep`, `prefill_num_workers`, `decode_tp`, `decode_ep`,
+  `prefill_ep`, `dcp_size`, `prefill_dcp_size`, `prefill_num_workers`,
+  `decode_tp`, `decode_ep`, `decode_dcp_size`,
   `decode_num_workers`, `dp_attention`, `prefill_dp_attention`,
   `decode_dp_attention`, `disagg`, `is_multinode`, `multi_node`, `multinode`,
   `conc`, `concurrency`, `batch_size`, `date`, `created_at`, `run_date`,
   `timestamp`
+- Cache hit rates: `server_gpu_cache_hit_rate`,
+  `server_external_cache_hit_rate`, `server_cpu_cache_hit_rate`, and
+  `theoretical_cache_hit_rate`, either top-level or nested under `metrics`.
 
 In raw benchmark CSV, optional metadata may be empty. Agentic scenario/workload
 values such as `agentic_traces` become `Agentic Traces`. Fixed-run values such

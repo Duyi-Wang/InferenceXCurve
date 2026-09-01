@@ -18,15 +18,21 @@ export interface InferenceCurvePoint {
   num_decode_gpu?: number;
   prefill_tp?: number;
   prefill_ep?: number;
+  prefill_dcp_size?: number;
   prefill_dp_attention?: boolean;
   prefill_num_workers?: number;
   decode_tp?: number;
   decode_ep?: number;
+  decode_dcp_size?: number;
   decode_dp_attention?: boolean;
   decode_num_workers?: number;
   disagg?: boolean;
   is_multinode?: boolean;
   kv_offload?: string;
+  server_gpu_cache_hit_rate?: number;
+  server_external_cache_hit_rate?: number;
+  server_cpu_cache_hit_rate?: number;
+  theoretical_cache_hit_rate?: number;
   concurrency?: number;
   shape?: string;
   label?: string;
@@ -1832,32 +1838,30 @@ function updatePointLabel(
 }
 
 function getReferenceTp(point: ChartPoint): number | undefined {
-  const explicitTp = readFiniteNumber(point.tp);
-  const disagg = readBoolean(point.disagg);
-  const prefillGpu = readFiniteNumber(point.num_prefill_gpu) ?? parseGpuCountFromLabel(point.label, 'prefill');
-  const decodeGpu = readFiniteNumber(point.num_decode_gpu) ?? parseGpuCountFromLabel(point.label, 'decode');
-
-  if (disagg !== false && prefillGpu !== undefined && decodeGpu !== undefined) {
-    return prefillGpu + decodeGpu;
-  }
-
-  return explicitTp;
+  return getInferenceCurvePointGpuCount(point);
 }
 
 function getAdvancedPointLabel(point: ChartPoint): string {
   const labelConfig = parseParallelismFromLabel(point.label);
   const strategyConfig = parseParallelismFromStrategy(point.strategy);
-  const tp = readFiniteNumber(point.tp) ?? getReferenceTp(point);
+  const tp = getReferenceTp(point) ?? readFiniteNumber(point.tp);
   const ep = readFiniteNumber(point.ep) ?? strategyConfig.ep;
   const dpAttention = readBoolean(point.dp_attention) ?? labelConfig.dpAttention;
 
   const prefillTp =
-    readFiniteNumber(point.prefill_tp) ?? labelConfig.prefillTp ?? readFiniteNumber(point.tp) ?? tp;
+    readFiniteNumber(point.prefill_tp) ?? labelConfig.prefillTp ?? tp;
   const prefillEp = readFiniteNumber(point.prefill_ep) ?? labelConfig.prefillEp ?? ep;
   const prefillDpAttention =
     readBoolean(point.prefill_dp_attention) ?? readBoolean(point.dp_attention) ?? labelConfig.dpAttention;
   const decodeTp = readFiniteNumber(point.decode_tp) ?? strategyConfig.tp ?? tp;
   const decodeEp = readFiniteNumber(point.decode_ep) ?? strategyConfig.ep ?? ep;
+  const commonDcp = meaningfulParallelismSize(
+    readFiniteNumber(point.prefill_dcp_size),
+    readFiniteNumber(point.decode_dcp_size),
+    strategyConfig.dcp
+  );
+  const prefillDcp = readFiniteNumber(point.prefill_dcp_size) ?? commonDcp;
+  const decodeDcp = readFiniteNumber(point.decode_dcp_size) ?? commonDcp;
   const decodeDpAttention =
     readBoolean(point.decode_dp_attention) ?? readBoolean(point.dp_attention) ?? labelConfig.dpAttention;
   const prefillWorkers =
@@ -1878,8 +1882,10 @@ function getAdvancedPointLabel(point: ChartPoint): string {
   const hasSplitConfig =
     prefillTp !== undefined ||
     prefillEp !== undefined ||
+    prefillDcp !== undefined ||
     decodeTp !== undefined ||
     decodeEp !== undefined ||
+    decodeDcp !== undefined ||
     prefillWorkers !== undefined ||
     decodeWorkers !== undefined;
   const disagg = readBoolean(point.disagg);
@@ -1892,14 +1898,23 @@ function getAdvancedPointLabel(point: ChartPoint): string {
     const prefillLabel = configSegmentLabel(
       prefillTp ?? tp ?? 0,
       prefillEp,
-      prefillDpAttention
+      prefillDpAttention,
+      prefillDcp
     );
-    const decodeLabel = configSegmentLabel(decodeTp ?? tp ?? 0, decodeEp, decodeDpAttention);
+    const decodeLabel = configSegmentLabel(
+      decodeTp ?? tp ?? 0,
+      decodeEp,
+      decodeDpAttention,
+      decodeDcp
+    );
     return `${prefillWorkers ?? 1}x${prefillLabel}+${decodeWorkers ?? 1}x${decodeLabel}`;
   }
 
-  if (tp !== undefined && (ep !== undefined || dpAttention !== undefined)) {
-    return configSegmentLabel(tp, ep, dpAttention);
+  if (
+    tp !== undefined &&
+    (ep !== undefined || dpAttention !== undefined || commonDcp !== undefined)
+  ) {
+    return configSegmentLabel(tp, ep, dpAttention, commonDcp);
   }
 
   const referenceTp = getReferenceTp(point);
@@ -1910,12 +1925,16 @@ function getAdvancedPointLabel(point: ChartPoint): string {
 function configSegmentLabel(
   tp: number,
   ep: number | undefined,
-  dpAttention: boolean | undefined
+  dpAttention: boolean | undefined,
+  dcp: number | undefined
 ): string {
-  if (ep !== undefined && ep > 1 && tp === ep) return dpAttention ? `DEP${tp}` : `TEP${tp}`;
+  const dcpSuffix = dcp !== undefined && dcp > 1 ? `/DCP${formatPointLabelNumber(dcp)}` : '';
+  if (ep !== undefined && ep > 1 && tp === ep) {
+    return `${dpAttention ? `DEP${tp}` : `TEP${tp}`}${dcpSuffix}`;
+  }
   const dpaPrefix = dpAttention ? 'DPA' : '';
-  if (ep === undefined || ep <= 1) return `${dpaPrefix}TP${tp}`;
-  return `${dpaPrefix}EP${ep}`;
+  if (ep === undefined || ep <= 1) return `${dpaPrefix}TP${tp}${dcpSuffix}`;
+  return `${dpaPrefix}EP${ep}${dcpSuffix}`;
 }
 
 function parseParallelismFromLabel(label: string | undefined): {
@@ -1934,11 +1953,18 @@ function parseParallelismFromLabel(label: string | undefined): {
 function parseParallelismFromStrategy(strategy: string | undefined): {
   tp?: number;
   ep?: number;
+  dcp?: number;
 } {
   return {
     tp: parseNumberFromText(strategy, /\bTP\s*(\d+(?:\.\d+)?)/iu),
-    ep: parseNumberFromText(strategy, /\bEP\s*(\d+(?:\.\d+)?)/iu)
+    ep: parseNumberFromText(strategy, /\bEP\s*(\d+(?:\.\d+)?)/iu),
+    dcp: parseNumberFromText(strategy, /\bDCP\s*(\d+(?:\.\d+)?)/iu)
   };
+}
+
+function meaningfulParallelismSize(...values: Array<number | undefined>): number | undefined {
+  const meaningful = values.filter((value): value is number => value !== undefined && value > 1);
+  return meaningful.length > 0 ? Math.max(...meaningful) : undefined;
 }
 
 function parseGpuCountFromLabel(label: string | undefined, segment: 'prefill' | 'decode'): number | undefined {
@@ -1962,6 +1988,24 @@ function readFiniteNumber(value: unknown): number | undefined {
   if (typeof value !== 'string') return undefined;
   const parsed = Number(value.trim());
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+export function getInferenceCurvePointGpuCount(point: InferenceCurvePoint): number | undefined {
+  const prefillGpu =
+    readFiniteNumber(point.num_prefill_gpu) ?? parseGpuCountFromLabel(point.label, 'prefill');
+  const decodeGpu =
+    readFiniteNumber(point.num_decode_gpu) ?? parseGpuCountFromLabel(point.label, 'decode');
+  const gpuCounts = [prefillGpu, decodeGpu].filter(
+    (value): value is number => value !== undefined
+  );
+
+  if (gpuCounts.length > 0) {
+    return readBoolean(point.disagg) === true
+      ? gpuCounts.reduce((total, value) => total + value, 0)
+      : Math.max(...gpuCounts);
+  }
+
+  return readFiniteNumber(point.tp);
 }
 
 function readBoolean(value: unknown): boolean | undefined {
@@ -2204,17 +2248,47 @@ function formatTooltip(
   if (point.strategy) fields.push(`Parallelism: ${escapeHtml(point.strategy)}`);
   const prefillGpu = readFiniteNumber(point.num_prefill_gpu) ?? parseGpuCountFromLabel(point.label, 'prefill');
   const decodeGpu = readFiniteNumber(point.num_decode_gpu) ?? parseGpuCountFromLabel(point.label, 'decode');
-  if (prefillGpu !== undefined && decodeGpu !== undefined) {
-    fields.push(`GPUs: ${formatPointLabelNumber(prefillGpu + decodeGpu)} (${prefillGpu} prefill + ${decodeGpu} decode)`);
-  } else if (point.tp !== undefined) {
-    fields.push(`TP: ${point.tp}`);
+  const gpuCount = getInferenceCurvePointGpuCount(point);
+  if (gpuCount !== undefined) {
+    if (
+      readBoolean(point.disagg) === true &&
+      prefillGpu !== undefined &&
+      decodeGpu !== undefined
+    ) {
+      fields.push(
+        `GPUs: ${formatPointLabelNumber(gpuCount)} (${prefillGpu} prefill + ${decodeGpu} decode)`
+      );
+    } else {
+      fields.push(`GPUs: ${formatPointLabelNumber(gpuCount)}`);
+    }
   }
   if (point.concurrency !== undefined) fields.push(`Concurrency: ${point.concurrency}`);
   if (typeof point.kv_offload === 'string' && point.kv_offload.trim()) {
     fields.push(`KV Offload: ${escapeHtml(point.kv_offload.trim())}`);
   }
+  const chipCacheHitRate = formatTooltipPercentage(point.server_gpu_cache_hit_rate);
+  const cpuCacheHitRate = formatTooltipPercentage(point.server_cpu_cache_hit_rate);
+  const theoreticalCacheHitRate = formatTooltipPercentage(point.theoretical_cache_hit_rate);
+  if (chipCacheHitRate) fields.push(`Chip Cache Hit Rate: ${chipCacheHitRate}`);
+  if (cpuCacheHitRate && isKvOffloadEnabled(point.kv_offload)) {
+    fields.push(`CPU Cache Hit Rate: ${cpuCacheHitRate}`);
+  }
+  if (theoreticalCacheHitRate) {
+    fields.push(`Theoretical Cache Hit Rate: ${theoreticalCacheHitRate}`);
+  }
   if (point.label) fields.push(escapeHtml(point.label));
   return fields.map((field) => `<div>${field}</div>`).join('');
+}
+
+function formatTooltipPercentage(value: unknown): string {
+  const number = readFiniteNumber(value);
+  return number === undefined ? '' : `${(number * 100).toFixed(1)}%`;
+}
+
+function isKvOffloadEnabled(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  const normalized = value.trim().toLowerCase();
+  return Boolean(normalized) && !/\b(?:off|none|false|disabled)\b/u.test(normalized);
 }
 
 function formatTooltipMetricField(label: string, value: number, unit: string): string {
