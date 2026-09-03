@@ -262,6 +262,7 @@ interface GitHubArtifact {
   id: number;
   name: string;
   expired: boolean;
+  created_at?: string;
   archive_download_url: string;
 }
 
@@ -6138,33 +6139,37 @@ async function loadGitHubActionSeries(
   onProgress?: (fraction: number) => void
 ): Promise<InferenceCurveSeries[]> {
   const preflightFailures: string[] = [];
-  if (isInferenceXGitHubRun(run)) {
+  const isInferenceXRun = isInferenceXGitHubRun(run);
+  if (isInferenceXRun) {
     try {
       setImportStatus('Fetching InferenceX unofficial run JSON...');
       onProgress?.(-1);
       const series = await loadInferenceXUnofficialRunSeries(run.runId);
       const merged = mergeImportedSeries(series);
       if (merged.length > 0) {
-        onProgress?.(1);
-        return merged;
+        if (!hasMissingAgenticP90E2ENormalizedInteractivity(merged)) {
+          onProgress?.(1);
+          return merged;
+        }
+        preflightFailures.push(
+          'InferenceX unofficial run JSON is missing P90 E2E Normalized Interactivity; trying the latest results_bmk artifact.'
+        );
       }
-      preflightFailures.push('InferenceX unofficial run JSON: no importable benchmark data found.');
+      if (merged.length === 0) {
+        preflightFailures.push('InferenceX unofficial run JSON: no importable benchmark data found.');
+      }
     } catch (error) {
       preflightFailures.push(
         `InferenceX unofficial run JSON: ${error instanceof Error ? error.message : 'failed'}`
       );
     }
-    setImportStatus('Fetching GitHub Actions artifacts...');
+    setImportStatus('Fetching the latest results_bmk artifact...');
   }
 
   const headers = makeGitHubHeaders(token);
   const downloadHeaders = makeGitHubDownloadHeaders(token);
   const artifacts = await fetchGitHubArtifacts(run, headers);
-  const candidates = artifacts
-    .filter((artifact) => !artifact.expired)
-    .filter((artifact) => isBenchmarkArtifactCandidate(artifact.name))
-    .sort((a, b) => scoreArtifactName(b.name) - scoreArtifactName(a.name))
-    .slice(0, 20);
+  const candidates = selectBenchmarkArtifactCandidates(artifacts, isInferenceXRun);
 
   if (candidates.length === 0) {
     throw new Error('No benchmark artifacts found for that GitHub Actions run.');
@@ -6198,6 +6203,50 @@ async function loadGitHubActionSeries(
     throw new Error(`No benchmark CSV/JSON data found in the action artifacts.${suffix}`);
   }
   return merged;
+}
+
+function hasMissingAgenticP90E2ENormalizedInteractivity(
+  series: InferenceCurveSeries[]
+): boolean {
+  return series.some(
+    (line) =>
+      isAgenticTraceSequence(getSeriesIslOsl(line)) &&
+      line.points.some((point) => {
+        const value = point.e2eNormalizedInteractivityPercentiles?.p90;
+        return typeof value !== 'number' || !Number.isFinite(value);
+      })
+  );
+}
+
+function selectBenchmarkArtifactCandidates(
+  artifacts: GitHubArtifact[],
+  preferLatestResultsBenchmark: boolean
+): GitHubArtifact[] {
+  const available = artifacts.filter((artifact) => !artifact.expired);
+  if (preferLatestResultsBenchmark) {
+    const latestResultsBenchmark = available
+      .filter((artifact) => isResultsBenchmarkArtifact(artifact.name))
+      .sort(compareGitHubArtifactsNewestFirst)[0];
+    if (latestResultsBenchmark) return [latestResultsBenchmark];
+  }
+
+  return available
+    .filter((artifact) => isBenchmarkArtifactCandidate(artifact.name))
+    .sort(
+      (a, b) =>
+        scoreArtifactName(b.name) - scoreArtifactName(a.name) ||
+        compareGitHubArtifactsNewestFirst(a, b)
+    )
+    .slice(0, 20);
+}
+
+function compareGitHubArtifactsNewestFirst(a: GitHubArtifact, b: GitHubArtifact): number {
+  const aCreatedAt = Date.parse(a.created_at ?? '');
+  const bCreatedAt = Date.parse(b.created_at ?? '');
+  if (Number.isFinite(aCreatedAt) && Number.isFinite(bCreatedAt) && aCreatedAt !== bCreatedAt) {
+    return bCreatedAt - aCreatedAt;
+  }
+  return b.id - a.id;
 }
 
 async function loadInferenceXUnofficialRunSeries(runId: string): Promise<InferenceCurveSeries[]> {
@@ -7244,17 +7293,21 @@ function formatImportSummary(
 function scoreArtifactName(name: string): number {
   const value = name.toLowerCase();
   let score = 0;
-  if (/^results?[-_]?bmk$/u.test(value)) score += 30;
+  if (isResultsBenchmarkArtifact(value)) score += 30;
   if (/(^|[-_])bmk($|[-_])/u.test(value)) score += 24;
   if (/benchmark|bench/u.test(value)) score += 16;
   if (/metric|summary/u.test(value)) score += 8;
   return score;
 }
 
+function isResultsBenchmarkArtifact(name: string): boolean {
+  return /^results?[-_]?bmk$/u.test(name.toLowerCase());
+}
+
 function isBenchmarkArtifactCandidate(name: string): boolean {
   const value = name.toLowerCase();
   if (/eval|run[-_]?stats|samples?|log|trace|profile/u.test(value)) return false;
-  return /^results?[-_]?bmk$/u.test(value) || /(^|[-_])bmk($|[-_])/u.test(value) || /benchmark|bench/u.test(value);
+  return isResultsBenchmarkArtifact(value) || /(^|[-_])bmk($|[-_])/u.test(value) || /benchmark|bench/u.test(value);
 }
 
 function parseDelimitedText(text: string, delimiter: ',' | '\t'): string[][] {
