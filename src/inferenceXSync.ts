@@ -465,14 +465,9 @@ async function fetchDerivedAgenticMetrics(
   for (let index = 0; index < ids.length; index += 200) {
     batches.push(ids.slice(index, index + 200));
   }
-  const responses = await Promise.all(
-    batches.map((batch) =>
-      fetchInferenceXJson(
-        `${INFERENCEX_API_BASE}/derived-agentic-metrics?ids=${batch.join(',')}`,
-        signal
-      )
-    )
-  );
+  const responses = (await Promise.all(
+    batches.map((batch) => fetchDerivedAgenticMetricsBatch(batch, signal))
+  )).flat();
   const result = new Map<number, InferenceXDerivedAgenticMetrics>();
   responses.forEach((response) => {
     if (!isRecord(response)) return;
@@ -490,6 +485,31 @@ async function fetchDerivedAgenticMetrics(
     });
   });
   return result;
+}
+
+async function fetchDerivedAgenticMetricsBatch(
+  ids: number[],
+  signal?: AbortSignal
+): Promise<unknown[]> {
+  try {
+    return [await fetchInferenceXJson(
+      `${INFERENCEX_API_BASE}/derived-agentic-metrics?ids=${ids.join(',')}`,
+      signal
+    )];
+  } catch (error) {
+    if (!isInferenceXServerError(error)) throw error;
+    if (ids.length <= 1) return [];
+    const midpoint = Math.ceil(ids.length / 2);
+    const responses = await Promise.all([
+      fetchDerivedAgenticMetricsBatch(ids.slice(0, midpoint), signal),
+      fetchDerivedAgenticMetricsBatch(ids.slice(midpoint), signal)
+    ]);
+    return responses.flat();
+  }
+}
+
+function isInferenceXServerError(error: unknown): boolean {
+  return error instanceof Error && /^5\d{2}\b/u.test(error.message);
 }
 
 async function fetchInferenceXJson(url: string, signal?: AbortSignal): Promise<unknown> {
@@ -555,30 +575,86 @@ function benchmarkRecordMatchesConfig(
 }
 
 function filterLatestBenchmarkRecords(records: InferenceXBenchmarkRecord[]): InferenceXBenchmarkRecord[] {
-  const recordsByDisagg = new Map<boolean, InferenceXBenchmarkRecord[]>();
+  const recordsByCurveBranch = new Map<string, InferenceXBenchmarkRecord[]>();
   records.forEach((record) => {
     const disagg = readBoolean(record, 'disagg') ?? false;
-    const group = recordsByDisagg.get(disagg) ?? [];
+    const offloadMode = readBenchmarkCurveOffloadMode(record);
+    const branchKey = `${disagg ? 'disagg' : 'aggregated'}|${offloadMode}`;
+    const group = recordsByCurveBranch.get(branchKey) ?? [];
     group.push(record);
-    recordsByDisagg.set(disagg, group);
+    recordsByCurveBranch.set(branchKey, group);
   });
-  return Array.from(recordsByDisagg.values()).flatMap((group) => filterLatestDatedRecords(group));
+  return Array.from(recordsByCurveBranch.values()).flatMap((group) => filterLatestCurveRecords(group));
 }
 
-function filterLatestDatedRecords(records: InferenceXBenchmarkRecord[]): InferenceXBenchmarkRecord[] {
+function filterLatestCurveRecords(records: InferenceXBenchmarkRecord[]): InferenceXBenchmarkRecord[] {
   if (records.length <= 1) return records;
-  const latestDate = records
-    .map((record) => readBenchmarkDate(record))
+  const latestCurveDate = records
+    .map((record) => readBenchmarkCurveDate(record))
     .filter(Boolean)
     .sort((a, b) => b.localeCompare(a))[0];
-  if (!latestDate) return records;
-  return records.filter((record) => readBenchmarkDate(record) === latestDate);
+  if (!latestCurveDate) return records;
+
+  const latestDatedRecords = records.filter(
+    (record) => readBenchmarkCurveDate(record) === latestCurveDate
+  );
+  if (!latestDatedRecords.some((record) => isAgenticScenario(readRecordScenario(record)))) {
+    return latestDatedRecords;
+  }
+
+  // Agentic snapshots can carry selected points forward from an older
+  // benchmark `date`. InferenceX marks every point belonging to the current
+  // snapshot with the same curve run metadata, so keep that complete run
+  // instead of retaining only rows whose original benchmark date is newest.
+  const latestRunRecord = latestDatedRecords.reduce((latest, record) =>
+    compareBenchmarkCurveRuns(record, latest) > 0 ? record : latest
+  );
+  return latestDatedRecords.filter((record) =>
+    benchmarkCurveRunsMatch(record, latestRunRecord)
+  );
 }
 
-function readBenchmarkDate(record: InferenceXBenchmarkRecord): string {
-  const value = readString(record, 'date');
+function readBenchmarkCurveDate(record: InferenceXBenchmarkRecord): string {
+  const value = readString(record, 'curve_date') || readString(record, 'date');
   const match = value.match(/\d{4}-\d{2}-\d{2}/u);
   return match?.[0] ?? '';
+}
+
+function readBenchmarkCurveRunStartedAt(record: InferenceXBenchmarkRecord): string {
+  return readString(record, 'curve_run_started_at') || readString(record, 'run_started_at');
+}
+
+function readBenchmarkCurveWorkflowRunId(record: InferenceXBenchmarkRecord): number | null {
+  return readNumber(record, 'curve_workflow_run_id') ?? readNumber(record, 'workflow_run_id');
+}
+
+function compareBenchmarkCurveRuns(
+  a: InferenceXBenchmarkRecord,
+  b: InferenceXBenchmarkRecord
+): number {
+  const startedAtComparison = readBenchmarkCurveRunStartedAt(a).localeCompare(
+    readBenchmarkCurveRunStartedAt(b)
+  );
+  if (startedAtComparison !== 0) return startedAtComparison;
+  return (
+    (readBenchmarkCurveWorkflowRunId(a) ?? Number.NEGATIVE_INFINITY) -
+    (readBenchmarkCurveWorkflowRunId(b) ?? Number.NEGATIVE_INFINITY)
+  );
+}
+
+function benchmarkCurveRunsMatch(
+  a: InferenceXBenchmarkRecord,
+  b: InferenceXBenchmarkRecord
+): boolean {
+  return (
+    readBenchmarkCurveRunStartedAt(a) === readBenchmarkCurveRunStartedAt(b) &&
+    readBenchmarkCurveWorkflowRunId(a) === readBenchmarkCurveWorkflowRunId(b)
+  );
+}
+
+function readBenchmarkCurveOffloadMode(record: InferenceXBenchmarkRecord): 'off' | 'on' {
+  const offload = readRecordOffloadConfig(record);
+  return offload.key && offload.key !== 'offload-off' ? 'on' : 'off';
 }
 
 function benchmarkRecordsToSeries(
@@ -694,7 +770,12 @@ function benchmarkRecordToPoint(
     tp: totalGpu ?? decodeTp ?? undefined,
     disagg,
     concurrency: readNumber(record, 'conc') ?? undefined,
-    label: makePointLabel(readString(record, 'date'), readString(record, 'run_url'), offload.label)
+    label: makePointLabel(
+      readString(record, 'date'),
+      readBenchmarkCurveDate(record),
+      readString(record, 'run_url'),
+      offload.label
+    )
   };
 
   if (interactivity !== null) point.interactivity = interactivity;
@@ -761,7 +842,11 @@ function makeSummaryItem(
 
 function latestPointDate(line: InferenceCurveSeries): string {
   return line.points
-    .map((point) => String(point.label ?? '').match(/\bdate\s+(\d{4}-\d{2}-\d{2})\b/u)?.[1] ?? '')
+    .map((point) => {
+      const label = String(point.label ?? '');
+      return label.match(/\bcurve_date\s+(\d{4}-\d{2}-\d{2})\b/u)?.[1] ??
+        label.match(/\bdate\s+(\d{4}-\d{2}-\d{2})\b/u)?.[1] ?? '';
+    })
     .filter(Boolean)
     .sort((a, b) => b.localeCompare(a))[0] ?? '';
 }
@@ -949,9 +1034,15 @@ function makeStrategyLabel(
   return parts.length > 0 ? parts.join('/') : undefined;
 }
 
-function makePointLabel(date: string, runUrl: string, offloadLabel = ''): string {
+function makePointLabel(
+  date: string,
+  curveDate: string,
+  runUrl: string,
+  offloadLabel = ''
+): string {
   return [
     date ? `date ${date}` : '',
+    curveDate && curveDate !== date ? `curve_date ${curveDate}` : '',
     runUrl ? `run_url ${runUrl}` : '',
     offloadLabel ? offloadLabel : ''
   ].filter(Boolean).join('; ');
