@@ -13,7 +13,7 @@ export interface InferenceXSyncConfig {
   precision: string;
   hardware: string;
   framework: string;
-  specMethod: string;
+  specMethod?: string;
   enabled: boolean;
 }
 
@@ -42,7 +42,7 @@ export interface InferenceXSyncSummaryItem {
   scenario: string;
   isl: number;
   osl: number;
-  specMethod: string;
+  specMethod?: string;
   pointCount: number;
   latestDate: string;
 }
@@ -220,14 +220,16 @@ export function normalizeInferenceXSyncConfig(value: Partial<InferenceXSyncConfi
     precision,
     hardware,
     framework,
-    specMethod,
+    ...(!isAgenticScenario(scenario) ? { specMethod } : {}),
     enabled
   };
   const canonicalId = makeInferenceXSyncConfigId(normalized);
   const savedId = normalizeText(value.id);
   return {
     ...normalized,
-    id: savedId && savedId !== `${canonicalId}-agg` ? savedId : canonicalId
+    id: !isAgenticScenario(scenario) && savedId && savedId !== `${canonicalId}-agg`
+      ? savedId
+      : canonicalId
   };
 }
 
@@ -248,7 +250,7 @@ export function makeInferenceXSyncLineId(
     config.precision,
     config.hardware,
     config.framework,
-    normalizeSpecMethod(config.specMethod) === MTP_SPEC ? MTP_SPEC : ''
+    !isAgenticScenario(scenario) && normalizeSpecMethod(config.specMethod) === MTP_SPEC ? MTP_SPEC : ''
   ]
     .filter(Boolean)
     .join('-')
@@ -267,7 +269,9 @@ export async function fetchInferenceXSyncSeries(
   configs: InferenceXSyncConfig[],
   signal?: AbortSignal
 ): Promise<InferenceXSyncResult> {
-  const enabledConfigs = configs.filter((config) => config.enabled);
+  const enabledConfigs = configs.length
+    ? normalizeInferenceXSyncConfigs(configs).filter((config) => config.enabled)
+    : [];
   const checkedAt = new Date().toISOString();
   if (enabledConfigs.length === 0) {
     return {
@@ -362,6 +366,7 @@ export function fingerprintInferenceCurveSeries(line: InferenceCurveSeries): str
       disagg: point.disagg ?? '',
       is_multinode: point.is_multinode ?? '',
       kv_offload: point.kv_offload ?? '',
+      ...(point.spec_decoding ? { spec_decoding: point.spec_decoding } : {}),
       server_gpu_cache_hit_rate: point.server_gpu_cache_hit_rate ?? '',
       server_external_cache_hit_rate: point.server_external_cache_hit_rate ?? '',
       server_cpu_cache_hit_rate: point.server_cpu_cache_hit_rate ?? '',
@@ -379,7 +384,9 @@ export function formatInferenceXConfigLabel(config: InferenceXSyncConfig): strin
     formatSequenceLabel(config),
     config.precision.toUpperCase(),
     `${formatHardwareLabel(config.hardware)} / ${formatFrameworkLabel(config.framework)}`,
-    normalizeSpecMethod(config.specMethod) === MTP_SPEC ? 'MTP' : 'Non-MTP'
+    isAgenticScenario(config.scenario)
+      ? ''
+      : normalizeSpecMethod(config.specMethod) === MTP_SPEC ? 'MTP' : 'Non-MTP'
   ].filter(Boolean).join(' • ');
 }
 
@@ -393,7 +400,8 @@ export function inferenceXAvailabilityRowMatchesConfig(
     row.precision.toLowerCase() === config.precision.toLowerCase() &&
     hardwareMatches(row.hardware, config.hardware) &&
     row.framework.toLowerCase() === config.framework.toLowerCase() &&
-    normalizeSpecMethod(row.specMethod) === normalizeSpecMethod(config.specMethod)
+    (isAgenticScenario(config.scenario) ||
+      normalizeSpecMethod(row.specMethod) === normalizeSpecMethod(config.specMethod))
   );
 }
 
@@ -568,13 +576,16 @@ function benchmarkRecordMatchesConfig(
     precision === config.precision.toLowerCase() &&
     hardwareMatches(hardware, config.hardware) &&
     framework === config.framework.toLowerCase() &&
-    specMethod === normalizeSpecMethod(config.specMethod) &&
+    (isAgenticScenario(config.scenario) || specMethod === normalizeSpecMethod(config.specMethod)) &&
     throughput !== null &&
     hasXMetric
   );
 }
 
 function filterLatestBenchmarkRecords(records: InferenceXBenchmarkRecord[]): InferenceXBenchmarkRecord[] {
+  // Agentic configs include all speculative methods. Select each branch's
+  // latest snapshot across those methods, rather than combining stale MTP
+  // and Non-MTP snapshots that happen to share the same serving config.
   const recordsByCurveBranch = new Map<string, InferenceXBenchmarkRecord[]>();
   records.forEach((record) => {
     const disagg = readBoolean(record, 'disagg') ?? false;
@@ -679,7 +690,8 @@ function benchmarkRecordsToSeries(
     );
   if (points.length === 0) return null;
 
-  const lineName = formatInferenceXLineName(config.hardware, config.framework, config.specMethod);
+  const isAgentic = isAgenticScenario(config.scenario);
+  const lineName = formatInferenceXLineName(config.hardware, config.framework, isAgentic ? undefined : config.specMethod);
   const islOsl = formatSequenceLabel(config);
   const model = getInferenceXDisplayModel(config.model);
   const precision = config.precision.toLowerCase();
@@ -691,7 +703,7 @@ function benchmarkRecordsToSeries(
     model,
     islOsl,
     precision,
-    mtp,
+    ...(!isAgentic ? { mtp } : {}),
     title: `${model} ${islOsl} ${precision.toUpperCase()} ${lineName}`,
     points
   };
@@ -769,6 +781,7 @@ function benchmarkRecordToPoint(
     strategy: makeStrategyLabel(decodeTp, decodeEp, decodeDcp ?? prefillDcp),
     tp: totalGpu ?? decodeTp ?? undefined,
     disagg,
+    ...(preferP90Metrics ? { spec_decoding: normalizeSpecMethod(readString(record, 'spec_method')) } : {}),
     concurrency: readNumber(record, 'conc') ?? undefined,
     label: makePointLabel(
       readString(record, 'date'),
@@ -834,7 +847,7 @@ function makeSummaryItem(
     scenario: normalizeScenario(config.scenario),
     isl: config.isl,
     osl: config.osl,
-    specMethod: normalizeSpecMethod(config.specMethod),
+    ...(!isAgenticScenario(config.scenario) ? { specMethod: normalizeSpecMethod(config.specMethod) } : {}),
     pointCount: line.points.length,
     latestDate: latestPointDate(line)
   };
@@ -983,14 +996,14 @@ function hardwareMatches(recordHardware: string, configHardware: string): boolea
 }
 
 function makeHwKey(config: InferenceXSyncConfig): string {
-  const suffix = normalizeSpecMethod(config.specMethod) === MTP_SPEC ? '_mtp' : '';
+  const suffix = !isAgenticScenario(config.scenario) && normalizeSpecMethod(config.specMethod) === MTP_SPEC ? '_mtp' : '';
   return `${config.hardware.toLowerCase()}_${config.framework.toLowerCase()}${suffix}`;
 }
 
 function formatInferenceXLineName(
   hardware: string,
   framework: string,
-  specMethod: string
+  specMethod: string | undefined
 ): string {
   const suffix = normalizeSpecMethod(specMethod) === MTP_SPEC ? ' MTP' : '';
   return `${formatHardwareLabel(hardware)} (${formatFrameworkLabel(framework)}${suffix})`;

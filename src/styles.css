@@ -514,7 +514,7 @@ p {
 }
 
 .filter-card.has-latency-percentile {
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .filter-card [hidden] {

@@ -458,6 +458,7 @@ const hiddenPointKeys = [
   'disagg',
   'is_multinode',
   'kv_offload',
+  'spec_decoding',
   'server_gpu_cache_hit_rate',
   'server_external_cache_hit_rate',
   'server_cpu_cache_hit_rate',
@@ -714,7 +715,11 @@ function restorePersistedSeriesDrafts(value: unknown): SeriesDraft[] {
       points: restorePersistedPointRows(draft.points)
     };
     if (isAgenticTraceSequence(restored.islOsl)) {
+      if (!readPersistedText(draft, 'mtp')) restored.mtp = '';
       restored.points.forEach((row) => {
+        if (!isEmptyPointRow(row) && !row.spec_decoding && readPersistedText(draft, 'mtp')) {
+          row.spec_decoding = restored.mtp === MTP_VALUE ? 'mtp' : 'none';
+        }
         (Object.keys(latencyMetricColumns) as LatencyMetricKey[]).forEach((metric) => {
           const p90Key = latencyMetricColumns[metric].rowKeys.p90;
           if (!row[p90Key] && row[metric]) row[p90Key] = row[metric];
@@ -1083,7 +1088,7 @@ app.innerHTML = `
         <span>Precision</span>
         <select id="precision-filter"></select>
       </label>
-      <label>
+      <label id="mtp-filter-control">
         <span>MTP</span>
         <select id="mtp-filter"></select>
       </label>
@@ -1768,6 +1773,8 @@ function renderInferenceXSyncConfigRow(config: InferenceXSyncConfig, index: numb
 
 function renderInferenceXSyncAddConfig(): string {
   const options = getInferenceXAddOptions();
+  const isAgentic = inferenceXSync.addShapeSelection !== ALL_VALUE &&
+    isAgenticTraceSequence(inferenceXSync.addDraft.scenario ?? '');
   return `
     <div class="inferencex-sync-add">
       <label>
@@ -1800,12 +1807,12 @@ function renderInferenceXSyncAddConfig(): string {
           ${renderInferenceXAllOptions(options.frameworks, inferenceXSync.addFrameworkSelection)}
         </select>
       </label>
-      <label>
+      ${isAgentic ? '' : `<label>
         <span>MTP</span>
         <select data-sync-add-field="specMethod">
           ${renderInferenceXSpecMethodOptions(options.specMethods, inferenceXSync.addSpecMethodSelection)}
         </select>
-      </label>
+      </label>`}
       <button type="button" class="primary action-button" data-sync-action="add-config">
         ${renderIcon('plus')}
         <span>Add Config</span>
@@ -1944,7 +1951,7 @@ function getInferenceXOptionRows(): InferenceXAvailabilityRow[] {
     precision: config.precision,
     hardware: config.hardware,
     framework: config.framework,
-    specMethod: config.specMethod,
+    specMethod: config.specMethod ?? 'none',
     disagg: true,
     date: ''
   }));
@@ -2136,12 +2143,14 @@ function applyInferenceXSyncResult(result: InferenceXSyncResult, options: { init
   clearAutoRenderTimer();
   const appliedAt = new Date().toISOString();
   const syncLineIds = new Set(result.series.map((line) => line.id));
-  const legacyLineIdByLineId = new Map<string, string>();
+  const legacyLineIdsByLineId = new Map<string, string[]>();
   const replacedSyncLineIds = new Set(syncLineIds);
   result.summary.forEach((item) => {
-    const legacyLineId = `${item.lineId}-agg`;
-    legacyLineIdByLineId.set(item.lineId, legacyLineId);
-    replacedSyncLineIds.add(legacyLineId);
+    const legacyLineIds = isAgenticTraceSequence(item.scenario)
+      ? [`${item.lineId}-agg`, `${item.lineId}-mtp`, `${item.lineId}-mtp-agg`]
+      : [`${item.lineId}-agg`];
+    legacyLineIdsByLineId.set(item.lineId, legacyLineIds);
+    legacyLineIds.forEach((id) => replacedSyncLineIds.add(id));
   });
   const changedLineIds = new Set(getInferenceXChangedSummaryItems().map((item) => item.lineId));
   const collapsedById = new Map(seriesDrafts.map((draft) => [draft.id, draft.collapsed]));
@@ -2157,11 +2166,9 @@ function applyInferenceXSyncResult(result: InferenceXSyncResult, options: { init
     const existingLineById = new Map(existingSeries.map((line) => [line.id, line]));
     let nextRenderOrder = getNextDraftRenderOrder() + result.series.length;
     const styledSyncSeries = result.series.map((line) => {
-      const legacyLineId = legacyLineIdByLineId.get(line.id);
-      const existingDraft = existingDraftById.get(line.id) ??
-        (legacyLineId ? existingDraftById.get(legacyLineId) : undefined);
-      const existingLine = existingLineById.get(line.id) ??
-        (legacyLineId ? existingLineById.get(legacyLineId) : undefined);
+      const candidateIds = [line.id, ...(legacyLineIdsByLineId.get(line.id) ?? [])];
+      const existingDraft = candidateIds.map((id) => existingDraftById.get(id)).find(Boolean);
+      const existingLine = candidateIds.map((id) => existingLineById.get(id)).find(Boolean);
       const styled = applyExistingSyncLineStyle(line, existingDraft, existingLine);
       if (existingDraft || existingLine) return styled;
       nextRenderOrder -= 1;
@@ -2173,9 +2180,8 @@ function applyInferenceXSyncResult(result: InferenceXSyncResult, options: { init
     ];
     seriesDrafts = seriesToDrafts(currentSeries);
     seriesDrafts.forEach((draft) => {
-      const legacyLineId = legacyLineIdByLineId.get(draft.id);
-      const collapsed = collapsedById.get(draft.id) ??
-        (legacyLineId ? collapsedById.get(legacyLineId) : undefined);
+      const candidateIds = [draft.id, ...(legacyLineIdsByLineId.get(draft.id) ?? [])];
+      const collapsed = candidateIds.map((id) => collapsedById.get(id)).find((value) => value !== undefined);
       if (collapsed !== undefined) draft.collapsed = collapsed;
     });
     const newSyncSeries = styledSyncSeries.filter((line) => !existingLineById.has(line.id));
@@ -2343,6 +2349,10 @@ function alignInferenceXAddDraft(preferredField = ''): void {
   if (inferenceXSync.addSpecMethodSelection !== ALL_VALUE) {
     inferenceXSync.addSpecMethodSelection = candidate.specMethod;
   }
+  if (inferenceXSync.addShapeSelection !== ALL_VALUE && isAgenticTraceSequence(candidate.scenario)) {
+    inferenceXSync.addSpecMethodSelection = ALL_VALUE;
+    delete inferenceXSync.addDraft.specMethod;
+  }
 }
 
 function pickBestInferenceXAddRow(
@@ -2366,7 +2376,7 @@ function pickBestInferenceXAddRow(
     if (shouldScorePrecision && row.precision === desired.precision) {
       score += preferredField === 'precision' ? 1000 : 50;
     }
-    if (shouldScoreSpecMethod && row.specMethod === desired.specMethod) {
+    if (shouldScoreSpecMethod && !isAgenticTraceSequence(row.scenario) && row.specMethod === desired.specMethod) {
       score += preferredField === 'specMethod' ? 1000 : 30;
     }
     return score;
@@ -2483,7 +2493,7 @@ function inferenceXAvailabilityRowMatchesAddDraft(row: InferenceXAvailabilityRow
       inferenceXSync.addFrameworkSelection === ALL_VALUE ||
       row.framework === inferenceXSync.addFrameworkSelection
     ) &&
-    (inferenceXSync.addSpecMethodSelection === ALL_VALUE ||
+    (isAgenticTraceSequence(row.scenario) || inferenceXSync.addSpecMethodSelection === ALL_VALUE ||
       row.specMethod === inferenceXSync.addSpecMethodSelection)
   );
 }
@@ -2555,6 +2565,7 @@ function renderFilterControls(): void {
   islOslFilterEl.disabled = state.scenarioFilter === AGENTIC_SCENARIO;
   precisionFilterEl.innerHTML = renderPrecisionFilterOptions(precisions);
   mtpFilterEl.innerHTML = renderMtpFilterOptions(mtpValues);
+  document.querySelector<HTMLElement>('#mtp-filter-control')!.hidden = state.scenarioFilter === AGENTIC_SCENARIO;
   latencyPercentileControlEl.hidden = !isAgenticTraceView(currentSeries);
   latencyPercentileControlEl.parentElement?.classList.toggle(
     'has-latency-percentile',
@@ -2832,7 +2843,7 @@ function formatLineMeta(series: SeriesDraft, seriesIndex: number): string {
     series.model,
     series.precision.toUpperCase(),
     formatIslOslLabel(series.islOsl),
-    formatMtpFilterLabel(getDraftMtpFilter(series))
+    isAgenticTraceSequence(series.islOsl) ? '' : formatMtpFilterLabel(getDraftMtpFilter(series))
   ]
     .filter(Boolean)
     .join(' • ');
@@ -2841,7 +2852,7 @@ function formatLineMeta(series: SeriesDraft, seriesIndex: number): string {
 function renderEmptySeriesFilter(): string {
   return `
     <div class="series-empty">
-      No line projects match the current Model, Scenario, ISL/OSL, Precision, and MTP filters.
+      No line projects match the current filters.
     </div>
   `;
 }
@@ -2892,6 +2903,7 @@ function renderSeriesNoteField(seriesIndex: number, value: string): string {
 }
 
 function renderSeriesMtpField(seriesIndex: number, value: string): string {
+  if (isAgenticTraceSequence(seriesDrafts[seriesIndex]?.islOsl ?? '')) return '';
   const selectedValue = normalizeMtpValue(value);
   return `
     <label class="series-field series-field-mtp">
@@ -3929,7 +3941,7 @@ function getFilteredDraftEntries(): { draft: SeriesDraft; index: number }[] {
       const precisionMatches =
         state.selectedPrecisions.size === 0 || state.selectedPrecisions.has(getDraftPrecision(draft));
       const mtpMatches =
-        state.mtpFilter === ALL_VALUE || getDraftMtpFilter(draft) === state.mtpFilter;
+        isAgenticTraceSequence(draft.islOsl) || state.mtpFilter === ALL_VALUE || getDraftMtpFilter(draft) === state.mtpFilter;
       return modelMatches && islOslMatches && precisionMatches && mtpMatches;
     });
 }
@@ -4032,7 +4044,7 @@ function draftsToPreviewSeries(drafts: SeriesDraft[]): InferenceCurveSeries[] {
       model: draft.model.trim() || getDefaultDraftModel(),
       islOsl: draft.islOsl.trim() || getDefaultDraftIslOsl(),
       precision: draft.precision.trim() || getDefaultDraftPrecision(),
-      mtp: getDraftMtpFilter(draft),
+      mtp: isAgenticTraceSequence(draft.islOsl) ? undefined : getDraftMtpFilter(draft),
       marker: normalizePointShapeValue(draft.marker),
       renderOrder: getDraftRenderOrder(draft, index),
       points: []
@@ -4066,7 +4078,7 @@ function seriesToDrafts(series: InferenceCurveSeries[]): SeriesDraft[] {
     model: getSeriesModel(line),
     islOsl: getSeriesIslOsl(line),
     precision: getSeriesPrecision(line),
-    mtp: getSeriesMtpFilter(line),
+    mtp: isAgenticTraceSequence(getSeriesIslOsl(line)) && !line.mtp ? '' : getSeriesMtpFilter(line),
     marker: normalizePointShapeValue(String(line.marker ?? '')),
     title: line.title ?? '',
     note: line.note ?? '',
@@ -4109,6 +4121,11 @@ function seriesToDrafts(series: InferenceCurveSeries[]): SeriesDraft[] {
         disagg: formatPointFieldValue(point.disagg),
         is_multinode: formatPointFieldValue(point.is_multinode),
         kv_offload: formatPointFieldValue(point.kv_offload),
+        spec_decoding: formatPointFieldValue(point.spec_decoding ?? (
+          isAgenticTraceSequence(getSeriesIslOsl(line)) && line.mtp
+            ? getSeriesMtpFilter(line) === MTP_VALUE ? 'mtp' : 'none'
+            : undefined
+        )),
         server_gpu_cache_hit_rate: formatPointFieldValue(point.server_gpu_cache_hit_rate),
         server_external_cache_hit_rate: formatPointFieldValue(
           point.server_external_cache_hit_rate
@@ -4300,6 +4317,7 @@ function draftsToSeriesInternal(drafts: SeriesDraft[]): InferenceCurveSeries[] {
         if (disagg !== null) point.disagg = disagg;
         if (isMultinode !== null) point.is_multinode = isMultinode;
         if (kvOffload) point.kv_offload = kvOffload;
+        if (row.spec_decoding?.trim()) point.spec_decoding = row.spec_decoding.trim();
         if (serverGpuCacheHitRate !== null) {
           point.server_gpu_cache_hit_rate = serverGpuCacheHitRate;
         }
@@ -4340,7 +4358,7 @@ function draftsToSeriesInternal(drafts: SeriesDraft[]): InferenceCurveSeries[] {
       model,
       islOsl,
       precision,
-      mtp: getDraftMtpFilter(draft),
+      mtp: isAgentic ? undefined : getDraftMtpFilter(draft),
       marker: normalizePointShapeValue(draft.marker),
       renderOrder: getDraftRenderOrder(draft, seriesIndex),
       points
@@ -5005,7 +5023,9 @@ function reconcileFiltersForSeries(series: InferenceCurveSeries[]): void {
   );
   const mtpValues = new Set(getAvailableMtpFilters(sequenceFiltered));
   const sortedMtpValues = sortMtpValues(Array.from(mtpValues));
-  if (state.mtpFilter !== ALL_VALUE && !mtpValues.has(state.mtpFilter)) {
+  if (state.scenarioFilter === AGENTIC_SCENARIO) {
+    state.mtpFilter = ALL_VALUE;
+  } else if (state.mtpFilter !== ALL_VALUE && !mtpValues.has(state.mtpFilter)) {
     state.mtpFilter = sortedMtpValues[0] ?? ALL_VALUE;
   }
 
@@ -5031,7 +5051,9 @@ function createInitialState(series: InferenceCurveSeries[]): AppState {
     scenarioFilter,
     islOslFilter
   );
-  const mtpFilter = getAvailableMtpFilters(sequenceFiltered)[0] ?? ALL_VALUE;
+  const mtpFilter = scenarioFilter === AGENTIC_SCENARIO
+    ? ALL_VALUE
+    : getAvailableMtpFilters(sequenceFiltered)[0] ?? ALL_VALUE;
   const visibleSeries = filterSeriesByMtp(sequenceFiltered, mtpFilter);
 
   return {
@@ -5103,7 +5125,9 @@ function filterSeriesByModelScenarioAndSequence(
 }
 
 function filterSeriesByMtp(series: InferenceCurveSeries[], mtpFilter: string): InferenceCurveSeries[] {
-  return series.filter((line) => mtpFilter === ALL_VALUE || getSeriesMtpFilter(line) === mtpFilter);
+  return series.filter((line) =>
+    isAgenticTraceSequence(getSeriesIslOsl(line)) || mtpFilter === ALL_VALUE || getSeriesMtpFilter(line) === mtpFilter
+  );
 }
 
 function getModelFilteredSeries(): InferenceCurveSeries[] {
@@ -5297,7 +5321,9 @@ function getChartSubtitle(): string {
     precisionLabel || 'No Precision',
     formatScenarioFilterLabel(state.scenarioFilter),
     state.scenarioFilter === AGENTIC_SCENARIO ? '' : formatIslOslLabel(state.islOslFilter),
-    state.mtpFilter === ALL_VALUE ? 'All MTP' : formatMtpFilterLabel(state.mtpFilter)
+    state.scenarioFilter === AGENTIC_SCENARIO
+      ? ''
+      : state.mtpFilter === ALL_VALUE ? 'All MTP' : formatMtpFilterLabel(state.mtpFilter)
   ].filter(Boolean).join(' • ');
 }
 
@@ -5342,6 +5368,7 @@ function getDefaultDraftPrecision(): string {
 }
 
 function getDefaultDraftMtp(): string {
+  if (state.scenarioFilter === AGENTIC_SCENARIO) return '';
   if (state.mtpFilter !== ALL_VALUE) return state.mtpFilter;
   return getAvailableMtpFilters(getModelSequenceFilteredSeries())[0] ?? NON_MTP_VALUE;
 }
@@ -5641,7 +5668,7 @@ function getMergeGroupKey(draft: SeriesDraft): string {
     normalizeMergeKeyPart(getDraftModel(draft)),
     normalizeMergeIslOsl(getDraftIslOsl(draft)),
     normalizeMergeKeyPart(getDraftPrecision(draft)),
-    getDraftMtpFilter(draft)
+    isAgenticTraceSequence(draft.islOsl) ? '' : getDraftMtpFilter(draft)
   ].join('|');
 }
 
@@ -5650,8 +5677,8 @@ function getMergeGroupLabel(draft: SeriesDraft): string {
     getDraftModel(draft),
     formatPrecisionLabel(getDraftPrecision(draft)),
     formatIslOslLabel(getDraftIslOsl(draft)),
-    formatMtpFilterLabel(getDraftMtpFilter(draft))
-  ].join(' • ');
+    isAgenticTraceSequence(draft.islOsl) ? '' : formatMtpFilterLabel(getDraftMtpFilter(draft))
+  ].filter(Boolean).join(' • ');
 }
 
 function normalizeMergeKeyPart(value: string): string {
@@ -5844,6 +5871,7 @@ function renderImportPreviewInput(
 }
 
 function renderImportPreviewMtpField(index: number, value: string): string {
+  if (isAgenticTraceSequence(pendingImportDrafts[index]?.draft.islOsl ?? '')) return '';
   const selectedValue = normalizeMtpValue(value);
   return `
     <label class="import-preview-field">
@@ -6766,6 +6794,7 @@ const POINT_IMPORT_ALIASES: Record<string, string[]> = {
   decode_num_workers: ['decode_num_workers', 'Decode Workers', 'Decode Worker', 'decode workers'],
   disagg: ['disagg', 'Disagg', 'disaggregated'],
   is_multinode: ['is_multinode', 'multi_node', 'multinode', 'Multi-node', 'Multi node'],
+  spec_decoding: ['spec_decoding', 'spec_method', 'Speculative Decoding'],
   kv_offload: [
     'kv_offload',
     'KV Offload',
@@ -6919,7 +6948,12 @@ function seriesFromEditorRecords(records: Record<string, unknown>[]): InferenceC
       const value = readMetricString(record, aliases);
       if (value) point[key] = value;
     });
-    if (!isEmptyPointRow(point)) draft.points.push(point);
+    if (!isEmptyPointRow(point)) {
+      if (isAgenticTraceSequence(draft.islOsl) && !point.spec_decoding && rawMtp) {
+        point.spec_decoding = normalizeMtpValue(rawMtp) === MTP_VALUE ? 'mtp' : 'none';
+      }
+      draft.points.push(point);
+    }
     drafts.set(id, draft);
   });
 
@@ -7042,7 +7076,7 @@ function importedPointFromBenchmarkRecord(
         ? formatScenarioLabel(scenario)
         : DEFAULT_ISL_OSL;
   const offload = readImportedOffloadConfig(record);
-  const lineName = formatImportedLineName(hardware, framework, specMethod);
+  const lineName = formatImportedLineName(hardware, framework, isAgentic ? '' : specMethod);
   const title = `${model} ${islOsl} ${precision.toUpperCase()} ${lineName}`;
   const prefillGpu = readMetricNumber(record, ['num_prefill_gpu', 'prefill gpus', 'prefill_gpu']);
   const decodeGpu = readMetricNumber(record, ['num_decode_gpu', 'decode gpus', 'decode_gpu']);
@@ -7152,6 +7186,7 @@ function importedPointFromBenchmarkRecord(
   if (decodeDpa !== undefined) point.decode_dp_attention = decodeDpa;
   if (prefillDpa !== undefined && prefillDpa === decodeDpa) point.dp_attention = prefillDpa;
   if (offload.label) point.kv_offload = offload.label;
+  if (isAgentic) point.spec_decoding = specMethod;
   if (serverGpuCacheHitRate !== null) point.server_gpu_cache_hit_rate = serverGpuCacheHitRate;
   if (serverExternalCacheHitRate !== null) {
     point.server_external_cache_hit_rate = serverExternalCacheHitRate;
@@ -7171,10 +7206,10 @@ function importedPointFromBenchmarkRecord(
     model,
     islOsl,
     precision,
-    mtp,
+    mtp: isAgentic ? '' : mtp,
     hardware,
     framework,
-    specMethod,
+    specMethod: isAgentic ? '' : specMethod,
     lineName,
     title,
     point
@@ -7253,6 +7288,7 @@ function mergeImportedSeries(series: InferenceCurveSeries[]): InferenceCurveSeri
         point.endToEndPercentiles,
         point.e2eNormalizedInteractivityPercentiles,
         point.kv_offload,
+        point.spec_decoding,
         point.prefill_dcp_size,
         point.decode_dcp_size,
         point.server_gpu_cache_hit_rate,
@@ -7880,7 +7916,8 @@ function buildChartCsvRows(mode: CsvExportMode): string[][] {
       'Theoretical Cache Hit Rate',
       'Concurrency',
       'Strategy',
-      'Note'
+      'Note',
+      'Speculative Decoding'
     ]
   ];
 
@@ -7911,7 +7948,7 @@ function buildChartCsvRows(mode: CsvExportMode): string[][] {
         getSeriesModel(line),
         getSeriesIslOsl(line),
         getSeriesPrecision(line),
-        getSeriesMtpFilter(line),
+        isAgenticTraceSequence(getSeriesIslOsl(line)) ? '' : getSeriesMtpFilter(line),
         String(line.hwKey ?? ''),
         line.color?.trim() ? 'Custom' : 'Auto',
         colorBySeriesId.get(series.id) ?? series.color,
@@ -7952,7 +7989,8 @@ function buildChartCsvRows(mode: CsvExportMode): string[][] {
         formatExportValue(point.theoretical_cache_hit_rate),
         formatExportValue(point.concurrency),
         String(point.strategy ?? ''),
-        String(point.label ?? '')
+        String(point.label ?? ''),
+        String(point.spec_decoding ?? '')
       ]);
     });
   });

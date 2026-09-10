@@ -17,7 +17,7 @@ round-trips through the app, and is more deterministic than raw benchmark CSV.
 Use this header order for generated CSV:
 
 ```csv
-Line ID,Line Name,Title,Line Note,Model,Scenario,Precision,MTP,HW Key,Color Mode,Resolved Color,Line Type,Line Marker,Layer,Included in Chart,Active Line,Point Index,Roofline Point,Point Marker,Interactivity (tok/s/user),Throughput/GPU (tok/s/gpu),TTFT (s),End-to-end (s),P50 Interactivity (tok/s/user),P75 Interactivity (tok/s/user),P90 Interactivity (tok/s/user),P95 Interactivity (tok/s/user),P50 TTFT (s),P75 TTFT (s),P90 TTFT (s),P95 TTFT (s),P50 End-to-end (s),P75 End-to-end (s),P90 End-to-end (s),P95 End-to-end (s),P75 E2E Normalized Interactivity (tok/s/user),P90 E2E Normalized Interactivity (tok/s/user),Prefill GPUs,Decode GPUs,Total GPUs,Prefill TP,Prefill EP,Prefill DCP,Prefill DPA,Prefill Workers,Decode TP,Decode EP,Decode DCP,Decode DPA,Decode Workers,DPA,Disagg,Multi-node,KV Offload,Chip Cache Hit Rate,External Cache Hit Rate,CPU Cache Hit Rate,Theoretical Cache Hit Rate,Concurrency,Strategy,Note
+Line ID,Line Name,Title,Line Note,Model,Scenario,Precision,MTP,HW Key,Color Mode,Resolved Color,Line Type,Line Marker,Layer,Included in Chart,Active Line,Point Index,Roofline Point,Point Marker,Interactivity (tok/s/user),Throughput/GPU (tok/s/gpu),TTFT (s),End-to-end (s),P50 Interactivity (tok/s/user),P75 Interactivity (tok/s/user),P90 Interactivity (tok/s/user),P95 Interactivity (tok/s/user),P50 TTFT (s),P75 TTFT (s),P90 TTFT (s),P95 TTFT (s),P50 End-to-end (s),P75 End-to-end (s),P90 End-to-end (s),P95 End-to-end (s),P75 E2E Normalized Interactivity (tok/s/user),P90 E2E Normalized Interactivity (tok/s/user),Prefill GPUs,Decode GPUs,Total GPUs,Prefill TP,Prefill EP,Prefill DCP,Prefill DPA,Prefill Workers,Decode TP,Decode EP,Decode DCP,Decode DPA,Decode Workers,DPA,Disagg,Multi-node,KV Offload,Chip Cache Hit Rate,External Cache Hit Rate,CPU Cache Hit Rate,Theoretical Cache Hit Rate,Concurrency,Strategy,Note,Speculative Decoding
 ```
 
 The importer uses the editor parser when at least one row has a non-empty
@@ -64,8 +64,11 @@ only those two percentiles and does not synthesize P50 or P95 values.
 
 Avoid relying on the app's internal fallbacks for empty `Line ID`, `Line Name`,
 `Model`, `Scenario`, or `Precision`; those defaults depend on current app state
-and are not suitable for generated CSV. `MTP` is technically optional, but
-generated integrations should prefer explicit `MTP` or `Non-MTP`.
+and are not suitable for generated CSV. For fixed-length data, `MTP` is
+technically optional, but generated integrations should prefer explicit `MTP`
+or `Non-MTP`. For Agentic data, leave `MTP` empty and use `Speculative Decoding`
+for each point. Agentic sync configs and raw benchmark imports merge speculative
+methods into one curve; the Agentic UI does not offer an MTP filter.
 
 ### Fields That May Be Empty
 
@@ -75,8 +78,13 @@ These fields are optional in editor CSV:
 - `Line Note`: optional curve-level notes shown only in the data editor. It is
   not used by the chart, legend, search, or tooltips. Repeat it for each point
   row belonging to the same line when generating CSV.
-- `MTP`: empty values are inferred from `Line ID`, `Line Name`, and `Title`; if
-  no `mtp` token is found, the line becomes `Non-MTP`.
+- `MTP`: fixed-length line metadata. Empty values are inferred from `Line ID`,
+  `Line Name`, and `Title`; if no `mtp` token is found, the line becomes
+  `Non-MTP`. For legacy Agentic files, an explicit value supplies point-level
+  speculative decoding metadata when `Speculative Decoding` is absent.
+- `Speculative Decoding`: optional point metadata, typically `mtp`, `none`, or
+  `draft_model`. Preserved in tooltips, browser storage, and CSV export; it
+  does not split Agentic curves. It takes precedence over legacy `MTP` values.
 - `Color Mode`: use `Custom` only when `Resolved Color` should be imported.
   Empty or `Auto` means automatic color.
 - `Resolved Color`: CSS color such as `#22c55e`; ignored unless `Color Mode` is
@@ -174,6 +182,7 @@ Accepted editor CSV aliases include:
   as `num_prefill_gpu`, `decode_tp`, and `prefill_dp_attention`; display labels
   such as `Prefill GPUs`, `Prefill DCP`, `Decode TP`, `Decode DCP`,
   `Prefill Workers`, `DPA`, `Disagg`, `Multi-node`, and `KV Offload`
+- Speculative decoding: `Speculative Decoding`, `spec_decoding`, `spec_method`
 - Cache hit rates: `server_gpu_cache_hit_rate`, `Chip Cache Hit Rate`,
   `server_external_cache_hit_rate`, `External Cache Hit Rate`,
   `server_cpu_cache_hit_rate`, `CPU Cache Hit Rate`,
@@ -182,17 +191,19 @@ Accepted editor CSV aliases include:
 ## Example
 
 ```csv
-Line ID,Line Name,Title,Line Note,Model,Scenario,Precision,MTP,HW Key,Color Mode,Resolved Color,Line Type,Line Marker,Layer,Included in Chart,Active Line,Point Index,Roofline Point,Point Marker,Interactivity (tok/s/user),Throughput/GPU (tok/s/gpu),TTFT (s),End-to-end (s),P50 Interactivity (tok/s/user),P75 Interactivity (tok/s/user),P90 Interactivity (tok/s/user),P95 Interactivity (tok/s/user),P50 TTFT (s),P75 TTFT (s),P90 TTFT (s),P95 TTFT (s),P50 End-to-end (s),P75 End-to-end (s),P90 End-to-end (s),P95 End-to-end (s),P75 E2E Normalized Interactivity (tok/s/user),P90 E2E Normalized Interactivity (tok/s/user),Prefill GPUs,Decode GPUs,Total GPUs,Prefill TP,Prefill EP,Prefill DCP,Prefill DPA,Prefill Workers,Decode TP,Decode EP,Decode DCP,Decode DPA,Decode Workers,DPA,Disagg,Multi-node,KV Offload,Chip Cache Hit Rate,External Cache Hit Rate,CPU Cache Hit Rate,Theoretical Cache Hit Rate,Concurrency,Strategy,Note
-dsr1-8192-fp8-b200-trt,B200 TRT,DeepSeek R1 B200 TRT,Production candidate,DeepSeek-R1-0528,ISL 8192 / OSL 1024,fp8,Non-MTP,,Auto,,solid,precision,1,,,,,,8.42,5220.5,0.12,9.04,,,,,,,,,,,,,,,4,8,,4,4,,true,,8,8,,true,,true,true,false,,,,,,1024,,run 123
-dsr1-agentic-fp8-b200-trt,B200 TRT Agentic,DeepSeek R1 B200 TRT agentic traces,Agentic validation run,DeepSeek-R1-0528,Agentic Traces,fp8,Non-MTP,,Auto,,solid,precision,2,,,,,,8.5,4830.2,0.18,37.4,12,10,8.5,7.8,0.10,0.14,0.18,0.22,25,31,37.4,42,19.78,11.24,4,8,,4,4,8,true,,8,8,8,true,,true,false,false,KV offload off,0.92,0,0,0.97,64,,agentic preview
+Line ID,Line Name,Title,Line Note,Model,Scenario,Precision,MTP,HW Key,Color Mode,Resolved Color,Line Type,Line Marker,Layer,Included in Chart,Active Line,Point Index,Roofline Point,Point Marker,Interactivity (tok/s/user),Throughput/GPU (tok/s/gpu),TTFT (s),End-to-end (s),P50 Interactivity (tok/s/user),P75 Interactivity (tok/s/user),P90 Interactivity (tok/s/user),P95 Interactivity (tok/s/user),P50 TTFT (s),P75 TTFT (s),P90 TTFT (s),P95 TTFT (s),P50 End-to-end (s),P75 End-to-end (s),P90 End-to-end (s),P95 End-to-end (s),P75 E2E Normalized Interactivity (tok/s/user),P90 E2E Normalized Interactivity (tok/s/user),Prefill GPUs,Decode GPUs,Total GPUs,Prefill TP,Prefill EP,Prefill DCP,Prefill DPA,Prefill Workers,Decode TP,Decode EP,Decode DCP,Decode DPA,Decode Workers,DPA,Disagg,Multi-node,KV Offload,Chip Cache Hit Rate,External Cache Hit Rate,CPU Cache Hit Rate,Theoretical Cache Hit Rate,Concurrency,Strategy,Note,Speculative Decoding
+dsr1-8192-fp8-b200-trt,B200 TRT,DeepSeek R1 B200 TRT,Production candidate,DeepSeek-R1-0528,ISL 8192 / OSL 1024,fp8,Non-MTP,,Auto,,solid,precision,1,,,,,,8.42,5220.5,0.12,9.04,,,,,,,,,,,,,,,4,8,,4,4,,true,,8,8,,true,,true,true,false,,,,,,1024,,run 123,
+dsr1-agentic-fp8-b200-trt,B200 TRT Agentic,DeepSeek R1 B200 TRT agentic traces,Agentic validation run,DeepSeek-R1-0528,Agentic Traces,fp8,,,Auto,,solid,precision,2,,,,,,8.5,4830.2,0.18,37.4,12,10,8.5,7.8,0.10,0.14,0.18,0.22,25,31,37.4,42,19.78,11.24,4,8,,4,4,8,true,,8,8,8,true,,true,false,false,KV offload off,0.92,0,0,0.97,64,,agentic preview,none
 ```
 
 ## Raw Benchmark CSV Fallback
 
 Raw benchmark CSV is supported only as a fallback. If no row has `Line ID`,
 the importer groups rows by parsed model, scenario, precision,
-MTP/spec, hardware, and framework. KV/offload mode is kept as `KV Offload`
-point metadata; it does not split rows into separate lines.
+hardware, and framework, plus MTP/spec for fixed-length rows. Agentic rows
+keep MTP/spec as `Speculative Decoding` point metadata. KV/offload mode is kept
+as `KV Offload` point metadata; neither field splits Agentic rows into separate
+lines.
 
 Each raw benchmark row must have a numeric throughput column and at least one
 numeric X-axis metric column. Accepted aliases include:

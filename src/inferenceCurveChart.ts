@@ -29,6 +29,7 @@ export interface InferenceCurvePoint {
   disagg?: boolean;
   is_multinode?: boolean;
   kv_offload?: string;
+  spec_decoding?: string;
   server_gpu_cache_hit_rate?: number;
   server_external_cache_hit_rate?: number;
   server_cpu_cache_hit_rate?: number;
@@ -2263,6 +2264,10 @@ function formatTooltip(
     }
   }
   if (point.concurrency !== undefined) fields.push(`Concurrency: ${point.concurrency}`);
+  if (point.spec_decoding) {
+    const label = point.spec_decoding === 'none' ? 'Off' : point.spec_decoding.toUpperCase();
+    fields.push(`Speculative Decoding: ${escapeHtml(label)}`);
+  }
   if (typeof point.kv_offload === 'string' && point.kv_offload.trim()) {
     fields.push(`KV Offload: ${escapeHtml(point.kv_offload.trim())}`);
   }
