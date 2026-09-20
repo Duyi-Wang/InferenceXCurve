@@ -541,8 +541,85 @@ p {
 
 .metric-row {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
   justify-content: center;
   padding: 0 12px 2px;
+}
+
+.chart-y-metric-control,
+.tco-heading,
+.tco-price-sync,
+.tco-heading label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.tco-price-sync {
+  margin-top: 12px;
+  color: var(--muted-foreground);
+}
+
+.tco-controls {
+  padding: 16px 20px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+}
+
+.tco-controls[hidden] {
+  display: none;
+}
+
+.tco-rates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.tco-rates label {
+  display: grid;
+  gap: 5px;
+  font-size: 12px;
+}
+
+.tco-rates input {
+  width: 160px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--foreground);
+  background: var(--background);
+  font: inherit;
+}
+
+.tco-rates input:read-only {
+  color: var(--muted-foreground);
+}
+
+.tco-controls a {
+  color: inherit;
+  text-underline-offset: 2px;
+}
+
+.tco-rates small,
+.tco-heading > span,
+.tco-controls p {
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.tco-controls p {
+  margin: 12px 0 0;
+}
+
+.tco-controls .tco-missing {
+  color: var(--foreground);
 }
 
 .metric-switch {

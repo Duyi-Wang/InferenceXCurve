@@ -31,9 +31,12 @@ These fields should always be present and non-empty in generated editor CSV:
 - `Line ID`: stable id for grouping rows into one curve.
 - `Line Name`: legend label.
 - `Model`: filter value, for example `DeepSeek-R1-0528`.
+  `DeepSeek-V4-Pro-0813` (including `deepseek-ai/` paths) is normalized to
+  `DeepSeek-V4-Pro`, sharing the same model chart as older V4 Pro data.
 - `Scenario`: sequence/scenario value, for example `ISL 8192 / OSL 1024`, `ISL 1024 / OSL 1024`, or `Agentic Traces`. The UI classifies numeric ISL/OSL values under `Fixed Sequence Length` and agentic labels under `Agentic Traces`.
 - `Precision`: filter value, for example `fp4` or `fp8`.
-- `Throughput/GPU (tok/s/gpu)`: numeric Y value.
+- `Throughput/GPU (tok/s/gpu)`: numeric total input + output tokens per second
+  per GPU. Always export raw throughput here, even when viewing TCO.
 
 Each point row with data must also include at least one numeric X-axis metric:
 
@@ -74,6 +77,10 @@ methods into one curve; the Agentic UI does not offer an MTP filter.
 
 These fields are optional in editor CSV:
 
+- `HW Key`: preserved hardware metadata, such as `b200_dynamo-trt` or
+  `mi355x_mori-sglang`. TCO uses the hardware before the first underscore or hyphen to
+  select a USD/GPU-hour price. Include this field when line names/IDs do not
+  identify the hardware; B200 and GB200 are distinct.
 - `Title`: optional tooltip/title metadata.
 - `Line Note`: optional curve-level notes shown only in the data editor. It is
   not used by the chart, legend, search, or tooltips. Repeat it for each point
@@ -128,7 +135,6 @@ otherwise import fails.
 The app's `Download CSV` output contains derived columns. They are safe to keep
 when round-tripping, but they are ignored on import:
 
-- `HW Key`
 - `Included in Chart`
 - `Active Line`
 - `Point Index`

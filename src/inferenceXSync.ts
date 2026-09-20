@@ -136,19 +136,15 @@ const MODEL_API_PARAMS: Record<string, string> = {
   minimaxm3: 'MiniMax-M3'
 };
 
-const DEFAULT_SYNC_MATRIX = {
-  model: 'DeepSeek-R1-0528',
-  shapes: [
-    { isl: 1024, osl: 1024 },
-    { isl: 8192, osl: 1024 }
-  ],
-  precisions: ['fp4', 'fp8'],
-  targets: [
-    { hardware: 'mi355x', framework: 'mori-sglang' },
-    { hardware: 'b200', framework: 'dynamo-trt' },
-    { hardware: 'b200', framework: 'dynamo-sglang' }
-  ],
-  specMethods: [NON_MTP_SPEC, MTP_SPEC]
+const DEFAULT_SYNC_CONFIG = {
+  model: 'DeepSeek-V4-Pro',
+  scenario: 'agentic-traces',
+  isl: 0,
+  osl: 0,
+  precision: 'fp4',
+  hardware: 'mi355x',
+  framework: 'mori-sglang',
+  enabled: true
 } as const;
 
 type InferenceXBenchmarkRecord = Record<string, unknown>;
@@ -159,27 +155,7 @@ interface InferenceXDerivedAgenticMetrics {
 }
 
 export function createDefaultInferenceXSyncConfigs(): InferenceXSyncConfig[] {
-  const configs: InferenceXSyncConfig[] = [];
-  DEFAULT_SYNC_MATRIX.shapes.forEach((shape) => {
-    DEFAULT_SYNC_MATRIX.precisions.forEach((precision) => {
-      DEFAULT_SYNC_MATRIX.targets.forEach((target) => {
-        DEFAULT_SYNC_MATRIX.specMethods.forEach((specMethod) => {
-          const config = normalizeInferenceXSyncConfig({
-            model: DEFAULT_SYNC_MATRIX.model,
-            isl: shape.isl,
-            osl: shape.osl,
-            precision,
-            hardware: target.hardware,
-            framework: target.framework,
-            specMethod,
-            enabled: true
-          });
-          configs.push(config);
-        });
-      });
-    });
-  });
-  return configs;
+  return [normalizeInferenceXSyncConfig(DEFAULT_SYNC_CONFIG)];
 }
 
 export function normalizeInferenceXSyncConfigs(value: unknown): InferenceXSyncConfig[] {
@@ -203,7 +179,7 @@ export function normalizeInferenceXSyncConfigs(value: unknown): InferenceXSyncCo
 }
 
 export function normalizeInferenceXSyncConfig(value: Partial<InferenceXSyncConfig>): InferenceXSyncConfig {
-  const model = normalizeText(value.model) || DEFAULT_SYNC_MATRIX.model;
+  const model = getInferenceXDisplayModel(normalizeText(value.model) || DEFAULT_SYNC_CONFIG.model);
   const scenario = normalizeScenario(value.scenario);
   const isl = normalizeSequenceInteger(value.isl, scenario ? 0 : 1024);
   const osl = normalizeSequenceInteger(value.osl, scenario ? 0 : 1024);
@@ -979,7 +955,12 @@ function compareOptionalNumbers(a: number | undefined, b: number | undefined): n
 
 function resolveModelKey(model: string): string {
   const normalized = normalizeText(model).toLowerCase();
-  if (!normalized) return 'dsr1';
+  if (!normalized) return '';
+  // The 0813 checkpoint shares dsv4's architecture and API history. The public
+  // API still accepts DeepSeek-V4-Pro, not DeepSeek-V4-Pro-0813.
+  const tail = normalized.split(/[\\/]/u).filter(Boolean).at(-1) ?? normalized;
+  const compact = tail.replace(/-(?:fp4|fp8|mxfp4|nvfp4)(?:-.*)?$/u, '').replace(/[^a-z0-9]/gu, '');
+  if (['dsv4', 'dsv4pro', 'deepseekv4pro', 'deepseekv4pro0813'].includes(compact)) return 'dsv4';
   if (MODEL_DISPLAY_NAMES[normalized]) return normalized;
   const displayMatch = Object.entries(MODEL_DISPLAY_NAMES).find(
     ([, display]) => display.toLowerCase() === normalized

@@ -98,6 +98,7 @@ Agent-specific rules:
 The app now treats the public InferenceX API as the primary source for default benchmark data, with `src/exampleData.ts` as offline fallback. Sync implementation lives in `src/inferenceXSync.ts`; UI state and local persistence live in `src/main.ts`.
 
 - App startup with no saved browser data should fetch default sync configs and render the API result; if that fails, keep the bundled `exampleSeries`.
+- The default data and single enabled sync config are `DeepSeek-V4-Pro` / `agentic-traces` / `fp4` / `mi355x` / `mori-sglang`. Do not reintroduce the old DSR1 default matrix. Agentic configs omit `specMethod` and use `isl: 0`, `osl: 0`.
 - App startup with saved browser data should check for updates only once and should not overwrite chart data until the user clicks `Update`.
 - `Check Updates` fetches enabled configs and stages changed series; `Update` applies staged series.
 - `benchmarks?model=...` returns historical rows. `disagg` and KV offload are point-level metadata rather than sync-config or line-id dimensions. Split records by `disagg` and effective `offload_mode`, select each branch's newest `curve_date` (falling back to `date`), and then merge the selected branches into the combined model / sequence or scenario / precision / hardware / framework curve. Fixed-length curves additionally split by MTP. Agentic curves select snapshots across all speculative methods and preserve each point's method as `spec_decoding`. For Agentic rows on the selected curve date, keep only the newest `curve_run_started_at` / `curve_workflow_run_id` snapshot; this snapshot may intentionally carry forward rows whose original `date` is older. Never discard those carried-forward rows merely because their benchmark `date` is not the newest.
@@ -121,12 +122,11 @@ The InferenceX API does **not** send an `Access-Control-Allow-Origin` header (th
 When updating `src/exampleData.ts`, query the public InferenceX API rather than scraping the rendered page:
 
 ```bash
-curl -L 'https://inferencex.semianalysis.com/api/v1/availability'
-curl -L 'https://inferencex.semianalysis.com/api/v1/benchmarks?model=DeepSeek-R1-0528'
-curl -L 'https://inferencex.semianalysis.com/api/v1/benchmarks?model=DeepSeek-R1-0528&date=2026-05-27&exact=true'
-curl -L 'https://inferencex.semianalysis.com/api/v1/workflow-info?date=2026-05-27'
+curl --compressed -L 'https://inferencex.semianalysis.com/api/v1/availability'
+curl --compressed -L 'https://inferencex.semianalysis.com/api/v1/benchmarks?model=DeepSeek-V4-Pro'
+curl --compressed -L 'https://inferencex.semianalysis.com/api/v1/workflow-info?date=2026-09-17'
 ```
 
-Use the display model name in the benchmark URL (`DeepSeek-R1-0528`), then filter returned rows by `model === "dsr1"`. The current example set keeps `1024/1024` and `8192/1024`, `fp4` and `fp8`, `disagg === true`, and these hardware/framework/spec combinations: `mi355x/mori-sglang`, `b200/dynamo-trt`, and `b200/dynamo-sglang`, with both `none` and `mtp`.
+Use the API display model name `DeepSeek-V4-Pro`, then select `model === "dsv4"`, `benchmark_type === "agentic_traces"`, `precision === "fp4"`, `hardware === "mi355x"`, and `framework === "mori-sglang"`. Generate the snapshot through `fetchInferenceXSyncSeries(createDefaultInferenceXSyncConfigs())` so offline data uses the same branch and curve-run selection as live sync. Keep offload on/off points together, and do not filter by speculative method. The bundled snapshot retrieved on 2026-09-20 has seven points from curve date 2026-09-17.
 
-Map InferenceX rows to this app as follows: `metrics.median_intvty` -> `interactivity`, `metrics.tput_per_gpu` -> `throughput`, `conc` -> `concurrency`, `spec_method === "mtp"` -> line `MTP`, otherwise `Non-MTP`, `hardware_framework[_mtp]` -> `hwKey`, and `date` plus `run_url` -> point `Note`.
+Preserve Agentic P50/P75/P90/P95 latency percentiles, use P90 as the unprefixed compatibility value, and retrieve P75/P90 E2E Normalized Interactivity from `derived-agentic-metrics?ids=...`. Map `metrics.tput_per_gpu` to `throughput`, `conc` to `concurrency`, `spec_method` to point `spec_decoding`, `hardware_framework` to `hwKey`, and `date` plus `run_url` to point `Note`. Leave the line-level `mtp` field absent.

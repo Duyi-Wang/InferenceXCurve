@@ -19,6 +19,9 @@ npm run build
 npm run preview
 ```
 
+Run the focused model compatibility and TCO regression checks with
+`npm run check:model-tco`.
+
 ## Data Model
 
 Each curve is edited as a **Line Project**. Line-level fields are shared by all
@@ -65,6 +68,43 @@ updates without pressing `Render Chart`. The button remains available for an
 immediate redraw.
 
 ## Filters and View Controls
+
+`DeepSeek-V4-Pro-0813`, `DeepSeek V4 Pro`, `DeepSeek-V4-Pro`, and their
+`deepseek-ai/` model paths share the `DeepSeek-V4-Pro` model filter. Sync keeps
+the existing curve IDs and uses the upstream `DeepSeek-V4-Pro` API parameter.
+
+The **Y axis** selector offers **Total Tokens per Dollar** alongside throughput.
+Its TCO calculation is `Throughput/GPU × 3600 / GPU hourly cost`. Throughput must
+include input and output tokens; it is already normalized per GPU, so neither
+the ISL/OSL ratio nor GPU count is multiplied again. Fixed-length and Agentic
+charts use the same formula.
+
+Cost presets cover owning at large hyperscaler volume and rental. On page load,
+the app refreshes the public InferenceX price sources if the last successful
+check was at least 24 hours ago. **Refresh Prices** checks immediately. The UI
+shows the check time and links to the upstream source. GitHub permits
+these browser requests from GitHub Pages without an InferenceX API proxy.
+Source files are pinned to one commit when GitHub's anonymous API quota is
+available; otherwise the app reads the raw default-branch files directly.
+
+Successful checks are cached under `inferencex-curve:tco-prices:v1`. Network
+failures or unsupported upstream formats keep the last good cache, falling
+back to the bundled September 20, 2026 prices when no cache exists. The app
+parses price literals and the owning-cost adjustment without executing upstream
+code. The published prices reference SemiAnalysis pricing surveys and its AI
+Cloud TCO Model; this updates when InferenceX publishes new prices.
+
+**Custom** starts from the selected
+preset and lets you set positive USD/GPU-hour prices, saved in this browser.
+Automatic and manual price refreshes leave custom prices unchanged.
+Hardware is matched using `HW Key`, then an unambiguous hardware token in line
+metadata. B200 and GB200 have separate prices. Lines without a price are omitted
+from the TCO plot until a custom price is supplied.
+
+CSV exports retain the benchmark data and hardware fields. TCO is calculated
+from raw throughput using the current browser's cost settings; pricing and
+tokens per dollar are not CSV columns. PNG exports include the selected metric
+and cost basis.
 
 The top controls filter by `Model`, `ISL/OSL`, `Precision`, and `MTP`. Defaults
 select the first available value rather than showing all values.
@@ -138,6 +178,13 @@ InferenceX sync configuration from the API. If the request fails or no matching
 rows are returned, it falls back to the bundled `exampleSeries`. On later opens,
 the app checks for updates once and stages the result, but it does not overwrite
 the current chart until you click `Update`.
+
+The default data and single sync config are **DeepSeek-V4-Pro / Agentic Traces /
+FP4 / MI355X / MoRI SGLang**. The bundled fallback contains seven points from
+the September 17, 2026 curve snapshot, including both KV offload branches and
+Agentic latency percentiles. Speculative decoding remains point metadata.
+**Reset All** replaces saved chart data and configs with this default;
+ordinary reloads retain the user's saved workspace.
 
 For each enabled sync config, the API may return historical rows across many
 dates. Sync mirrors the upstream chart behavior by keeping only the newest

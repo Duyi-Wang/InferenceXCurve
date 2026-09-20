@@ -61,6 +61,8 @@ export interface InferenceCurveChartOptions {
   activeSeriesIds?: Set<string>;
   selectedPrecisions?: string[];
   xMetric?: InferenceCurveXAxisMetric;
+  yMetric?: InferenceCurveYAxisMetric;
+  tcoHourlyCosts?: Record<string, number>;
   latencyPercentile?: InferenceCurveLatencyPercentile;
   metricDisplayOverrides?: InferenceCurveXAxisMetricDisplayOverrides;
   enforceEndToEndPareto?: boolean;
@@ -88,6 +90,59 @@ export interface InferenceCurveChartOptions {
 }
 
 export type ParetoGoal = 'maximize' | 'minimize';
+
+export type InferenceCurveYAxisMetric = 'throughput' | 'totalTokensPerDollar';
+export type InferenceCurveTcoCostMode = 'hyperscaler' | 'rental' | 'custom';
+
+// Public InferenceX costs, retrieved 2026-09-20. USD per GPU-hour.
+// https://github.com/SemiAnalysisAI/InferenceX-app/blob/e41635bf390819d5af61ed4e8935f87b298e36d4/packages/constants/src/gpu-keys.ts
+export const INFERENCE_CURVE_TCO_COSTS: Record<string, { hyperscaler: number; rental: number }> = {
+  h100: { hyperscaler: 1.17, rental: 2 },
+  h200: { hyperscaler: 1.22, rental: 2.9 },
+  b200: { hyperscaler: 1.73, rental: 3.7 },
+  b300: { hyperscaler: 2.26, rental: 4.25 },
+  gb200: { hyperscaler: 1.86, rental: 4 },
+  gb300: { hyperscaler: 2.31, rental: 5 },
+  mi300x: { hyperscaler: 0.95, rental: 1.3 },
+  mi325x: { hyperscaler: 1.1, rental: 1.6 },
+  mi355x: { hyperscaler: 1.5, rental: 2.9 },
+  rtx6000pro: { hyperscaler: 0.68, rental: 0.52 },
+  vr200: { hyperscaler: 3.61, rental: 8.5 },
+  jalapeno: { hyperscaler: 1.27, rental: 1.27 },
+  // Match getGpuSpecs' default internal owning basis (external buyers: $1.21).
+  // https://github.com/SemiAnalysisAI/InferenceX-app/blob/e41635bf390819d5af61ed4e8935f87b298e36d4/packages/app/src/lib/constants.ts
+  tpuv7: { hyperscaler: 1.03, rental: 2 }
+};
+
+export function getInferenceCurveTcoHardware(line: InferenceCurveSeries): string {
+  // Explicit hardware wins. Never infer B200 from a GB200 label or price an
+  // unknown accelerator using another model's rate.
+  if (line.hwKey?.trim()) return line.hwKey.trim().toLowerCase().split(/[-_]/u)[0]!;
+  const tokens = `${line.id} ${line.name} ${line.title ?? ''}`.toLowerCase().split(/[^a-z0-9]+/u);
+  const matches = [...new Set(tokens.filter((token) => Object.hasOwn(INFERENCE_CURVE_TCO_COSTS, token)))];
+  return matches.length === 1 ? matches[0]! : `line:${line.id}`;
+}
+
+export function getInferenceCurvePointYValue(
+  point: InferenceCurvePoint,
+  line: InferenceCurveSeries,
+  metric: InferenceCurveYAxisMetric = 'throughput',
+  hourlyCosts: Record<string, number> = {}
+): number {
+  if (metric === 'throughput') return point.throughput;
+  const cost = hourlyCosts[getInferenceCurveTcoHardware(line)];
+  if (!Number.isFinite(cost) || cost <= 0 || !Number.isFinite(point.throughput) || point.throughput < 0) {
+    return Number.NaN;
+  }
+  // Throughput already includes input + output tokens and is normalized per GPU.
+  return point.throughput * 3600 / cost;
+}
+
+export function getInferenceCurveYAxisLabel(metric: InferenceCurveYAxisMetric): string {
+  return metric === 'totalTokensPerDollar'
+    ? 'Total Tokens per Dollar (tok/$)'
+    : 'Token Throughput per GPU (tok/s/gpu)';
+}
 
 export type InferenceCurveLatencyPercentile = 'p50' | 'p75' | 'p90' | 'p95';
 
@@ -315,6 +370,8 @@ const defaultOptions: Required<
   Omit<InferenceCurveChartOptions, 'activeSeriesIds' | 'selectedPrecisions'>
 > = {
   xMetric: 'interactivity',
+  yMetric: 'throughput',
+  tcoHourlyCosts: {},
   latencyPercentile: 'p90',
   enforceEndToEndPareto: false,
   showNonOptimalPoints: false,
@@ -482,7 +539,9 @@ export function prepareInferenceCurveSeries(
   enforceEndToEndPareto = false,
   xGoal?: ParetoGoal,
   yGoal: ParetoGoal = 'maximize',
-  latencyPercentile: InferenceCurveLatencyPercentile = 'p90'
+  latencyPercentile: InferenceCurveLatencyPercentile = 'p90',
+  yMetric: InferenceCurveYAxisMetric = 'throughput',
+  tcoHourlyCosts: Record<string, number> = {}
 ): PreparedSeries[] {
   const colors = resolveInferenceCurveColors(series, highContrast, theme, colorSeries);
   return series.map((line, seriesIndex) => {
@@ -492,13 +551,14 @@ export function prepareInferenceCurveSeries(
     const points: ChartPoint[] = [];
     line.points.forEach((point, pointIndex) => {
       const x = getPointXValue(point, xMetric, latencyPercentile);
-      const y = point.throughput;
+      const y = getInferenceCurvePointYValue(point, line, yMetric, tcoHourlyCosts);
       if (!Number.isFinite(x) || !Number.isFinite(y)) return;
       points.push({
         ...point,
         seriesId: line.id,
         seriesName: line.name,
         seriesTitle: line.title,
+        tcoHourlyCost: tcoHourlyCosts[getInferenceCurveTcoHardware(line)],
         pointIndex,
         color,
         precision: String(point.precision ?? 'default'),
@@ -828,6 +888,10 @@ export function renderInferenceCurveChart(
   userOptions: InferenceCurveChartOptions = {}
 ): void {
   const options = { ...defaultOptions, ...userOptions };
+  if (!userOptions.yLabel) options.yLabel = getInferenceCurveYAxisLabel(options.yMetric);
+  if (!userOptions.title && options.yMetric === 'totalTokensPerDollar') {
+    options.title = getInferenceCurveTitle(options.xMetric).replace('Token Throughput per GPU', 'Total Tokens per Dollar');
+  }
   if (userOptions.latencyPercentile) {
     options.metricDisplayOverrides = makeLatencyPercentileDisplayOverrides(
       userOptions.latencyPercentile,
@@ -857,7 +921,9 @@ export function renderInferenceCurveChart(
     options.enforceEndToEndPareto,
     userOptions.xGoal,
     userOptions.yGoal,
-    options.latencyPercentile
+    options.latencyPercentile,
+    options.yMetric,
+    options.tcoHourlyCosts
   );
   const visibleSeries = sortPreparedSeriesForRender(
     prepared.map((series) => ({
@@ -2236,9 +2302,15 @@ function formatTooltip(
   const fields = [
     `<strong>${escapeHtml(point.seriesName)}</strong>`,
     formatTooltipMetricField(metricConfig.tooltipLabel, point.x, metricConfig.unit),
-    `Throughput: ${formatTooltipMetric(point.y)} tok/s/gpu`,
+    `Throughput: ${formatTooltipMetric(point.throughput)} tok/s/gpu`,
     `Precision: ${escapeHtml(formatPrecision(point.precision))}`
   ];
+  if (options.yMetric === 'totalTokensPerDollar') {
+    fields.splice(2, 0,
+      `Total Tokens per Dollar: ${formatTooltipMetric(point.y)} tok/$`,
+      `GPU Hourly Cost: $${formatTooltipMetric(Number(point.tcoHourlyCost))}/GPU-hour`
+    );
+  }
   X_AXIS_METRIC_ORDER.forEach((candidate) => {
     if (candidate === metric) return;
     const value = readPointMetricValue(point, candidate, percentile);

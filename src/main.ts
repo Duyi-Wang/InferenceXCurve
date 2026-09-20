@@ -4,6 +4,14 @@ import { strFromU8, unzipSync } from 'fflate';
 
 import { exampleSeries } from './exampleData';
 import {
+  fetchInferenceXTcoPrices,
+  INFERENCEX_TCO_CACHE_KEY,
+  INFERENCEX_TCO_REPOSITORY,
+  readInferenceXTcoPriceSnapshot,
+  shouldRefreshInferenceXTcoPrices,
+  type InferenceXTcoPriceSnapshot
+} from './inferenceXTcoSync';
+import {
   createDefaultInferenceXSyncConfigs,
   fetchInferenceXAvailability,
   fetchInferenceXSyncSeries,
@@ -24,9 +32,12 @@ import {
   getAvailablePrecisions,
   getInferenceCurveColorSourceSeries,
   getInferenceCurvePointGpuCount,
+  getInferenceCurveTcoHardware,
   getInferenceCurveTitle,
   getInferenceCurveXAxisLabel,
+  getInferenceCurveYAxisLabel,
   INFERENCE_CURVE_MARGIN,
+  INFERENCE_CURVE_TCO_COSTS,
   prepareInferenceCurveSeries,
   renderInferenceCurveChart,
   resetInferenceCurveZoom,
@@ -37,7 +48,9 @@ import {
   type InferenceCurveLatencyPercentile,
   type InferenceCurveLatencyPercentiles,
   type InferenceCurveSeries,
-  type InferenceCurveXAxisMetric
+  type InferenceCurveXAxisMetric,
+  type InferenceCurveYAxisMetric,
+  type InferenceCurveTcoCostMode
 } from './inferenceCurveChart';
 
 const app = document.querySelector<HTMLDivElement>('#inferencex-workspace-root')!;
@@ -62,6 +75,9 @@ type PointRow = Record<string, string>;
 interface AppState {
   theme: Theme;
   chartMetric: InferenceCurveXAxisMetric;
+  chartYMetric: InferenceCurveYAxisMetric;
+  tcoCostMode: InferenceCurveTcoCostMode;
+  tcoCustomCosts: Record<string, number>;
   latencyPercentile: InferenceCurveLatencyPercentile;
   activeSeriesIds: Set<string>;
   activeSeriesIdsByView: Map<string, Set<string>>;
@@ -94,6 +110,7 @@ interface TableColumn {
 
 interface SeriesDraft {
   id: string;
+  hwKey?: string;
   name: string;
   model: string;
   islOsl: string;
@@ -141,6 +158,9 @@ interface PendingMergeGroup {
 interface PersistedAppState {
   theme?: Theme;
   chartMetric?: InferenceCurveXAxisMetric;
+  chartYMetric?: InferenceCurveYAxisMetric;
+  tcoCostMode?: InferenceCurveTcoCostMode;
+  tcoCustomCosts?: Record<string, number>;
   latencyPercentile?: InferenceCurveLatencyPercentile;
   activeSeriesIds?: string[];
   activeSeriesIdsByView?: Record<string, string[]>;
@@ -577,6 +597,10 @@ function createInitialDataState(): InitialDataState {
   const restoredDrafts = persisted.seriesDrafts.length
     ? persisted.seriesDrafts
     : draftsFromSeriesForRestore(persisted.currentSeries);
+  const savedHardware = new Map(persisted.currentSeries.map((line) => [line.id, line.hwKey]));
+  restoredDrafts.forEach((draft) => {
+    draft.hwKey ||= savedHardware.get(draft.id);
+  });
   let restoredSeries = persisted.currentSeries;
   try {
     const draftSeries = draftsToSeriesAllowEmpty(restoredDrafts);
@@ -701,7 +725,8 @@ function restorePersistedSeriesDrafts(value: unknown): SeriesDraft[] {
     const restored: SeriesDraft = {
       id: readPersistedText(draft, 'id', `line-${index + 1}`),
       name: readPersistedText(draft, 'name', `Line ${index + 1}`),
-      model: readPersistedText(draft, 'model', DEFAULT_MODEL),
+      model: getInferenceXDisplayModel(readPersistedText(draft, 'model', DEFAULT_MODEL)),
+      hwKey: readPersistedText(draft, 'hwKey') || undefined,
       islOsl: readPersistedText(draft, 'islOsl', DEFAULT_ISL_OSL),
       precision: readPersistedText(draft, 'precision', DEFAULT_PRECISION),
       mtp: normalizeMtpValue(readPersistedText(draft, 'mtp', NON_MTP_VALUE)),
@@ -753,11 +778,15 @@ function restorePersistedState(value: unknown): PersistedAppState {
   return {
     theme: value.theme === 'light' || value.theme === 'dark' ? value.theme : undefined,
     chartMetric: normalizeChartMetric(value.chartMetric),
+    chartYMetric: value.chartYMetric === 'totalTokensPerDollar' ? 'totalTokensPerDollar' : 'throughput',
+    tcoCostMode: normalizeTcoCostMode(value.tcoCostMode),
+    tcoCustomCosts: normalizeTcoCustomCosts(value.tcoCustomCosts),
     latencyPercentile: normalizeLatencyPercentile(value.latencyPercentile),
     activeSeriesIds: readPersistedStringArray(value.activeSeriesIds),
     activeSeriesIdsByView: readPersistedActiveSeriesByView(value.activeSeriesIdsByView),
     selectedPrecisions: readPersistedStringArray(value.selectedPrecisions),
-    modelFilter: readPersistedText(value, 'modelFilter') || undefined,
+    modelFilter: readPersistedText(value, 'modelFilter')
+      ? getInferenceXDisplayModel(readPersistedText(value, 'modelFilter')) : undefined,
     scenarioFilter: readPersistedText(value, 'scenarioFilter') || undefined,
     islOslFilter: readPersistedText(value, 'islOslFilter') || undefined,
     mtpFilter: readPersistedText(value, 'mtpFilter') || undefined,
@@ -796,6 +825,9 @@ function restoreAppState(defaults: AppState, saved: PersistedAppState, series: I
   return {
     theme: saved.theme ?? defaults.theme,
     chartMetric: saved.chartMetric ?? defaults.chartMetric,
+    chartYMetric: saved.chartYMetric ?? defaults.chartYMetric,
+    tcoCostMode: saved.tcoCostMode ?? defaults.tcoCostMode,
+    tcoCustomCosts: saved.tcoCustomCosts ?? defaults.tcoCustomCosts,
     latencyPercentile: saved.latencyPercentile ?? defaults.latencyPercentile,
     activeSeriesIds:
       activeSeriesIds.length > 0 || series.length === 0
@@ -832,6 +864,9 @@ function serializeAppState(): PersistedAppState {
   return {
     theme: state.theme,
     chartMetric: state.chartMetric,
+    chartYMetric: state.chartYMetric,
+    tcoCostMode: state.tcoCostMode,
+    tcoCustomCosts: state.tcoCustomCosts,
     latencyPercentile: state.latencyPercentile,
     activeSeriesIds: Array.from(state.activeSeriesIds),
     activeSeriesIdsByView: serializeActiveSeriesByView(),
@@ -1003,7 +1038,17 @@ function readPersistedActiveSeriesByView(value: unknown): Record<string, string[
   const result: Record<string, string[]> = {};
   Object.entries(value).forEach(([key, ids]) => {
     if (!Array.isArray(ids)) return;
-    result[key] = ids.map((id) => normalizeCellText(String(id))).filter(Boolean);
+    const [model, ...filters] = key.split('|');
+    let canonicalKey = key;
+    try {
+      canonicalKey = [encodeURIComponent(getInferenceXDisplayModel(decodeURIComponent(model!))), ...filters].join('|');
+    } catch {
+      // Keep legacy keys with invalid percent escapes unchanged.
+    }
+    result[canonicalKey] = [...new Set([
+      ...(result[canonicalKey] ?? []),
+      ...ids.map((id) => normalizeCellText(String(id))).filter(Boolean)
+    ])];
   });
   return Object.keys(result).length ? result : undefined;
 }
@@ -1055,6 +1100,9 @@ let pendingImportDrafts: PendingImportDraft[] = [];
 let pendingImportSettings: ImportBatchSettings = createImportBatchSettings();
 let pendingMergeGroups: PendingMergeGroup[] = [];
 let state: AppState = initialData.state;
+let tcoPriceSnapshot = loadCachedTcoPrices();
+let tcoPriceLoading = false;
+let tcoPriceError = '';
 let inferenceXSync: InferenceXSyncState = initialData.inferenceXSync;
 let localSaveTimer: number | null = null;
 let autoRenderTimer: number | null = null;
@@ -1098,8 +1146,17 @@ app.innerHTML = `
       </label>
     </section>
     <section class="metric-row no-export">
-      <div id="metric-switch" class="metric-switch" role="group" aria-label="Chart metric"></div>
+      <div id="metric-switch" class="metric-switch" role="group" aria-label="X-axis metric"></div>
+      <label class="chart-y-metric-control">
+        <span>Y axis</span>
+        <select id="chart-y-metric">
+          <option value="throughput">Throughput / GPU</option>
+          <option value="totalTokensPerDollar">Total Tokens per Dollar</option>
+        </select>
+      </label>
     </section>
+
+    <section id="tco-controls" class="tco-controls no-export" hidden></section>
 
     <section class="chart-card">
       <div class="chart-card-toolbar no-export">
@@ -1473,6 +1530,7 @@ window.addEventListener('inferencex-workspace-activate', () => {
   renderAll();
 });
 void initializeInferenceXSync();
+void refreshInferenceXTcoPrices();
 
 function toggleWatermarkPanel(): void {
   setWatermarkPanelOpen(watermarkMenuPanelEl.hidden);
@@ -1594,12 +1652,148 @@ function handleMetricSwitchClick(event: MouseEvent): void {
   scheduleLocalSave();
 }
 
+function normalizeTcoCostMode(value: unknown): InferenceCurveTcoCostMode {
+  return value === 'rental' || value === 'custom' ? value : 'hyperscaler';
+}
+
+function loadCachedTcoPrices(): InferenceXTcoPriceSnapshot | null {
+  try {
+    return readInferenceXTcoPriceSnapshot(JSON.parse(window.localStorage.getItem(INFERENCEX_TCO_CACHE_KEY) ?? 'null'));
+  } catch {
+    return null;
+  }
+}
+
+async function refreshInferenceXTcoPrices(force = false): Promise<void> {
+  if (tcoPriceLoading || (!force && !shouldRefreshInferenceXTcoPrices(tcoPriceSnapshot))) return;
+  tcoPriceLoading = true;
+  tcoPriceError = '';
+  renderTcoControls();
+  try {
+    const snapshot = await fetchInferenceXTcoPrices();
+    tcoPriceSnapshot = snapshot;
+    try {
+      window.localStorage.setItem(INFERENCEX_TCO_CACHE_KEY, JSON.stringify(snapshot));
+    } catch {
+      tcoPriceError = 'Prices updated for this session, but the browser could not save the price cache.';
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not fetch upstream prices.';
+    tcoPriceError = `${message} Using ${tcoPriceSnapshot ? 'cached' : 'bundled'} presets; custom prices are unchanged.`;
+  } finally {
+    tcoPriceLoading = false;
+    renderAll();
+  }
+}
+
+function normalizeTcoCustomCosts(value: unknown): Record<string, number> {
+  if (!isRecord(value)) return {};
+  return Object.fromEntries(Object.entries(value).filter(([, cost]) =>
+    typeof cost === 'number' && Number.isFinite(cost) && cost > 0
+  )) as Record<string, number>;
+}
+
+function getTcoHourlyCosts(): Record<string, number> {
+  if (state.tcoCostMode === 'custom') return state.tcoCustomCosts;
+  const mode = state.tcoCostMode;
+  return Object.fromEntries(Object.entries(tcoPriceSnapshot?.costs ?? INFERENCE_CURVE_TCO_COSTS).map(([hardware, costs]) =>
+    [hardware, costs[mode]]
+  ));
+}
+
+function getTcoCostModeLabel(): string {
+  if (state.tcoCostMode === 'custom') return 'Custom GPU Cost';
+  return state.tcoCostMode === 'rental' ? 'Rental' : 'Owning at Large Hyperscaler Volume';
+}
+
+function renderTcoControls(): void {
+  const selector = document.querySelector<HTMLSelectElement>('#chart-y-metric')!;
+  selector.value = state.chartYMetric;
+  selector.onchange = () => {
+    state.chartYMetric = selector.value === 'totalTokensPerDollar' ? 'totalTokensPerDollar' : 'throughput';
+    renderAll();
+    scheduleLocalSave();
+  };
+  const panel = document.querySelector<HTMLElement>('#tco-controls')!;
+  panel.hidden = state.chartYMetric !== 'totalTokensPerDollar';
+  if (panel.hidden) return;
+  const lines = getFilteredSeriesForChart();
+  const costs = getTcoHourlyCosts();
+  const priceSourceUrl = `${INFERENCEX_TCO_REPOSITORY}/blob/${tcoPriceSnapshot?.revision ?? 'e41635bf390819d5af61ed4e8935f87b298e36d4'}/packages/constants/src/gpu-keys.ts`;
+  const priceSourceTitle = tcoPriceSnapshot?.sourceTitle ?? 'SemiAnalysis July 2026 Pricing Surveys & AI Cloud TCO Model';
+  const lastChecked = tcoPriceSnapshot
+    ? `Last checked: ${new Date(tcoPriceSnapshot.checkedAt).toLocaleString()}`
+    : 'Bundled prices: September 20, 2026';
+  const hardwareLabels = new Map(lines.map((line) => {
+    const hardware = getInferenceCurveTcoHardware(line);
+    return [hardware, hardware.startsWith('line:') ? line.name : hardware.toUpperCase()];
+  }));
+  const missingLines = lines.filter((line) => {
+    const cost = costs[getInferenceCurveTcoHardware(line)];
+    return state.activeSeriesIds.has(line.id) && !(Number.isFinite(cost) && cost > 0);
+  });
+  panel.innerHTML = `
+    <div class="tco-heading">
+      <label>Cost basis
+        <select id="tco-cost-mode">
+          <option value="hyperscaler" ${state.tcoCostMode === 'hyperscaler' ? 'selected' : ''}>Owning at Large Hyperscaler Volume</option>
+          <option value="rental" ${state.tcoCostMode === 'rental' ? 'selected' : ''}>Rental</option>
+          <option value="custom" ${state.tcoCostMode === 'custom' ? 'selected' : ''}>Custom</option>
+        </select>
+      </label>
+      <span>Total input + output tokens / GPU / second × 3600 ÷ $ / GPU-hour</span>
+    </div>
+    <div class="tco-rates">
+      ${[...hardwareLabels].map(([hardware, label]) => `
+        <label><span>${escapeHtml(label)} <small>($/GPU-hour)</small></span>
+          <input type="number" min="0.000001" step="any" placeholder="Set cost"
+            aria-label="${escapeAttribute(label)} hourly GPU cost"
+            data-tco-hardware="${escapeAttribute(hardware)}"
+            value="${costs[hardware] ?? ''}" ${state.tcoCostMode === 'custom' ? '' : 'readonly'} />
+        </label>
+      `).join('')}
+    </div>
+    <div class="tco-price-sync">
+      <button type="button" class="series-action-button" id="refresh-tco-prices" ${tcoPriceLoading ? 'disabled' : ''}>${tcoPriceLoading ? 'Checking Prices…' : 'Refresh Prices'}</button>
+      <span>${escapeHtml(lastChecked)} · Auto-check every 24 hours on page load</span>
+    </div>
+    <p>Preset source: <a href="${escapeAttribute(priceSourceUrl)}" target="_blank" rel="noopener noreferrer">InferenceX published prices</a> · ${escapeHtml(priceSourceTitle)}. Custom prices are saved in this browser.</p>
+    ${tcoPriceError ? `<p class="tco-missing" role="status">${escapeHtml(tcoPriceError)}</p>` : ''}
+    ${missingLines.length ? `<p class="tco-missing" role="status">${missingLines.length} active line(s) have no GPU cost and are omitted from this chart. Select Custom and enter a positive hourly cost.</p>` : ''}
+  `;
+  panel.querySelector<HTMLButtonElement>('#refresh-tco-prices')!.onclick = () => { void refreshInferenceXTcoPrices(true); };
+  panel.querySelector<HTMLSelectElement>('#tco-cost-mode')!.onchange = (event) => {
+    const mode = normalizeTcoCostMode((event.target as HTMLSelectElement).value);
+    if (mode === 'custom') state.tcoCustomCosts = { ...costs, ...state.tcoCustomCosts };
+    state.tcoCostMode = mode;
+    renderAll();
+    scheduleLocalSave();
+  };
+  panel.querySelectorAll<HTMLInputElement>('input[data-tco-hardware]').forEach((input) => {
+    input.onchange = () => {
+      const cost = input.valueAsNumber;
+      if (!Number.isFinite(cost) || cost <= 0) {
+        input.setCustomValidity('Enter a finite hourly GPU cost greater than zero.');
+        input.reportValidity();
+        return;
+      }
+      input.setCustomValidity('');
+      state.tcoCustomCosts[input.dataset.tcoHardware!] = cost;
+      renderAll();
+      scheduleLocalSave();
+    };
+  });
+}
+
 function getChartOptions(): InferenceCurveChartOptions {
   const latencyPercentile = isAgenticTraceView(currentSeries)
     ? state.latencyPercentile
     : undefined;
   return {
     xMetric: state.chartMetric,
+    yMetric: state.chartYMetric,
+    tcoHourlyCosts: getTcoHourlyCosts(),
+    yLabel: getInferenceCurveYAxisLabel(state.chartYMetric),
     ...(latencyPercentile ? { latencyPercentile } : {}),
     activeSeriesIds: state.activeSeriesIds,
     selectedPrecisions: Array.from(state.selectedPrecisions),
@@ -1624,6 +1818,7 @@ function getChartOptions(): InferenceCurveChartOptions {
 
 function renderAll(): void {
   if (app.hidden) return;
+  renderTcoControls();
   chartTitleEl.textContent = getChartTitle();
   chartSubtitleEl.textContent = getChartSubtitle();
   renderInferenceCurveChart(chartEl, getFilteredSeriesForChart(), getChartOptions());
@@ -2149,6 +2344,11 @@ function applyInferenceXSyncResult(result: InferenceXSyncResult, options: { init
     const legacyLineIds = isAgenticTraceSequence(item.scenario)
       ? [`${item.lineId}-agg`, `${item.lineId}-mtp`, `${item.lineId}-mtp-agg`]
       : [`${item.lineId}-agg`];
+    if (item.model === 'DeepSeek-V4-Pro') {
+      [item.lineId, ...legacyLineIds].forEach((id) => {
+        legacyLineIds.push(id.replace('deepseek-v4-pro-', 'deepseek-v4-pro-0813-'));
+      });
+    }
     legacyLineIdsByLineId.set(item.lineId, legacyLineIds);
     legacyLineIds.forEach((id) => replacedSyncLineIds.add(id));
   });
@@ -3682,7 +3882,9 @@ function renderLegend(): void {
     shouldEnforceEndToEndPareto(),
     undefined,
     'maximize',
-    state.latencyPercentile
+    state.latencyPercentile,
+    state.chartYMetric,
+    getTcoHourlyCosts()
   );
   const query = state.search.trim().toLowerCase();
   const visibleItems = prepared.filter(
@@ -4041,6 +4243,7 @@ function draftsToPreviewSeries(drafts: SeriesDraft[]): InferenceCurveSeries[] {
     const line: InferenceCurveSeries = {
       id: getDraftSeriesId(draft, index),
       name: draft.name.trim() || `Line ${index + 1}`,
+      hwKey: draft.hwKey,
       model: draft.model.trim() || getDefaultDraftModel(),
       islOsl: draft.islOsl.trim() || getDefaultDraftIslOsl(),
       precision: draft.precision.trim() || getDefaultDraftPrecision(),
@@ -4075,6 +4278,7 @@ function seriesToDrafts(series: InferenceCurveSeries[]): SeriesDraft[] {
   const drafts = series.map((line, index) => ({
     id: line.id,
     name: line.name,
+    hwKey: line.hwKey,
     model: getSeriesModel(line),
     islOsl: getSeriesIslOsl(line),
     precision: getSeriesPrecision(line),
@@ -4342,7 +4546,7 @@ function draftsToSeriesInternal(drafts: SeriesDraft[]): InferenceCurveSeries[] {
 
     const lineId = draft.id.trim();
     const lineName = draft.name.trim();
-    const model = draft.model.trim();
+    const model = draft.model.trim() ? getInferenceXDisplayModel(draft.model) : '';
     const islOsl = draft.islOsl.trim();
     const precision = draft.precision.trim();
     if (!lineId || !lineName) {
@@ -4355,6 +4559,7 @@ function draftsToSeriesInternal(drafts: SeriesDraft[]): InferenceCurveSeries[] {
     const line: InferenceCurveSeries = {
       id: lineId,
       name: lineName,
+      hwKey: draft.hwKey,
       model,
       islOsl,
       precision,
@@ -5059,6 +5264,9 @@ function createInitialState(series: InferenceCurveSeries[]): AppState {
   return {
     theme: 'dark',
     chartMetric: 'interactivity',
+    chartYMetric: 'throughput',
+    tcoCostMode: 'hyperscaler',
+    tcoCustomCosts: {},
     latencyPercentile: DEFAULT_LATENCY_PERCENTILE,
     activeSeriesIds: new Set(visibleSeries.map((line) => line.id)),
     activeSeriesIdsByView: new Map(),
@@ -5225,7 +5433,7 @@ function parseIslOslLengths(value: string): { isl: number; osl: number } | null 
 }
 
 function getSeriesModel(series: InferenceCurveSeries): string {
-  return String(series.model ?? DEFAULT_MODEL);
+  return getInferenceXDisplayModel(String(series.model ?? DEFAULT_MODEL));
 }
 
 function getSeriesIslOsl(series: InferenceCurveSeries): string {
@@ -5248,7 +5456,7 @@ function getSeriesMtpFilter(series: InferenceCurveSeries): string {
 }
 
 function getDraftModel(draft: SeriesDraft): string {
-  return draft.model.trim() || DEFAULT_MODEL;
+  return getInferenceXDisplayModel(draft.model.trim() || DEFAULT_MODEL);
 }
 
 function getDraftIslOsl(draft: SeriesDraft): string {
@@ -5299,11 +5507,13 @@ function formatMtpFilterLabel(value: string): string {
 }
 
 function getChartTitle(): string {
-  return getInferenceCurveTitle(
+  const title = getInferenceCurveTitle(
     state.chartMetric,
     undefined,
     isAgenticTraceView(currentSeries) ? state.latencyPercentile : undefined
   );
+  return state.chartYMetric === 'totalTokensPerDollar'
+    ? title.replace('Token Throughput per GPU', 'Total Tokens per Dollar') : title;
 }
 
 function getChartSubtitle(): string {
@@ -5319,6 +5529,7 @@ function getChartSubtitle(): string {
   return [
     state.modelFilter === ALL_VALUE ? 'All Models' : formatModelLabel(state.modelFilter),
     precisionLabel || 'No Precision',
+    state.chartYMetric === 'totalTokensPerDollar' ? `TCO: ${getTcoCostModeLabel()}` : '',
     formatScenarioFilterLabel(state.scenarioFilter),
     state.scenarioFilter === AGENTIC_SCENARIO ? '' : formatIslOslLabel(state.islOslFilter),
     state.scenarioFilter === AGENTIC_SCENARIO
@@ -6920,7 +7131,8 @@ function seriesFromEditorRecords(records: Record<string, unknown>[]): InferenceC
       ({
         id,
         name,
-        model: readMetricString(record, ['model']) || getDefaultDraftModel(),
+        model: getInferenceXDisplayModel(readMetricString(record, ['model']) || getDefaultDraftModel()),
+        hwKey: readMetricString(record, ['hwKey', 'hw_key', 'hw key', 'hardware']) || undefined,
         islOsl: readEditorSequence(record) || getDefaultDraftIslOsl(),
         precision: readMetricString(record, ['precision']) || getDefaultDraftPrecision(),
         mtp: rawMtp ? normalizeMtpValue(rawMtp) : inferMtpFilterFromTokens(`${id} ${name} ${title}`),
@@ -7482,6 +7694,7 @@ function resolveModelKeyFromPrefix(value: string): string | null {
 }
 
 function resolveModelKeyFromModelValue(value: string): string | null {
+  if (getInferenceXDisplayModel(value) === DB_MODEL_TO_DISPLAY.dsv4) return 'dsv4';
   const lower = value.trim().toLowerCase();
   if (!lower) return null;
 
@@ -7842,7 +8055,9 @@ function buildChartCsvRows(mode: CsvExportMode): string[][] {
     shouldEnforceEndToEndPareto(),
     undefined,
     'maximize',
-    state.latencyPercentile
+    state.latencyPercentile,
+    state.chartYMetric,
+    getTcoHourlyCosts()
   );
   const currentPointByKey = new Map<string, { roof: boolean }>();
   currentPrepared.forEach((series) => {
@@ -8186,7 +8401,9 @@ function getExportLegendItems(): ExportLegendItem[] {
     shouldEnforceEndToEndPareto(),
     undefined,
     'maximize',
-    state.latencyPercentile
+    state.latencyPercentile,
+    state.chartYMetric,
+    getTcoHourlyCosts()
   );
   const query = state.search.trim().toLowerCase();
 
