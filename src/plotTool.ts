@@ -6,6 +6,7 @@ import {
   type InferenceCurveSeries,
   type ParetoGoal
 } from './inferenceCurveChart';
+import { getTheme, THEME_CHANGE_EVENT } from './theme';
 
 const PLOT_TOOL_STORAGE_KEY = 'inferencex-curve:plot-tool-data:v1';
 const SAVE_DEBOUNCE_MS = 300;
@@ -162,10 +163,6 @@ export function mountPlotTool(root: HTMLElement): () => void {
   let draggedLineIndex: number | null = null;
   const controller = new AbortController();
   const { signal } = controller;
-
-  if (!document.documentElement.classList.contains('dark') && !document.documentElement.classList.contains('light')) {
-    document.documentElement.classList.add('dark');
-  }
 
   root.innerHTML = `
     <main class="container page plot-tool-page">
@@ -393,7 +390,7 @@ export function mountPlotTool(root: HTMLElement): () => void {
       logX: state.logX,
       logY: state.logY,
       genericTooltip: true,
-      theme: document.documentElement.classList.contains('light') ? 'light' : 'dark',
+      theme: getTheme(),
       title: state.title,
       subtitle: state.subtitle,
       watermark: state.watermark,
@@ -478,7 +475,7 @@ export function mountPlotTool(root: HTMLElement): () => void {
     const prepared = prepareInferenceCurveSeries(
       series,
       false,
-      document.documentElement.classList.contains('light') ? 'light' : 'dark',
+      getTheme(),
       series,
       'interactivity',
       false,
@@ -923,6 +920,7 @@ export function mountPlotTool(root: HTMLElement): () => void {
   window.addEventListener('resize', () => {
     if (!destroyed) renderChart();
   }, { signal });
+  window.addEventListener(THEME_CHANGE_EVENT, () => renderChart(false, false), { signal });
   window.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter' || (!event.ctrlKey && !event.metaKey)) return;
     event.preventDefault();
@@ -1201,8 +1199,8 @@ function exportPlotPng(
       text { font-family: ${styles.fontFamily || 'sans-serif'}; }
       .chart-root .x-axis .domain, .chart-root .y-axis .domain, .chart-root .tick line { stroke: ${border}; }
       .chart-root .tick text, .x-axis-label, .y-axis-label { fill: ${foreground}; }
-      .goal-direction-glow { fill: #fff; stroke: #fff; stroke-width: 8px; stroke-linejoin: round; opacity: .14; }
-      .goal-direction-arrow, .goal-direction-label { fill: #fff; }
+      .goal-direction-glow { fill: ${foreground}; stroke: ${foreground}; stroke-width: 8px; stroke-linejoin: round; opacity: .14; }
+      .goal-direction-arrow, .goal-direction-label { fill: ${foreground}; }
       .goal-direction-arrow { stroke: none; }
       .goal-direction-label { font-size: 14px; font-weight: 900; letter-spacing: .08em; paint-order: stroke; stroke: ${background}; stroke-width: 4px; stroke-linejoin: round; }
       .chart-root .grid line { stroke: ${borderAlt}; }

@@ -1,4 +1,5 @@
 import './styles.css';
+import { getTheme, THEME_CHANGE_EVENT, type Theme } from './theme';
 
 import { strFromU8, unzipSync } from 'fflate';
 
@@ -56,7 +57,6 @@ import {
 const app = document.querySelector<HTMLDivElement>('#inferencex-workspace-root')!;
 if (!app) throw new Error('Missing #inferencex-workspace-root');
 
-type Theme = 'dark' | 'light';
 type CsvExportMode = 'all' | 'visible';
 type SeriesField =
   | 'id'
@@ -823,7 +823,7 @@ function restoreAppState(defaults: AppState, saved: PersistedAppState, series: I
   );
 
   return {
-    theme: saved.theme ?? defaults.theme,
+    theme: getTheme(),
     chartMetric: saved.chartMetric ?? defaults.chartMetric,
     chartYMetric: saved.chartYMetric ?? defaults.chartYMetric,
     tcoCostMode: saved.tcoCostMode ?? defaults.tcoCostMode,
@@ -1391,7 +1391,6 @@ const inferenceXSyncEl = document.querySelector<HTMLElement>('#inferencex-sync')
 const mergeLinesEl = document.querySelector<HTMLButtonElement>('#merge-lines')!;
 const mergePreviewEl = document.querySelector<HTMLElement>('#merge-preview')!;
 
-applyTheme();
 renderFilterControls();
 renderInferenceXSyncPanel();
 renderSeriesEditor();
@@ -1415,7 +1414,6 @@ document.querySelector('#reset-data')?.addEventListener('click', () => {
   normalizeDraftRenderOrderFromPanelOrder();
   syncCurrentSeriesOrderFromDrafts();
   state = createInitialState(currentSeries);
-  applyTheme();
   syncWatermarkControl();
   renderFilterControls();
   renderInferenceXSyncPanel();
@@ -1512,6 +1510,14 @@ document.querySelector('#download-visible-csv')?.addEventListener('click', () =>
 document.querySelector('#reset-zoom')?.addEventListener('click', resetInferenceCurveZoom);
 window.addEventListener('resize', () => {
   if (!app.hidden) renderAll();
+});
+window.addEventListener(THEME_CHANGE_EVENT, () => {
+  commitSeriesDom();
+  state.theme = getTheme();
+  renderSeriesEditor();
+  renderMergePreview();
+  renderAll();
+  scheduleLocalSave();
 });
 window.addEventListener('keydown', handleGlobalKeydown);
 document.addEventListener('click', handleDocumentClick);
@@ -2406,7 +2412,6 @@ function applyInferenceXSyncResult(result: InferenceXSyncResult, options: { init
   reconcileFiltersForSeries(currentSeries);
   reconcileActiveSeriesForChart();
   saveActiveSeriesForCurrentView();
-  applyTheme();
   renderFilterControls();
   renderInferenceXSyncPanel();
   renderSeriesEditor();
@@ -5262,7 +5267,7 @@ function createInitialState(series: InferenceCurveSeries[]): AppState {
   const visibleSeries = filterSeriesByMtp(sequenceFiltered, mtpFilter);
 
   return {
-    theme: 'dark',
+    theme: getTheme(),
     chartMetric: 'interactivity',
     chartYMetric: 'throughput',
     tcoCostMode: 'hyperscaler',
@@ -8366,8 +8371,8 @@ function buildExportStyle(palette: ExportPalette): string {
       .chart-root .grid .plot-border { stroke: ${palette.border}; }
       .chart-watermark { fill: ${palette.foreground}; font-weight: 800; opacity: 0.055; user-select: none; }
       .y-axis-label, .x-axis-label { fill: ${palette.foreground}; font-size: 12px; }
-      .goal-direction-glow { fill: #fff; stroke: #fff; stroke-width: 8px; stroke-linejoin: round; opacity: 0.14; }
-      .goal-direction-arrow, .goal-direction-label { fill: #fff; }
+      .goal-direction-glow { fill: ${palette.foreground}; stroke: ${palette.foreground}; stroke-width: 8px; stroke-linejoin: round; opacity: 0.14; }
+      .goal-direction-arrow, .goal-direction-label { fill: ${palette.foreground}; }
       .goal-direction-arrow { stroke: none; }
       .goal-direction-label { font-size: 14px; font-weight: 900; letter-spacing: 0.08em; paint-order: stroke; stroke: ${palette.background}; stroke-width: 4px; stroke-linejoin: round; }
       .point-label { paint-order: stroke; stroke: ${palette.background}; stroke-width: 3px; fill: ${palette.foreground}; font-size: 10px; font-weight: 700; }
@@ -8615,11 +8620,6 @@ function setImportProgress(fraction: number | null): void {
     githubImportProgressEl.classList.remove('indeterminate');
     githubImportProgressFillEl.style.width = `${Math.min(100, Math.max(0, fraction) * 100)}%`;
   }
-}
-
-function applyTheme(): void {
-  document.documentElement.classList.toggle('dark', state.theme === 'dark');
-  document.documentElement.classList.toggle('light', state.theme === 'light');
 }
 
 function csvCell(value: string): string {
