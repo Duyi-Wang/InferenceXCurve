@@ -1655,13 +1655,16 @@ function drawPillJoin(
     )
     .attr('transform', (label) => `translate(${label.x},${label.y})`);
 
-  groups.each(function (label) {
+  const texts = groups
+    .select<SVGTextElement>('.pill-text')
+    .attr('text-anchor', anchor)
+    .text((label) => label.label);
+  // Finish text writes before measuring, then finish all reads before writing
+  // backgrounds. Interleaving getBBox() and writes forces layout per label.
+  const bounds = texts.nodes().map((text) => text.getBBox());
+  groups.each(function (label, index) {
     const group = d3.select(this);
-    const text = group
-      .select<SVGTextElement>('.pill-text')
-      .attr('text-anchor', anchor)
-      .text(label.label);
-    const bbox = text.node()!.getBBox();
+    const bbox = bounds[index]!;
     group
       .select<SVGRectElement>('.pill-bg')
       .attr('x', bbox.x - 5)

@@ -1511,12 +1511,10 @@ window.addEventListener('resize', () => {
   if (!app.hidden) renderAll();
 });
 window.addEventListener(THEME_CHANGE_EVENT, () => {
-  commitSeriesDom();
   state.theme = getTheme();
-  renderSeriesEditor();
-  renderMergePreview();
+  if (app.hidden) return;
+  refreshEditorTheme();
   renderAll();
-  scheduleLocalSave();
 });
 window.addEventListener('keydown', handleGlobalKeydown);
 document.addEventListener('click', handleDocumentClick);
@@ -1532,6 +1530,7 @@ window.addEventListener('inferencex-workspace-deactivate', () => {
   saveLocalDataNow();
 });
 window.addEventListener('inferencex-workspace-activate', () => {
+  refreshEditorTheme();
   renderAll();
 });
 void initializeInferenceXSync();
@@ -2948,6 +2947,18 @@ function renderSeriesEditor(): void {
           .join('')
       : renderEmptySeriesFilter();
   attachSeriesEditorEvents();
+}
+
+function refreshEditorTheme(): void {
+  // Theme preferences are saved separately. Keep the existing table cells and
+  // event handlers, including any edits, instead of rebuilding the data editor.
+  const colors = resolveInferenceCurveColors(draftsToPreviewSeries(seriesDrafts), state.highContrast, state.theme);
+  getFilteredDraftEntries().forEach(({ draft, index }) => {
+    const color = draft.color.trim() || colors.get(getDraftSeriesId(draft, index))
+      || colorInputFallbacks[index % colorInputFallbacks.length]!;
+    syncColorPicker(index, color, draft.color);
+  });
+  renderMergePreview();
 }
 
 function renderSeriesCard(series: SeriesDraft, seriesIndex: number, autoColor: string): string {

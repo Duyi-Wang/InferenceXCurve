@@ -73,8 +73,7 @@ body {
   z-index: 140;
   top: 0;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
-  background: color-mix(in srgb, var(--background) 92%, transparent);
-  backdrop-filter: blur(14px);
+  background: var(--background);
 }
 
 .workspace-toolbar {
@@ -402,10 +401,9 @@ button.primary {
   padding: 6px;
   border: 1px solid color-mix(in srgb, var(--border) 46%, transparent);
   border-radius: 10px;
-  background: color-mix(in srgb, var(--popover) 92%, transparent);
+  background: var(--popover);
   box-shadow: 0 16px 38px rgb(0 0 0 / 22%);
   transform: translateY(-50%);
-  backdrop-filter: blur(10px);
 }
 
 .quick-tool-button {
@@ -502,9 +500,9 @@ select:focus {
 .data-card {
   border: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
   border-radius: 12px;
-  background: color-mix(in srgb, var(--background) 20%, transparent);
+  /* Opaque cards avoid filtering the backdrop while large tables scroll. */
+  background: var(--card);
   color: var(--card-foreground);
-  backdrop-filter: blur(2px);
 }
 
 .data-card,
