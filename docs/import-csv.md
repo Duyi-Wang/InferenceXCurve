@@ -112,11 +112,19 @@ These fields are optional in editor CSV:
 - `Prefill GPUs`, `Decode GPUs`, `Prefill TP`, `Prefill EP`, `Prefill DCP`,
   `Prefill Workers`, `Decode TP`, `Decode EP`, `Decode DCP`, `Decode Workers`, and
   `Concurrency`: numeric when present.
+- `Prefill DCP` and `Decode DCP` describe each phase independently, including
+  aggregated deployments. Use `1` when the phase has no DCP parallelism; leave
+  the field empty when unknown. Explicit DCP fields take precedence over legacy
+  `Strategy`/`Note` text, and a missing phase is never copied from the other.
+  Tooltips show both phase values. Chart labels use `DCP8` for equal sizes above
+  one, or `DCP(P=16,D=1)` for different sizes (`P` = Prefill, `D` = Decode,
+  `?` = not provided). Disaggregated point labels keep DCP on each phase segment.
 - `Prefill DPA`, `Decode DPA`, `DPA`, `Disagg`, and `Multi-node`: boolean when
   present. Accepted values are `true`, `false`, `1`, `0`, `yes`, `no`, `y`,
   and `n`.
 - `Strategy`: optional display/tooltip text. If empty, the app derives a
-  strategy label from decode TP/EP when possible.
+  strategy label from decode TP/EP/DCP when possible. Chart strategy labels and
+  gradients also distinguish the structured Prefill/Decode DCP configuration.
 - `KV Offload`: optional point metadata such as `KV offload off` or
   `KV offload DRAM via LMCache`. It is not a line grouping dimension, but it is
   preserved for tooltips/export and is included in Copy and split by config.

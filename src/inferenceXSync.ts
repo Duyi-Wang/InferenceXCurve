@@ -754,7 +754,7 @@ function benchmarkRecordToPoint(
   const point: InferenceCurveSeries['points'][number] = {
     throughput,
     precision: config.precision.toLowerCase(),
-    strategy: makeStrategyLabel(decodeTp, decodeEp, decodeDcp ?? prefillDcp),
+    strategy: makeStrategyLabel(decodeTp, decodeEp, decodeDcp),
     tp: totalGpu ?? decodeTp ?? undefined,
     disagg,
     ...(preferP90Metrics ? { spec_decoding: normalizeSpecMethod(readString(record, 'spec_method')) } : {}),

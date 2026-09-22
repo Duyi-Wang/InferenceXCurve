@@ -170,6 +170,7 @@ export type InferenceCurveXAxisMetricDisplayOverrides = Partial<
 >;
 
 interface ChartPoint extends InferenceCurvePoint {
+  strategyLabel?: string;
   seriesId: string;
   seriesName: string;
   seriesTitle?: string;
@@ -555,6 +556,7 @@ export function prepareInferenceCurveSeries(
       if (!Number.isFinite(x) || !Number.isFinite(y)) return;
       points.push({
         ...point,
+        strategyLabel: getPointStrategyLabel(point),
         seriesId: line.id,
         seriesName: line.name,
         seriesTitle: line.title,
@@ -1511,8 +1513,8 @@ function drawScatterPoints(
     }
 
     const color =
-      options.showGradientLabels && point.roof && point.strategy && strategyColor.has(point.strategy)
-        ? strategyColor.get(point.strategy)!
+      options.showGradientLabels && point.roof && point.strategyLabel && strategyColor.has(point.strategyLabel)
+        ? strategyColor.get(point.strategyLabel)!
         : point.color;
     const shape = group.select<SVGElement>('.visible-shape');
     shape.attr('fill', color).attr('stroke', 'none').attr('data-shape-key', shapeKey);
@@ -1565,13 +1567,13 @@ function drawStrategyLabels(
   series.forEach((line) => {
     const segments: { label: string; color: string; points: ChartPoint[] }[] = [];
     line.roofline.forEach((point) => {
-      if (!point.strategy) return;
-      const color = strategyColor.get(point.strategy) ?? line.color;
+      if (!point.strategyLabel) return;
+      const color = strategyColor.get(point.strategyLabel) ?? line.color;
       const last = segments.at(-1);
-      if (last && last.label === point.strategy) {
+      if (last && last.label === point.strategyLabel) {
         last.points.push(point);
       } else {
-        segments.push({ label: point.strategy, color, points: [point] });
+        segments.push({ label: point.strategyLabel, color, points: [point] });
       }
     });
 
@@ -1845,7 +1847,7 @@ function getPointLabelText(
   }
   const concurrency = readFiniteNumber(point.concurrency);
   if (concurrency !== undefined) return `C=${formatPointLabelNumber(concurrency)}`;
-  return point.strategy ?? '';
+  return point.strategyLabel ?? '';
 }
 
 function getConcurrencyPointLabel(point: ChartPoint): string {
@@ -1922,13 +1924,9 @@ function getAdvancedPointLabel(point: ChartPoint): string {
     readBoolean(point.prefill_dp_attention) ?? readBoolean(point.dp_attention) ?? labelConfig.dpAttention;
   const decodeTp = readFiniteNumber(point.decode_tp) ?? strategyConfig.tp ?? tp;
   const decodeEp = readFiniteNumber(point.decode_ep) ?? strategyConfig.ep ?? ep;
-  const commonDcp = meaningfulParallelismSize(
-    readFiniteNumber(point.prefill_dcp_size),
-    readFiniteNumber(point.decode_dcp_size),
-    strategyConfig.dcp
-  );
-  const prefillDcp = readFiniteNumber(point.prefill_dcp_size) ?? commonDcp;
-  const decodeDcp = readFiniteNumber(point.decode_dcp_size) ?? commonDcp;
+  const { prefill: prefillDcp, decode: decodeDcp } = getInferenceCurvePointDcp(point);
+  const hasDcp = prefillDcp !== undefined || decodeDcp !== undefined;
+  const hasDifferentDcp = prefillDcp !== decodeDcp;
   const decodeDpAttention =
     readBoolean(point.decode_dp_attention) ?? readBoolean(point.dp_attention) ?? labelConfig.dpAttention;
   const prefillWorkers =
@@ -1966,36 +1964,43 @@ function getAdvancedPointLabel(point: ChartPoint): string {
       prefillTp ?? tp ?? 0,
       prefillEp,
       prefillDpAttention,
-      prefillDcp
+      prefillDcp,
+      hasDifferentDcp
     );
     const decodeLabel = configSegmentLabel(
       decodeTp ?? tp ?? 0,
       decodeEp,
       decodeDpAttention,
-      decodeDcp
+      decodeDcp,
+      hasDifferentDcp
     );
     return `${prefillWorkers ?? 1}x${prefillLabel}+${decodeWorkers ?? 1}x${decodeLabel}`;
   }
 
   if (
     tp !== undefined &&
-    (ep !== undefined || dpAttention !== undefined || commonDcp !== undefined)
+    (ep !== undefined || dpAttention !== undefined || hasDcp)
   ) {
-    return configSegmentLabel(tp, ep, dpAttention, commonDcp);
+    return [configSegmentLabel(tp, ep, dpAttention, undefined), formatDcpConfigLabel(prefillDcp, decodeDcp)]
+      .filter(Boolean)
+      .join('/');
   }
 
   const referenceTp = getReferenceTp(point);
   if (referenceTp !== undefined) return formatPointLabelNumber(referenceTp);
-  return point.strategy ?? point.label ?? '';
+  return point.strategyLabel ?? point.label ?? '';
 }
 
 function configSegmentLabel(
   tp: number,
   ep: number | undefined,
   dpAttention: boolean | undefined,
-  dcp: number | undefined
+  dcp: number | undefined,
+  showDcpState = false
 ): string {
-  const dcpSuffix = dcp !== undefined && dcp > 1 ? `/DCP${formatPointLabelNumber(dcp)}` : '';
+  const dcpSuffix = showDcpState || (dcp !== undefined && dcp > 1)
+    ? `/DCP${dcp === undefined ? '?' : formatPointLabelNumber(dcp)}`
+    : '';
   if (ep !== undefined && ep > 1 && tp === ep) {
     return `${dpAttention ? `DEP${tp}` : `TEP${tp}`}${dcpSuffix}`;
   }
@@ -2029,9 +2034,43 @@ function parseParallelismFromStrategy(strategy: string | undefined): {
   };
 }
 
-function meaningfulParallelismSize(...values: Array<number | undefined>): number | undefined {
-  const meaningful = values.filter((value): value is number => value !== undefined && value > 1);
-  return meaningful.length > 0 ? Math.max(...meaningful) : undefined;
+export function getInferenceCurvePointDcp(point: InferenceCurvePoint): {
+  prefill?: number;
+  decode?: number;
+} {
+  const prefill = readFiniteNumber(point.prefill_dcp_size);
+  const decode = readFiniteNumber(point.decode_dcp_size);
+  // Structured phase fields are authoritative. A missing phase is unknown,
+  // not a copy of the other phase or of a potentially stale strategy string.
+  if (prefill !== undefined || decode !== undefined) return { prefill, decode };
+  return {
+    prefill: parseNumberFromText(point.label, /\bprefill\s+DCP\s*:?\s*(\d+(?:\.\d+)?)/iu),
+    decode: parseParallelismFromStrategy(point.strategy).dcp
+  };
+}
+
+function formatDcpConfigLabel(prefill: number | undefined, decode: number | undefined): string {
+  if (prefill === decode) {
+    return prefill !== undefined && prefill > 1 ? `DCP${formatPointLabelNumber(prefill)}` : '';
+  }
+  const prefillLabel = prefill === undefined ? '?' : formatPointLabelNumber(prefill);
+  const decodeLabel = decode === undefined ? '?' : formatPointLabelNumber(decode);
+  return `DCP(P=${prefillLabel},D=${decodeLabel})`;
+}
+
+function getPointStrategyLabel(point: InferenceCurvePoint): string | undefined {
+  const { prefill, decode } = getInferenceCurvePointDcp(point);
+  if (prefill === undefined && decode === undefined) return point.strategy;
+  const strategy = point.strategy?.trim() || [
+    point.decode_tp === undefined ? '' : `TP${point.decode_tp}`,
+    point.decode_ep === undefined ? '' : `EP${point.decode_ep}`
+  ].filter(Boolean).join('/');
+  const parts = strategy.split('/');
+  // Only rewrite generated TP/EP/DCP labels; preserve custom strategy text.
+  const base = parts.every((part) => /^(?:TP|EP|DCP)\d+(?:\.\d+)?$/iu.test(part))
+    ? parts.filter((part) => !/^DCP/iu.test(part)).join('/')
+    : strategy;
+  return [base, formatDcpConfigLabel(prefill, decode)].filter(Boolean).join('/') || undefined;
 }
 
 function parseGpuCountFromLabel(label: string | undefined, segment: 'prefill' | 'decode'): number | undefined {
@@ -2214,7 +2253,7 @@ function makeStarPath(outerRadius: number, innerRadius: number): string {
 
 function buildStrategyColorMap(series: PreparedSeries[]): Map<string, string> {
   const labels = Array.from(
-    new Set(series.flatMap((line) => line.roofline.map((point) => point.strategy).filter(Boolean)))
+    new Set(series.flatMap((line) => line.roofline.map((point) => point.strategyLabel).filter(Boolean)))
   ) as string[];
   const map = new Map<string, string>();
   labels.forEach((label, index) => {
@@ -2228,11 +2267,11 @@ function makeStrategyLabels(
   strategyColor: Map<string, string>
 ): StrategyLabel[] {
   return roofline
-    .filter((point) => point.strategy)
+    .filter((point) => point.strategyLabel)
     .map((point) => ({
       point,
-      label: point.strategy!,
-      color: strategyColor.get(point.strategy!) ?? point.color
+      label: point.strategyLabel!,
+      color: strategyColor.get(point.strategyLabel!) ?? point.color
     }));
 }
 
@@ -2318,7 +2357,14 @@ function formatTooltip(
     const config = getXAxisMetricConfig(candidate, overrides);
     fields.push(formatTooltipMetricField(config.tooltipLabel, value, config.unit));
   });
-  if (point.strategy) fields.push(`Parallelism: ${escapeHtml(point.strategy)}`);
+  if (point.strategyLabel) fields.push(`Parallelism: ${escapeHtml(point.strategyLabel)}`);
+  const dcp = getInferenceCurvePointDcp(point);
+  if (dcp.prefill !== undefined || dcp.decode !== undefined) {
+    fields.push(
+      `Prefill DCP: ${dcp.prefill === undefined ? 'Not provided' : formatPointLabelNumber(dcp.prefill)}`,
+      `Decode DCP: ${dcp.decode === undefined ? 'Not provided' : formatPointLabelNumber(dcp.decode)}`
+    );
+  }
   const prefillGpu = readFiniteNumber(point.num_prefill_gpu) ?? parseGpuCountFromLabel(point.label, 'prefill');
   const decodeGpu = readFiniteNumber(point.num_decode_gpu) ?? parseGpuCountFromLabel(point.label, 'decode');
   const gpuCount = getInferenceCurvePointGpuCount(point);

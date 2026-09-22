@@ -32,6 +32,7 @@ import {
   DEFAULT_CHART_WATERMARK,
   getAvailablePrecisions,
   getInferenceCurveColorSourceSeries,
+  getInferenceCurvePointDcp,
   getInferenceCurvePointGpuCount,
   getInferenceCurveTcoHardware,
   getInferenceCurveTitle,
@@ -261,7 +262,6 @@ interface ParsedPointMetadata {
   num_decode_gpu?: number;
   prefill_tp?: number;
   prefill_ep?: number;
-  prefill_dcp_size?: number;
   prefill_dp_attention?: boolean;
   decode_dp_attention?: boolean;
 }
@@ -269,7 +269,6 @@ interface ParsedPointMetadata {
 interface ParsedStrategyMetadata {
   decode_tp?: number;
   decode_ep?: number;
-  decode_dcp_size?: number;
 }
 
 interface GitHubRunRef {
@@ -3980,8 +3979,10 @@ function renderLegend(): void {
         ${renderSwitch('hidePointLabels', 'Hide Labels', state.hidePointLabels)}
         ${renderSwitch('highContrast', 'High Contrast', state.highContrast)}
         ${renderSwitch('showConcurrencyLabels', 'Only Concurrency Labels', state.showConcurrencyLabels)}
-        ${renderSwitch('useAdvancedLabels', 'Parallelism Labels', state.useAdvancedLabels)}
-        ${renderSwitch('showGradientLabels', 'Gradient Labels', state.showGradientLabels)}
+        ${renderSwitch('useAdvancedLabels', 'Parallelism Labels', state.useAdvancedLabels,
+          'DCP: P = Prefill, D = Decode, ? = not provided. Disaggregated labels list Prefill then Decode.')}
+        ${renderSwitch('showGradientLabels', 'Gradient Labels', state.showGradientLabels,
+          'Color and label strategies including phase DCP: P = Prefill, D = Decode, ? = not provided.')}
         ${renderSwitch('showLineLabels', 'Line Labels', state.showLineLabels)}
         ${renderSwitch('showOffloadRings', 'Offload Rings', state.showOffloadRings)}
       </div>
@@ -4298,6 +4299,7 @@ function seriesToDrafts(series: InferenceCurveSeries[]): SeriesDraft[] {
     points: line.points.map((point) => {
       const labelMetadata = parsePointMetadataLabel(point.label);
       const strategyMetadata = parsePointStrategy(point.strategy);
+      const dcp = getInferenceCurvePointDcp(point);
       const row: PointRow = {
         interactivity: formatPointFieldValue(point.interactivity),
         throughput: String(point.throughput),
@@ -4310,17 +4312,13 @@ function seriesToDrafts(series: InferenceCurveSeries[]): SeriesDraft[] {
         num_decode_gpu: formatPointFieldValue(point.num_decode_gpu ?? labelMetadata.num_decode_gpu),
         prefill_tp: formatPointFieldValue(point.prefill_tp ?? labelMetadata.prefill_tp),
         prefill_ep: formatPointFieldValue(point.prefill_ep ?? labelMetadata.prefill_ep),
-        prefill_dcp_size: formatPointFieldValue(
-          point.prefill_dcp_size ?? labelMetadata.prefill_dcp_size
-        ),
+        prefill_dcp_size: formatPointFieldValue(dcp.prefill),
         prefill_dp_attention: formatPointFieldValue(
           point.prefill_dp_attention ?? point.dp_attention ?? labelMetadata.prefill_dp_attention
         ),
         decode_tp: formatPointFieldValue(point.decode_tp ?? strategyMetadata.decode_tp),
         decode_ep: formatPointFieldValue(point.decode_ep ?? strategyMetadata.decode_ep),
-        decode_dcp_size: formatPointFieldValue(
-          point.decode_dcp_size ?? strategyMetadata.decode_dcp_size
-        ),
+        decode_dcp_size: formatPointFieldValue(dcp.decode),
         decode_dp_attention: formatPointFieldValue(
           point.decode_dp_attention ?? point.dp_attention ?? labelMetadata.decode_dp_attention
         ),
@@ -4542,7 +4540,7 @@ function draftsToSeriesInternal(drafts: SeriesDraft[]): InferenceCurveSeries[] {
         point.tp =
           getInferenceCurvePointGpuCount(point) ?? parseNumber(row.tp) ?? decodeTp ?? undefined;
         point.strategy =
-          (row.strategy ?? '').trim() || makeStrategyLabel(decodeTp, decodeEp, decodeDcp ?? prefillDcp);
+          (row.strategy ?? '').trim() || makeStrategyLabel(decodeTp, decodeEp, decodeDcp);
         return point;
       })
       .filter((point): point is NonNullable<typeof point> => point !== null);
@@ -4921,7 +4919,6 @@ function parsePointMetadataLabel(label: string | undefined): ParsedPointMetadata
     num_decode_gpu: parseNumberFromText(label, /\bdecode\s+GPUs?\s*:?\s*(\d+(?:\.\d+)?)/iu),
     prefill_tp: prefillMatch ? Number(prefillMatch[1]) : undefined,
     prefill_ep: prefillMatch ? Number(prefillMatch[2]) : undefined,
-    prefill_dcp_size: parseNumberFromText(label, /\bprefill\s+DCP\s*:?\s*(\d+(?:\.\d+)?)/iu),
     prefill_dp_attention: legacyDpAttention,
     decode_dp_attention: legacyDpAttention
   };
@@ -4930,8 +4927,7 @@ function parsePointMetadataLabel(label: string | undefined): ParsedPointMetadata
 function parsePointStrategy(strategy: string | undefined): ParsedStrategyMetadata {
   return {
     decode_tp: parseNumberFromText(strategy, /\bTP\s*(\d+(?:\.\d+)?)/iu),
-    decode_ep: parseNumberFromText(strategy, /\bEP\s*(\d+(?:\.\d+)?)/iu),
-    decode_dcp_size: parseNumberFromText(strategy, /\bDCP\s*(\d+(?:\.\d+)?)/iu)
+    decode_ep: parseNumberFromText(strategy, /\bEP\s*(\d+(?:\.\d+)?)/iu)
   };
 }
 
@@ -7365,7 +7361,7 @@ function importedPointFromBenchmarkRecord(
   const point: InferenceCurveSeries['points'][number] = {
     throughput,
     precision,
-    strategy: makeStrategyLabel(decodeTp, decodeEp, decodeDcp ?? prefillDcp),
+    strategy: makeStrategyLabel(decodeTp, decodeEp, decodeDcp),
     tp: totalGpu ?? decodeTp ?? undefined,
     disagg,
     concurrency: concurrency ?? undefined,
