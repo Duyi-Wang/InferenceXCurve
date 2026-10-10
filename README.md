@@ -143,6 +143,11 @@ run URL such as:
 https://github.com/owner/repo/actions/runs/123456789
 ```
 
+For the upstream `SemiAnalysisAI/InferenceX` repository, you can also enter just
+the numeric run ID, such as `35166686551`. Clicking `Import Action Data` expands
+it to `https://github.com/SemiAnalysisAI/InferenceX/actions/runs/35166686551`
+in the input field and imports that run. Use a full URL for other repositories.
+
 Downloading run artifacts always requires a GitHub token, even for public repos.
 Pick the token type by who owns the repo:
 

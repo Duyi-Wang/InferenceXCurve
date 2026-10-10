@@ -322,6 +322,7 @@ const TOKEN_STORAGE_KEY = 'inferencex-curve:github-token:v1';
 const LOCAL_SAVE_DEBOUNCE_MS = 350;
 const AUTO_RENDER_DEBOUNCE_MS = 400;
 const MAX_WATERMARK_LENGTH = 64;
+const INFERENCEX_GITHUB_RUN_BASE = 'https://github.com/SemiAnalysisAI/InferenceX/actions/runs';
 const INFERENCEX_UNOFFICIAL_RUN_REMOTE_API_BASE = 'https://inferencex.semianalysis.com/api';
 const INFERENCEX_UNOFFICIAL_RUN_DEV_PROXY_API_BASE = '/inferencex-api';
 const VITE_DEV_PORTS = new Set(['5173', '5174']);
@@ -1286,11 +1287,12 @@ app.innerHTML = `
 
       <div class="action-import-panel">
         <label class="action-import-url">
-          <span>GitHub Actions Run URL</span>
+          <span>GitHub Actions Run URL or ID</span>
           <input
             id="github-action-url"
             type="text"
-            placeholder="https://github.com/owner/repo/actions/runs/123456789"
+            placeholder="Run ID or https://github.com/owner/repo/actions/runs/123456789"
+            title="Run IDs use the upstream SemiAnalysisAI/InferenceX repository."
           />
         </label>
         <div class="action-import-token">
@@ -6307,10 +6309,10 @@ function addSelectedImportLines(): void {
 }
 
 async function importGitHubActionData(): Promise<void> {
-  const runUrl = githubActionUrlEl.value.trim();
+  const runInput = githubActionUrlEl.value.trim();
   const token = githubTokenEl.value.trim();
-  if (!runUrl) {
-    setImportStatus('Enter a GitHub Actions run URL first.', true);
+  if (!runInput) {
+    setImportStatus('Enter a GitHub Actions run URL or ID first.', true);
     githubActionUrlEl.focus();
     return;
   }
@@ -6319,7 +6321,9 @@ async function importGitHubActionData(): Promise<void> {
   try {
     setImportStatus('Fetching GitHub Actions artifacts...');
     setImportProgress(-1);
+    const runUrl = /^\d+$/u.test(runInput) ? `${INFERENCEX_GITHUB_RUN_BASE}/${runInput}` : runInput;
     const run = parseGitHubRunUrl(runUrl);
+    githubActionUrlEl.value = runUrl;
     const importedSeries = await loadGitHubActionSeries(run, token, (fraction) =>
       setImportProgress(fraction)
     );
@@ -6539,7 +6543,9 @@ function parseGitHubRunUrl(value: string): GitHubRunRef {
   const url = new URL(value);
   const match = url.pathname.match(/^\/([^/]+)\/([^/]+)\/actions\/runs\/(\d+)/u);
   if (url.hostname !== 'github.com' || !match) {
-    throw new Error('Use a GitHub Actions run URL like https://github.com/owner/repo/actions/runs/123.');
+    throw new Error(
+      'Use a GitHub Actions run URL like https://github.com/owner/repo/actions/runs/123, or a numeric run ID for SemiAnalysisAI/InferenceX.'
+    );
   }
   return { owner: match[1]!, repo: match[2]!, runId: match[3]! };
 }
