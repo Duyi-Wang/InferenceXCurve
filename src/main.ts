@@ -6144,13 +6144,8 @@ function handleImportPreviewInput(event: Event): void {
   if (batchField) {
     updateImportBatchSetting(batchField, normalizeCellText(input.value));
     applyImportBatchSettings();
-    if (batchField === 'color') {
-      const colorModeSelect = githubImportPreviewEl.querySelector<HTMLSelectElement>(
-        'select[data-import-batch-field="colorMode"]'
-      );
-      if (colorModeSelect) colorModeSelect.value = 'custom';
-    }
-    if (event.type === 'change' || input instanceof HTMLSelectElement) renderImportPreview();
+    if (event.type === 'change') input.value = pendingImportSettings[batchField];
+    syncImportBatchPreview();
     return;
   }
 
@@ -6166,6 +6161,33 @@ function handleImportPreviewInput(event: Event): void {
   if (field in entry.draft) {
     updateImportDraftField(entry, field as keyof SeriesDraft, normalizeCellText(input.value));
   }
+}
+
+function syncImportBatchPreview(): void {
+  // Preserve controls across blur/change so the next click and native color picker stay active.
+  const colorModeSelect = githubImportPreviewEl.querySelector<HTMLSelectElement>(
+    'select[data-import-batch-field="colorMode"]'
+  );
+  if (colorModeSelect) colorModeSelect.value = pendingImportSettings.colorMode;
+  const colorPicker = githubImportPreviewEl.querySelector<HTMLInputElement>(
+    'input[data-import-batch-field="color"]'
+  );
+  const color = toColorInputValue(pendingImportSettings.color, 0);
+  if (colorPicker && colorPicker.value !== color) colorPicker.value = color;
+  githubImportPreviewEl.querySelectorAll<HTMLButtonElement>('button[data-import-color-preset]').forEach((button) => {
+    button.classList.toggle(
+      'selected',
+      pendingImportSettings.colorMode === 'custom' &&
+        button.dataset.importColorPreset?.toLowerCase() === pendingImportSettings.color.toLowerCase()
+    );
+  });
+  githubImportPreviewEl.querySelectorAll<HTMLInputElement | HTMLSelectElement>(
+    '[data-import-field="id"], [data-import-field="name"], [data-import-field="title"], [data-import-field="marker"]'
+  ).forEach((input) => {
+    const entry = pendingImportDrafts[Number(input.dataset.importIndex)];
+    const field = input.dataset.importField as 'id' | 'name' | 'title' | 'marker';
+    if (entry && input.value !== entry.draft[field]) input.value = entry.draft[field];
+  });
 }
 
 function updateImportBatchSetting(field: keyof ImportBatchSettings, value: string): void {
@@ -6259,7 +6281,7 @@ function handleImportPreviewClick(event: MouseEvent): void {
     pendingImportSettings.color = colorPresetButton.dataset.importColorPreset || colorInputFallbacks[0]!;
     pendingImportSettings.colorMode = 'custom';
     applyImportBatchSettings();
-    renderImportPreview();
+    syncImportBatchPreview();
     return;
   }
 
