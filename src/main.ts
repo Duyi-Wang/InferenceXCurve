@@ -1109,6 +1109,7 @@ let autoRenderTimer: number | null = null;
 let localStorageWarningShown = false;
 let skipNextBeforeUnloadSave = false;
 let draggedSeriesIndex: number | null = null;
+let seriesDragCollapseFrame: number | null = null;
 let pendingActiveSeriesIds = new Set<string>();
 
 sortSeriesDraftsByLayer();
@@ -2938,6 +2939,7 @@ function renderMetricSwitchOptions(): string {
 }
 
 function renderSeriesEditor(): void {
+  clearSeriesDragState();
   const previewColors = resolveInferenceCurveColors(draftsToPreviewSeries(seriesDrafts), state.highContrast, state.theme);
   const entries = getFilteredDraftEntries();
   seriesEditorEl.innerHTML =
@@ -3712,6 +3714,12 @@ function attachSeriesDragEvents(): void {
       event.dataTransfer?.setData('text/plain', String(seriesIndex));
       if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
       handle.closest<HTMLElement>('[data-series-card]')?.classList.add('dragging');
+      // Let the browser capture the drag image before changing the list layout.
+      seriesDragCollapseFrame = window.requestAnimationFrame(() => {
+        seriesDragCollapseFrame = null;
+        seriesEditorEl.classList.add('is-reordering');
+        handle.scrollIntoView({ behavior: 'instant', block: 'nearest', inline: 'nearest' });
+      });
     });
     handle.addEventListener('dragend', clearSeriesDragState);
   });
@@ -3764,6 +3772,11 @@ function clearSeriesDropPosition(card: HTMLElement): void {
 
 function clearSeriesDragState(): void {
   draggedSeriesIndex = null;
+  if (seriesDragCollapseFrame !== null) {
+    window.cancelAnimationFrame(seriesDragCollapseFrame);
+    seriesDragCollapseFrame = null;
+  }
+  seriesEditorEl.classList.remove('is-reordering');
   seriesEditorEl.querySelectorAll<HTMLElement>('[data-series-card]').forEach((card) => {
     card.classList.remove('dragging', 'drop-before', 'drop-after');
   });

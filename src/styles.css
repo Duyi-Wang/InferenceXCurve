@@ -2140,6 +2140,32 @@ p {
   opacity: 0.48;
 }
 
+.series-editor.is-reordering {
+  gap: 6px;
+}
+
+.series-editor.is-reordering .series-card > :not(.series-card-head),
+.series-editor.is-reordering .series-card-actions,
+.series-editor.is-reordering .series-card-title p {
+  display: none;
+}
+
+.series-editor.is-reordering .series-card-head {
+  flex-direction: row;
+  align-items: center;
+  padding: 8px 14px;
+  border-bottom: 0;
+  border-radius: inherit;
+}
+
+.series-editor.is-reordering .series-card-title {
+  flex: 1;
+}
+
+.series-editor.is-reordering .series-card-title > div {
+  min-width: 0;
+}
+
 .series-card.drop-before::before,
 .series-card.drop-after::after {
   position: absolute;
