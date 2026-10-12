@@ -40,6 +40,7 @@ import {
   getInferenceCurveYAxisLabel,
   INFERENCE_CURVE_MARGIN,
   INFERENCE_CURVE_TCO_COSTS,
+  normalizeInferenceCurveLineLabelPositions,
   prepareInferenceCurveSeries,
   renderInferenceCurveChart,
   resetInferenceCurveZoom,
@@ -49,6 +50,7 @@ import {
   type InferenceCurveE2ENormalizedInteractivityPercentiles,
   type InferenceCurveLatencyPercentile,
   type InferenceCurveLatencyPercentiles,
+  type InferenceCurveLineLabelPositions,
   type InferenceCurveSeries,
   type InferenceCurveXAxisMetric,
   type InferenceCurveYAxisMetric,
@@ -94,6 +96,7 @@ interface AppState {
   useAdvancedLabels: boolean;
   showGradientLabels: boolean;
   showLineLabels: boolean;
+  lineLabelPositions: InferenceCurveLineLabelPositions;
   showGoalDirection: boolean;
   showOffloadRings: boolean;
   highContrast: boolean;
@@ -177,6 +180,7 @@ interface PersistedAppState {
   useAdvancedLabels?: boolean;
   showGradientLabels?: boolean;
   showLineLabels?: boolean;
+  lineLabelPositions?: InferenceCurveLineLabelPositions;
   showGoalDirection?: boolean;
   showOffloadRings?: boolean;
   highContrast?: boolean;
@@ -797,6 +801,7 @@ function restorePersistedState(value: unknown): PersistedAppState {
     useAdvancedLabels: readPersistedBoolean(value.useAdvancedLabels),
     showGradientLabels: readPersistedBoolean(value.showGradientLabels),
     showLineLabels: readPersistedBoolean(value.showLineLabels),
+    lineLabelPositions: normalizeInferenceCurveLineLabelPositions(value.lineLabelPositions),
     showGoalDirection: readPersistedBoolean(value.showGoalDirection),
     showOffloadRings: readPersistedBoolean(value.showOffloadRings),
     highContrast: readPersistedBoolean(value.highContrast),
@@ -851,6 +856,7 @@ function restoreAppState(defaults: AppState, saved: PersistedAppState, series: I
     useAdvancedLabels: saved.useAdvancedLabels ?? defaults.useAdvancedLabels,
     showGradientLabels: saved.showGradientLabels ?? defaults.showGradientLabels,
     showLineLabels: saved.showLineLabels ?? defaults.showLineLabels,
+    lineLabelPositions: saved.lineLabelPositions ?? defaults.lineLabelPositions,
     showGoalDirection: saved.showGoalDirection ?? defaults.showGoalDirection,
     showOffloadRings: saved.showOffloadRings ?? defaults.showOffloadRings,
     highContrast: saved.highContrast ?? defaults.highContrast,
@@ -882,6 +888,7 @@ function serializeAppState(): PersistedAppState {
     useAdvancedLabels: state.useAdvancedLabels,
     showGradientLabels: state.showGradientLabels,
     showLineLabels: state.showLineLabels,
+    lineLabelPositions: state.lineLabelPositions,
     showGoalDirection: state.showGoalDirection,
     showOffloadRings: state.showOffloadRings,
     highContrast: state.highContrast,
@@ -1811,6 +1818,12 @@ function getChartOptions(): InferenceCurveChartOptions {
     useAdvancedLabels: state.useAdvancedLabels,
     showGradientLabels: state.showGradientLabels,
     showLineLabels: state.showLineLabels,
+    lineLabelPositions: state.lineLabelPositions,
+    lineLabelPositionScope: JSON.stringify([state.chartMetric, state.chartYMetric, latencyPercentile ?? '']),
+    onLineLabelPositionsChange: (positions) => {
+      state.lineLabelPositions = positions;
+      scheduleLocalSave();
+    },
     showGoalIndicators: state.showGoalDirection,
     showOffloadRings: state.showOffloadRings,
     highContrast: state.highContrast,
@@ -4009,7 +4022,8 @@ function renderLegend(): void {
           'DCP: P = Prefill, D = Decode, ? = not provided. Disaggregated labels list Prefill then Decode.')}
         ${renderSwitch('showGradientLabels', 'Gradient Labels', state.showGradientLabels,
           'Color and label strategies including phase DCP: P = Prefill, D = Decode, ? = not provided.')}
-        ${renderSwitch('showLineLabels', 'Line Labels', state.showLineLabels)}
+        ${renderSwitch('showLineLabels', 'Line Labels', state.showLineLabels,
+          'Drag a line label to move it. Double-click the label to reset its position.')}
         ${renderSwitch('showOffloadRings', 'Offload Rings', state.showOffloadRings)}
       </div>
     </div>
@@ -5309,6 +5323,7 @@ function createInitialState(series: InferenceCurveSeries[]): AppState {
     useAdvancedLabels: false,
     showGradientLabels: false,
     showLineLabels: false,
+    lineLabelPositions: {},
     showGoalDirection: true,
     showOffloadRings: true,
     highContrast: false,

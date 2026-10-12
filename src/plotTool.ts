@@ -1,9 +1,11 @@
 import {
   DEFAULT_CHART_WATERMARK,
+  normalizeInferenceCurveLineLabelPositions,
   prepareInferenceCurveSeries,
   renderInferenceCurveChart,
   resetInferenceCurveZoom,
   type InferenceCurveSeries,
+  type InferenceCurveLineLabelPositions,
   type ParetoGoal
 } from './inferenceCurveChart';
 import { getTheme, THEME_CHANGE_EVENT } from './theme';
@@ -79,6 +81,7 @@ interface PlotToolState {
   logX: boolean;
   logY: boolean;
   showLineLabels: boolean;
+  lineLabelPositions: InferenceCurveLineLabelPositions;
   showGoalDirection: boolean;
 }
 
@@ -124,6 +127,7 @@ function createDefaultState(): PlotToolState {
     logX: false,
     logY: false,
     showLineLabels: false,
+    lineLabelPositions: {},
     showGoalDirection: true
   };
 }
@@ -385,6 +389,11 @@ export function mountPlotTool(root: HTMLElement): () => void {
       showNonOptimalPoints: state.showNonOptimalPoints,
       hidePointLabels: true,
       showLineLabels: state.showLineLabels,
+      lineLabelPositions: state.lineLabelPositions,
+      onLineLabelPositionsChange: (positions) => {
+        state.lineLabelPositions = positions;
+        scheduleSave();
+      },
       showOffloadRings: false,
       showGoalIndicators: state.showGoalDirection,
       logX: state.logX,
@@ -1004,6 +1013,7 @@ function loadPlotToolData(): { lines: PlotLineDraft[]; state: PlotToolState } | 
         logX: savedState.logX === true,
         logY: savedState.logY === true,
         showLineLabels: savedState.showLineLabels === true,
+        lineLabelPositions: normalizeInferenceCurveLineLabelPositions(savedState.lineLabelPositions),
         showGoalDirection: savedState.showGoalDirection !== false
       }
     };

@@ -72,6 +72,9 @@ export interface InferenceCurveChartOptions {
   useAdvancedLabels?: boolean;
   showGradientLabels?: boolean;
   showLineLabels?: boolean;
+  lineLabelPositions?: InferenceCurveLineLabelPositions;
+  lineLabelPositionScope?: string;
+  onLineLabelPositionsChange?: (positions: InferenceCurveLineLabelPositions) => void;
   showOffloadRings?: boolean;
   highContrast?: boolean;
   logX?: boolean;
@@ -87,6 +90,25 @@ export interface InferenceCurveChartOptions {
   watermark?: string;
   xLabel?: string;
   yLabel?: string;
+}
+
+// Label origins in chart data coordinates, so they follow zooming and resizing.
+export type InferenceCurveLineLabelPositions = Record<string, { x: number; y: number }>;
+
+type ResolvedChartOptions = Required<Omit<
+  InferenceCurveChartOptions,
+  'activeSeriesIds' | 'selectedPrecisions' | 'onLineLabelPositionsChange'
+>> & Pick<InferenceCurveChartOptions, 'onLineLabelPositionsChange'>;
+
+export function normalizeInferenceCurveLineLabelPositions(value: unknown): InferenceCurveLineLabelPositions {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).flatMap(([key, position]) => {
+    if (!position || typeof position !== 'object') return [];
+    const { x, y } = position as { x?: unknown; y?: unknown };
+    return typeof x === 'number' && Number.isFinite(x) && typeof y === 'number' && Number.isFinite(y)
+      ? [[key, { x, y }]]
+      : [];
+  }));
 }
 
 export type ParetoGoal = 'maximize' | 'minimize';
@@ -367,9 +389,7 @@ const LATENCY_METRICS = new Set<InferenceCurveXAxisMetric>([
   'ttft'
 ]);
 
-const defaultOptions: Required<
-  Omit<InferenceCurveChartOptions, 'activeSeriesIds' | 'selectedPrecisions'>
-> = {
+const defaultOptions: ResolvedChartOptions = {
   xMetric: 'interactivity',
   yMetric: 'throughput',
   tcoHourlyCosts: {},
@@ -381,6 +401,8 @@ const defaultOptions: Required<
   useAdvancedLabels: false,
   showGradientLabels: false,
   showLineLabels: false,
+  lineLabelPositions: {},
+  lineLabelPositionScope: '',
   showOffloadRings: true,
   highContrast: false,
   logX: false,
@@ -890,6 +912,7 @@ export function renderInferenceCurveChart(
   userOptions: InferenceCurveChartOptions = {}
 ): void {
   const options = { ...defaultOptions, ...userOptions };
+  options.lineLabelPositions = { ...options.lineLabelPositions };
   if (!userOptions.yLabel) options.yLabel = getInferenceCurveYAxisLabel(options.yMetric);
   if (!userOptions.title && options.yMetric === 'totalTokensPerDollar') {
     options.title = getInferenceCurveTitle(options.xMetric).replace('Token Throughput per GPU', 'Total Tokens per Dollar');
@@ -1078,6 +1101,7 @@ export function renderInferenceCurveChart(
     applyInteraction();
   };
   let suppressNextSvgClick = false;
+  let draggingLineLabel = false;
   const clearHoverState = () => {
     if (!interaction.hoveredSeriesId && !interaction.hoveredPointKey) return;
     interaction.hoveredSeriesId = null;
@@ -1109,9 +1133,14 @@ export function renderInferenceCurveChart(
     return nearestPoint;
   };
   const syncHoverFromPointer = (event: PointerEvent) => {
+    if (draggingLineLabel) return;
     const svgNode = svg.node();
     const target = event.target instanceof Element ? event.target : null;
     if (!svgNode || !target || !svgNode.contains(target)) {
+      clearHoverState();
+      return;
+    }
+    if (target.closest('.line-label')) {
       clearHoverState();
       return;
     }
@@ -1143,6 +1172,7 @@ export function renderInferenceCurveChart(
     clearHoverState();
   };
   const selectSeriesFromPointer = (event: PointerEvent) => {
+    if (draggingLineLabel) return;
     if (!isPrimaryPointerSelection(event)) return;
     const point = findNearestPointFromPointer(event);
     if (point) {
@@ -1199,7 +1229,13 @@ export function renderInferenceCurveChart(
       setHoveredPoint
     );
     drawStrategyLabels(zoomGroup, visibleSeries, xs, ys, strategyColor, options);
-    drawLineLabels(zoomGroup, visibleSeries, xs, ys, options);
+    drawLineLabels(zoomGroup, visibleSeries, xs, ys, options, (dragging) => {
+      draggingLineLabel = dragging;
+      if (dragging) {
+        clearHoverState();
+        hideTooltip(tooltip, rulerGroup);
+      }
+    });
     applyInteraction();
   };
 
@@ -1397,7 +1433,7 @@ function drawRooflines(
   xScale: ContinuousScale,
   yScale: ContinuousScale,
   strategyColor: Map<string, string>,
-  options: Required<Omit<InferenceCurveChartOptions, 'activeSeriesIds' | 'selectedPrecisions'>>,
+  options: ResolvedChartOptions,
   setHoveredSeries: (seriesId: string | null) => void
 ): void {
   const lineGenerator = d3
@@ -1486,7 +1522,7 @@ function drawScatterPoints(
   verticalRuler: d3.Selection<SVGLineElement, unknown, null, undefined>,
   horizontalRuler: d3.Selection<SVGLineElement, unknown, null, undefined>,
   container: HTMLElement,
-  options: Required<Omit<InferenceCurveChartOptions, 'activeSeriesIds' | 'selectedPrecisions'>>,
+  options: ResolvedChartOptions,
   setHoveredSeries: (seriesId: string | null) => void,
   setHoveredPoint: (point: ChartPoint | null) => void
 ): void {
@@ -1556,7 +1592,7 @@ function drawStrategyLabels(
   xScale: ContinuousScale,
   yScale: ContinuousScale,
   strategyColor: Map<string, string>,
-  options: Required<Omit<InferenceCurveChartOptions, 'activeSeriesIds' | 'selectedPrecisions'>>
+  options: ResolvedChartOptions
 ): void {
   if (!options.showGradientLabels) {
     zoomGroup.selectAll('.parallelism-label').remove();
@@ -1598,7 +1634,8 @@ function drawLineLabels(
   series: PreparedSeries[],
   xScale: ContinuousScale,
   yScale: ContinuousScale,
-  options: Required<Omit<InferenceCurveChartOptions, 'activeSeriesIds' | 'selectedPrecisions'>>
+  options: ResolvedChartOptions,
+  setDragging: (dragging: boolean) => void
 ): void {
   if (!options.showLineLabels) {
     zoomGroup.selectAll('.line-label').remove();
@@ -1631,7 +1668,71 @@ function drawLineLabels(
     labels.push({ key: line.id, seriesId: line.id, x: px + 8, y: py - 14, label: line.name, color: line.color });
   });
 
+  const positionKey = (label: PillLabel) => JSON.stringify([options.lineLabelPositionScope, label.key]);
+  labels.forEach((label) => {
+    const position = options.lineLabelPositions[positionKey(label)];
+    if (!position) return;
+    const x = xScale(position.x);
+    const y = yScale(position.y);
+    if (Number.isFinite(x) && Number.isFinite(y)) {
+      label.x = x;
+      label.y = y;
+    }
+  });
+
   drawPillJoin(zoomGroup, '.line-label', labels, 'start');
+  const [left, right] = d3.extent(xScale.range()) as [number, number];
+  const [top, bottom] = d3.extent(yScale.range()) as [number, number];
+  const constrain = (x: number, y: number, bounds: DOMRect) => ({
+    x: Math.max(left - bounds.x, Math.min(right - bounds.x - bounds.width, x)),
+    y: Math.max(top - bounds.y, Math.min(bottom - bounds.y - bounds.height, y))
+  });
+  const notifyChange = () => options.onLineLabelPositionsChange?.({ ...options.lineLabelPositions });
+
+  const groups = zoomGroup.selectAll<SVGGElement, PillLabel>('.line-label');
+  const bounds = groups.nodes().map((group) => group.getBBox());
+  groups
+    .style('pointer-events', 'all')
+    .each(function (label, index) {
+      Object.assign(label, constrain(label.x, label.y, bounds[index]!));
+      d3.select(this).attr('transform', `translate(${label.x},${label.y})`);
+    })
+    .on('pointerdown', stopChartInteractionEvent)
+    .on('pointerup', stopChartInteractionEvent)
+    .on('click', stopChartInteractionEvent)
+    .on('dblclick', (event, label) => {
+      stopChartInteractionEvent(event);
+      delete options.lineLabelPositions[positionKey(label)];
+      notifyChange();
+      drawLineLabels(zoomGroup, series, xScale, yScale, options, setDragging);
+    })
+    .call(d3.drag<SVGGElement, PillLabel, { x: number; y: number; bounds: DOMRect; moved: boolean }>()
+      .subject(function (_event, label) {
+        return { x: label.x, y: label.y, bounds: this.getBBox(), moved: false };
+      })
+      .clickDistance(3)
+      .on('start', function () {
+        setDragging(true);
+        d3.select(this).classed('dragging', true).raise();
+      })
+      .on('drag', function (event, label) {
+        event.subject.moved = true;
+        Object.assign(label, constrain(event.x, event.y, event.subject.bounds));
+        d3.select(this).attr('transform', `translate(${label.x},${label.y})`);
+        options.lineLabelPositions[positionKey(label)] = {
+          x: xScale.invert(label.x),
+          y: yScale.invert(label.y)
+        };
+      })
+      .on('end', function (event) {
+        setDragging(false);
+        d3.select(this).classed('dragging', false);
+        if (event.subject.moved) notifyChange();
+      }))
+    .selectAll<SVGTitleElement, PillLabel>('title')
+    .data((label) => [label])
+    .join('title')
+    .text('Drag to move label. Double-click to reset its position.');
 }
 
 function drawPillJoin(
@@ -1678,7 +1779,7 @@ function drawPillJoin(
 function applySeriesInteraction(
   zoomGroup: d3.Selection<SVGGElement, unknown, null, undefined>,
   interaction: ChartInteractionState,
-  options: Required<Omit<InferenceCurveChartOptions, 'activeSeriesIds' | 'selectedPrecisions'>>,
+  options: ResolvedChartOptions,
   selectedPrecisions: string[]
 ): void {
   const selectedSeriesId = interaction.selectedSeriesId;
@@ -1725,6 +1826,8 @@ function applySeriesInteraction(
     .style('opacity', (label) => getSeriesOpacity(label.seriesId, selectedSeriesId));
 
   if (layerSeriesId) raiseSeriesToFront(zoomGroup, layerSeriesId);
+  // Keep draggable labels reachable even when another curve is highlighted.
+  zoomGroup.selectAll('.line-label').raise();
 }
 
 function getSeriesOpacity(seriesId: string, selectedSeriesId: string | null): number {
@@ -1803,7 +1906,7 @@ function renderAxes(
   yAxisGroup: d3.Selection<SVGGElement, unknown, null, undefined>,
   xScale: ContinuousScale,
   yScale: ContinuousScale,
-  options: Required<Omit<InferenceCurveChartOptions, 'activeSeriesIds' | 'selectedPrecisions'>>
+  options: ResolvedChartOptions
 ): void {
   xAxisGroup.call(
     d3
@@ -1826,7 +1929,7 @@ function renderAxes(
 
 function isPointVisible(
   point: ChartPoint,
-  options: Required<Omit<InferenceCurveChartOptions, 'activeSeriesIds' | 'selectedPrecisions'>>
+  options: ResolvedChartOptions
 ): boolean {
   return options.showNonOptimalPoints || point.roof;
 }
@@ -1837,7 +1940,7 @@ function getChartPointKey(point: ChartPoint): string {
 
 function getPointLabelText(
   point: ChartPoint,
-  options: Required<Omit<InferenceCurveChartOptions, 'activeSeriesIds' | 'selectedPrecisions'>>
+  options: ResolvedChartOptions
 ): string {
   if (options.hidePointLabels || options.showGradientLabels) return '';
   if (options.showConcurrencyLabels) return getConcurrencyPointLabel(point);
@@ -2326,7 +2429,7 @@ function computeGradientStops(
 
 function formatTooltip(
   point: ChartPoint,
-  options: Required<Omit<InferenceCurveChartOptions, 'activeSeriesIds' | 'selectedPrecisions'>>
+  options: ResolvedChartOptions
 ): string {
   if (options.genericTooltip) {
     return [

@@ -919,6 +919,17 @@ p {
   font-size: 11px;
 }
 
+.line-label {
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+
+.line-label.dragging {
+  cursor: grabbing;
+}
+
 .pill-bg {
   opacity: 0.9;
 }
