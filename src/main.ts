@@ -4023,7 +4023,7 @@ function renderLegend(): void {
         ${renderSwitch('showGradientLabels', 'Gradient Labels', state.showGradientLabels,
           'Color and label strategies including phase DCP: P = Prefill, D = Decode, ? = not provided.')}
         ${renderSwitch('showLineLabels', 'Line Labels', state.showLineLabels,
-          'Drag a line label to move it. Double-click the label to reset its position.')}
+          'Drag a label along its curve; cross the curve to switch sides. Double-click to reset.')}
         ${renderSwitch('showOffloadRings', 'Offload Rings', state.showOffloadRings)}
       </div>
     </div>

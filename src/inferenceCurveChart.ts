@@ -92,8 +92,21 @@ export interface InferenceCurveChartOptions {
   yLabel?: string;
 }
 
-// Label origins in chart data coordinates, so they follow zooming and resizing.
-export type InferenceCurveLineLabelPositions = Record<string, { x: number; y: number }>;
+export interface InferenceCurveLineLabelPosition {
+  // Fraction of the rendered curve's arc length, independent of zoom and pan.
+  fraction: number;
+  side: 'left' | 'right';
+}
+
+interface LegacyLineLabelPosition {
+  x: number;
+  y: number;
+}
+
+export type InferenceCurveLineLabelPositions = Record<
+  string,
+  InferenceCurveLineLabelPosition | LegacyLineLabelPosition
+>;
 
 type ResolvedChartOptions = Required<Omit<
   InferenceCurveChartOptions,
@@ -102,8 +115,18 @@ type ResolvedChartOptions = Required<Omit<
 
 export function normalizeInferenceCurveLineLabelPositions(value: unknown): InferenceCurveLineLabelPositions {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-  return Object.fromEntries(Object.entries(value).flatMap(([key, position]) => {
+  return Object.fromEntries(Object.entries(value).flatMap(([key, position]): [
+    string, InferenceCurveLineLabelPosition | LegacyLineLabelPosition
+  ][] => {
     if (!position || typeof position !== 'object') return [];
+    if ('fraction' in position) {
+      const { fraction, side } = position as { fraction?: unknown; side?: unknown };
+      return typeof fraction === 'number' && Number.isFinite(fraction) && fraction >= 0 && fraction <= 1
+        && (side === 'left' || side === 'right')
+        ? [[key, { fraction, side }]]
+        : [];
+    }
+    // Old free-floating positions are snapped to their curve when it is drawn.
     const { x, y } = position as { x?: unknown; y?: unknown };
     return typeof x === 'number' && Number.isFinite(x) && typeof y === 'number' && Number.isFinite(y)
       ? [[key, { x, y }]]
@@ -235,6 +258,29 @@ interface PillLabel {
   label: string;
   color: string;
 }
+
+interface LineLabel extends PillLabel {
+  anchor: { x: number; y: number };
+  side: InferenceCurveLineLabelPosition['side'];
+  path: SVGPathElement;
+  pathLength: number;
+}
+
+interface CurvePathSample {
+  length: number;
+  x: number;
+  y: number;
+}
+
+interface LineLabelDragSubject {
+  x: number;
+  y: number;
+  bounds: DOMRect;
+  moved: boolean;
+  samples: CurvePathSample[];
+}
+
+const LINE_LABEL_GAP = 8;
 
 type ContinuousScale = d3.ScaleLinear<number, number> | d3.ScaleLogarithmic<number, number>;
 type ShapeKey = 'circle' | 'square' | 'triangle' | 'diamond' | 'star' | 'plus' | 'cross';
@@ -1629,6 +1675,50 @@ function drawStrategyLabels(
   drawPillJoin(zoomGroup, '.parallelism-label', labels, 'middle');
 }
 
+function sampleCurvePath(path: SVGPathElement, length: number): CurvePathSample[] {
+  const count = Math.max(16, Math.min(256, Math.ceil(length / 12)));
+  return Array.from({ length: count + 1 }, (_, index) => {
+    const distance = length * index / count;
+    const point = path.getPointAtLength(distance);
+    return { length: distance, x: point.x, y: point.y };
+  });
+}
+
+function findNearestCurvePoint(
+  path: SVGPathElement,
+  samples: CurvePathSample[],
+  x: number,
+  y: number
+): CurvePathSample {
+  const distance = (point: { x: number; y: number }) => (point.x - x) ** 2 + (point.y - y) ** 2;
+  let bestIndex = 0;
+  samples.forEach((point, index) => {
+    if (distance(point) < distance(samples[bestIndex]!)) bestIndex = index;
+  });
+  let best = samples[bestIndex]!;
+  let low = samples[Math.max(0, bestIndex - 1)]!.length;
+  let high = samples[Math.min(samples.length - 1, bestIndex + 1)]!.length;
+  // Refine on the actual SVG spline, not straight segments between benchmarks.
+  while (high - low > 0.05) {
+    const leftLength = low + (high - low) / 3;
+    const rightLength = high - (high - low) / 3;
+    const left = path.getPointAtLength(leftLength);
+    const right = path.getPointAtLength(rightLength);
+    if (distance(left) < distance(best)) best = { length: leftLength, x: left.x, y: left.y };
+    if (distance(right) < distance(best)) best = { length: rightLength, x: right.x, y: right.y };
+    if (distance(left) <= distance(right)) high = rightLength;
+    else low = leftLength;
+  }
+  return best;
+}
+
+function positionLineLabel(label: LineLabel, bounds: DOMRect): void {
+  label.x = label.side === 'left'
+    ? label.anchor.x - LINE_LABEL_GAP - bounds.x - bounds.width
+    : label.anchor.x + LINE_LABEL_GAP - bounds.x;
+  label.y = label.anchor.y - bounds.y - bounds.height / 2;
+}
+
 function drawLineLabels(
   zoomGroup: d3.Selection<SVGGElement, unknown, null, undefined>,
   series: PreparedSeries[],
@@ -1642,13 +1732,23 @@ function drawLineLabels(
     return;
   }
 
+  const paths = new Map<string, SVGPathElement>();
+  zoomGroup.selectAll<SVGPathElement, { key: string }>('.roofline-path').each(function (entry) {
+    paths.set(entry.key, this);
+  });
+  const positionKey = (id: string) => JSON.stringify([options.lineLabelPositionScope, id]);
+  const notifyChange = () => options.onLineLabelPositionsChange?.({ ...options.lineLabelPositions });
+  let migratedPosition = false;
   const placed: { x: number; y: number }[] = [];
-  const labels: PillLabel[] = [];
+  const labels: LineLabel[] = [];
   const sorted = [...series]
     .filter((line) => line.roofline.length >= 2)
     .sort((a, b) => yScale(a.roofline[0]!.y) - yScale(b.roofline[0]!.y));
 
   sorted.forEach((line) => {
+    const path = paths.get(line.id);
+    if (!path) return;
+    const pathLength = path.getTotalLength();
     const candidates = [
       line.roofline[Math.min(1, line.roofline.length - 1)]!,
       line.roofline[Math.floor(line.roofline.length / 2)]!,
@@ -1662,39 +1762,42 @@ function drawLineLabels(
         const py = yScale(point.y);
         return !placed.some((label) => Math.abs(label.x - px) < 120 && Math.abs(label.y - py) < 18);
       }) ?? candidates[0]!;
-    const px = xScale(chosen.x);
-    const py = yScale(chosen.y);
-    placed.push({ x: px, y: py });
-    labels.push({ key: line.id, seriesId: line.id, x: px + 8, y: py - 14, label: line.name, color: line.color });
-  });
-
-  const positionKey = (label: PillLabel) => JSON.stringify([options.lineLabelPositionScope, label.key]);
-  labels.forEach((label) => {
-    const position = options.lineLabelPositions[positionKey(label)];
-    if (!position) return;
-    const x = xScale(position.x);
-    const y = yScale(position.y);
-    if (Number.isFinite(x) && Number.isFinite(y)) {
-      label.x = x;
-      label.y = y;
+    let anchor = { x: xScale(chosen.x), y: yScale(chosen.y) };
+    let side: InferenceCurveLineLabelPosition['side'] = 'right';
+    const key = positionKey(line.id);
+    const position = options.lineLabelPositions[key];
+    if (position && 'fraction' in position) {
+      anchor = path.getPointAtLength(position.fraction * pathLength);
+      side = position.side;
+    } else if (position) {
+      const x = xScale(position.x);
+      const y = yScale(position.y);
+      if (Number.isFinite(x) && Number.isFinite(y)) {
+        const nearest = findNearestCurvePoint(path, sampleCurvePath(path, pathLength), x, y);
+        anchor = nearest;
+        side = x < nearest.x ? 'left' : 'right';
+        options.lineLabelPositions[key] = { fraction: pathLength ? nearest.length / pathLength : 0, side };
+      } else {
+        delete options.lineLabelPositions[key];
+      }
+      migratedPosition = true;
     }
+    placed.push(anchor);
+    labels.push({
+      key: line.id, seriesId: line.id, x: anchor.x, y: anchor.y,
+      label: line.name, color: line.color, anchor, side, path, pathLength
+    });
   });
 
   drawPillJoin(zoomGroup, '.line-label', labels, 'start');
-  const [left, right] = d3.extent(xScale.range()) as [number, number];
-  const [top, bottom] = d3.extent(yScale.range()) as [number, number];
-  const constrain = (x: number, y: number, bounds: DOMRect) => ({
-    x: Math.max(left - bounds.x, Math.min(right - bounds.x - bounds.width, x)),
-    y: Math.max(top - bounds.y, Math.min(bottom - bounds.y - bounds.height, y))
-  });
-  const notifyChange = () => options.onLineLabelPositionsChange?.({ ...options.lineLabelPositions });
-
-  const groups = zoomGroup.selectAll<SVGGElement, PillLabel>('.line-label');
+  const groups = zoomGroup.selectAll<SVGGElement, LineLabel>('.line-label');
   const bounds = groups.nodes().map((group) => group.getBBox());
   groups
     .style('pointer-events', 'all')
     .each(function (label, index) {
-      Object.assign(label, constrain(label.x, label.y, bounds[index]!));
+      // Let the plot clip labels with their curve. Clamping labels to the plot
+      // edge independently would detach them from their anchor during zooming.
+      positionLineLabel(label, bounds[index]!);
       d3.select(this).attr('transform', `translate(${label.x},${label.y})`);
     })
     .on('pointerdown', stopChartInteractionEvent)
@@ -1702,13 +1805,16 @@ function drawLineLabels(
     .on('click', stopChartInteractionEvent)
     .on('dblclick', (event, label) => {
       stopChartInteractionEvent(event);
-      delete options.lineLabelPositions[positionKey(label)];
+      delete options.lineLabelPositions[positionKey(label.key)];
       notifyChange();
       drawLineLabels(zoomGroup, series, xScale, yScale, options, setDragging);
     })
-    .call(d3.drag<SVGGElement, PillLabel, { x: number; y: number; bounds: DOMRect; moved: boolean }>()
-      .subject(function (_event, label) {
-        return { x: label.x, y: label.y, bounds: this.getBBox(), moved: false };
+    .call(d3.drag<SVGGElement, LineLabel, LineLabelDragSubject>()
+      .subject(function (event, label) {
+        return {
+          x: event.x, y: event.y, bounds: this.getBBox(), moved: false,
+          samples: sampleCurvePath(label.path, label.pathLength)
+        };
       })
       .clickDistance(3)
       .on('start', function () {
@@ -1717,11 +1823,19 @@ function drawLineLabels(
       })
       .on('drag', function (event, label) {
         event.subject.moved = true;
-        Object.assign(label, constrain(event.x, event.y, event.subject.bounds));
+        // Project each movement from the current anchor to avoid a jump when
+        // grabbing text away from the curve. Crossing the curve switches sides.
+        const nearest = findNearestCurvePoint(
+          label.path, event.subject.samples, label.anchor.x + event.dx, label.anchor.y + event.dy
+        );
+        label.anchor = nearest;
+        if (event.x < nearest.x - LINE_LABEL_GAP) label.side = 'left';
+        else if (event.x > nearest.x + LINE_LABEL_GAP) label.side = 'right';
+        positionLineLabel(label, event.subject.bounds);
         d3.select(this).attr('transform', `translate(${label.x},${label.y})`);
-        options.lineLabelPositions[positionKey(label)] = {
-          x: xScale.invert(label.x),
-          y: yScale.invert(label.y)
+        options.lineLabelPositions[positionKey(label.key)] = {
+          fraction: label.pathLength ? nearest.length / label.pathLength : 0,
+          side: label.side
         };
       })
       .on('end', function (event) {
@@ -1729,10 +1843,11 @@ function drawLineLabels(
         d3.select(this).classed('dragging', false);
         if (event.subject.moved) notifyChange();
       }))
-    .selectAll<SVGTitleElement, PillLabel>('title')
+    .selectAll<SVGTitleElement, LineLabel>('title')
     .data((label) => [label])
     .join('title')
-    .text('Drag to move label. Double-click to reset its position.');
+    .text('Drag along the curve; cross it to switch sides. Double-click to reset.');
+  if (migratedPosition) notifyChange();
 }
 
 function drawPillJoin(
