@@ -547,7 +547,19 @@ const colorPresets: ColorPreset[] = [
   { name: 'Blue', value: '#2563eb' },
   { name: 'Indigo', value: '#6366f1' },
   { name: 'Violet', value: '#8b5cf6' },
-  { name: 'Pink', value: '#ec4899' }
+  { name: 'Pink', value: '#ec4899' },
+  { name: 'Teal', value: '#14b8a6' },
+  { name: 'Sky', value: '#38bdf8' },
+  { name: 'Yellow', value: '#facc15' },
+  { name: 'Purple', value: '#a855f7' },
+  { name: 'Fuchsia', value: '#d946ef' },
+  { name: 'Coral', value: '#fb7185' },
+  { name: 'Mint', value: '#6ee7b7' },
+  { name: 'Lavender', value: '#c4b5fd' },
+  { name: 'Peach', value: '#fdba74' },
+  { name: 'Brown', value: '#9c755f' },
+  { name: 'Slate', value: '#64748b' },
+  { name: 'Silver', value: '#a1a1aa' }
 ];
 
 const colorInputFallbacks = [

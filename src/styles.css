@@ -2750,11 +2750,12 @@ p {
 
 .color-presets {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
   gap: 3px;
+  row-gap: 6px;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .color-preset {
