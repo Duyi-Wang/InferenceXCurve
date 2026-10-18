@@ -1449,6 +1449,10 @@ p {
   gap: 8px;
 }
 
+#inferencex-workspace-root .data-header-actions {
+  justify-content: flex-end;
+}
+
 .data-header-actions > .action-button {
   min-height: 34px;
   padding: 0 13px;
