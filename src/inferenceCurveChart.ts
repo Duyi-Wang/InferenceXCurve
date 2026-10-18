@@ -1354,10 +1354,10 @@ function drawGoalIndicator(
   const unitY = (endY - startY) / length;
   const perpendicularX = -unitY;
   const perpendicularY = unitX;
-  const stemHalfWidth = 5;
-  const headHalfWidth = 12;
-  const headBaseX = endX - unitX * 20;
-  const headBaseY = endY - unitY * 20;
+  const stemHalfWidth = 7;
+  const headHalfWidth = 15;
+  const headBaseX = endX - unitX * 22;
+  const headBaseY = endY - unitY * 22;
   const arrowPoints: Array<[number, number]> = [
     [startX + perpendicularX * stemHalfWidth, startY + perpendicularY * stemHalfWidth],
     [headBaseX + perpendicularX * stemHalfWidth, headBaseY + perpendicularY * stemHalfWidth],

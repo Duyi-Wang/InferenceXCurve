@@ -8463,7 +8463,7 @@ function buildExportStyle(palette: ExportPalette): string {
       .chart-watermark { fill: ${palette.foreground}; font-weight: 800; opacity: 0.055; user-select: none; }
       .y-axis-label, .x-axis-label { fill: ${palette.foreground}; font-size: 12px; }
       .goal-direction-arrow { fill: ${palette.foreground}; stroke: ${palette.foreground}; stroke-width: 4; stroke-linejoin: round; opacity: .95; }
-      .goal-direction-label { fill: ${palette.mutedForeground}; font-size: 10px; font-weight: 700; letter-spacing: .12em; paint-order: stroke; stroke: ${palette.background}; stroke-width: 3px; stroke-linejoin: round; }
+      .goal-direction-label { fill: ${palette.mutedForeground}; font-size: 14px; font-weight: 800; letter-spacing: .12em; paint-order: stroke; stroke: ${palette.background}; stroke-width: 3px; stroke-linejoin: round; }
       .point-label { paint-order: stroke; stroke: ${palette.background}; stroke-width: 3px; fill: ${palette.foreground}; font-size: 10px; font-weight: 700; }
       .parallelism-label text, .line-label text, .pill-text { fill: #fff; font-size: 9px; font-weight: 700; }
       .line-label text { font-size: 11px; }

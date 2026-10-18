@@ -968,8 +968,8 @@ p {
 
 .goal-direction-label {
   fill: var(--muted-foreground);
-  font-size: 10px;
-  font-weight: 700;
+  font-size: 14px;
+  font-weight: 800;
   letter-spacing: 0.12em;
   paint-order: stroke;
   stroke: var(--background);
