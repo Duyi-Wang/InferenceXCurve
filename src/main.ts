@@ -1353,12 +1353,15 @@ app.innerHTML = `
               <span>Remember</span>
             </label>
           </div>
-          <input
-            id="github-token"
-            type="password"
-            autocomplete="off"
-            placeholder="Optional"
-          />
+          <div class="action-import-token-input">
+            ${renderIcon('key')}
+            <input
+              id="github-token"
+              type="password"
+              autocomplete="off"
+              placeholder="Personal access token"
+            />
+          </div>
         </div>
         <button id="import-action-data" class="action-button" type="button">
           ${renderIcon('download-cloud')}
@@ -3418,6 +3421,7 @@ function renderIcon(name: string): string {
     'chevron-down': '<path d="m6 9 6 6 6-6"/>',
     target: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3"/><path d="M12 19v3"/><path d="M2 12h3"/><path d="M19 12h3"/>',
     help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 4.5 1.5c0 1.7-2.5 2-2.5 3.5"/><path d="M12 17h.01"/>',
+    key: '<circle cx="8" cy="15" r="5"/><path d="m11.5 11.5 9-9M16 7l3 3M19 4l3 3"/>',
     sliders: '<path d="M4 7h16"/><path d="M4 17h16"/><circle cx="9" cy="7" r="2"/><circle cx="15" cy="17" r="2"/>',
     upload: '<path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>'
   };

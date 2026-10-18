@@ -153,35 +153,6 @@ body {
   background: var(--brand-soft);
 }
 
-.workspace-brand {
-  display: inline-flex;
-  flex-shrink: 0;
-  align-items: center;
-  gap: 10px;
-  color: var(--foreground);
-  font-size: 19px;
-  font-weight: 750;
-  letter-spacing: -0.7px;
-  text-decoration: none;
-}
-
-.workspace-brand-mark {
-  display: grid;
-  width: 34px;
-  height: 34px;
-  place-items: center;
-  border: 1px solid color-mix(in srgb, var(--brand) 24%, transparent);
-  border-radius: 10px;
-  background: var(--brand-soft);
-  color: var(--brand);
-}
-
-.workspace-brand-mark svg {
-  width: 26px;
-  height: 26px;
-}
-
-.workspace-brand-accent,
 .heading-period {
   color: var(--brand);
 }
@@ -438,7 +409,8 @@ input {
 
 button,
 select,
-input[type="text"] {
+input[type="text"],
+input[type="password"] {
   border: 1px solid var(--input);
   border-radius: 8px;
   background: transparent;
@@ -486,7 +458,7 @@ button.primary {
   z-index: 120;
   top: 50%;
   /* Stay beside the centered workspace, including on wide monitors. */
-  right: max(10px, calc((100vw - 1440px) / 2 - 60px));
+  right: max(10px, calc((100vw - 1440px) / 2 - 68px));
   display: grid;
   gap: 8px;
   padding: 6px;
@@ -499,9 +471,9 @@ button.primary {
 
 .quick-tool-button {
   display: inline-grid;
-  width: 36px;
-  height: 36px;
-  min-height: 36px;
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
   place-items: center;
   padding: 0;
   border-color: color-mix(in srgb, var(--border) 56%, transparent);
@@ -517,8 +489,8 @@ button.primary {
 }
 
 .quick-tool-button .button-icon {
-  width: 17px;
-  height: 17px;
+  width: 22px;
+  height: 22px;
 }
 
 .series-action-button {
@@ -1427,7 +1399,7 @@ p {
 
 .data-card-header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(220px, 1fr) minmax(0, auto);
   align-items: start;
   gap: 16px;
   margin-bottom: 20px;
@@ -1539,16 +1511,56 @@ p {
   font-size: 13px;
 }
 
+.action-import-token {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.action-import-token-input {
+  position: relative;
+  color: var(--muted-foreground);
+}
+
+.action-import-token-input > .button-icon {
+  position: absolute;
+  top: 50%;
+  left: 10px;
+  width: 16px;
+  height: 16px;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.action-import-token-input input {
+  padding-left: 34px;
+}
+
+.action-import-token-input input::placeholder {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.action-import-token-input:focus-within {
+  color: var(--brand);
+}
+
 .action-import-token label.action-import-remember {
   flex-direction: row;
   align-items: center;
   gap: 5px;
   margin: 0 0 0 auto;
+  cursor: pointer;
 }
 
 .action-import-remember input {
-  width: auto;
+  width: 14px;
+  height: 14px;
   min-height: 0;
+  margin: 0;
+  padding: 0;
+  cursor: pointer;
 }
 
 .action-import-remember span {
@@ -1571,6 +1583,9 @@ p {
 
 .action-import-field-label > label {
   flex: 0 0 auto;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .help-tip {
@@ -3459,14 +3474,8 @@ input[type="checkbox"] {
     padding: 0 4px 6px;
   }
 
-  .workspace-shortcut,
-  .workspace-brand > span:last-child {
+  .workspace-shortcut {
     display: none;
-  }
-
-  .workspace-brand-mark {
-    width: 30px;
-    height: 30px;
   }
 
   .quick-toolbar {
