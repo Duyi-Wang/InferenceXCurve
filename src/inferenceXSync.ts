@@ -393,7 +393,8 @@ function readAvailabilityRow(record: Record<string, unknown>): InferenceXAvailab
   const osl = readNumber(record, 'osl') ?? 0;
   const precision = readString(record, 'precision').toLowerCase();
   const hardware = readString(record, 'hardware').toLowerCase();
-  const framework = readString(record, 'framework').toLowerCase();
+  const disagg = readBoolean(record, 'disagg') ?? false;
+  const framework = normalizeUpstreamFramework(readString(record, 'framework'), disagg);
   if (!model || (!scenario && (isl <= 0 || osl <= 0)) || !precision || !hardware || !framework) return null;
   return {
     model,
@@ -405,7 +406,7 @@ function readAvailabilityRow(record: Record<string, unknown>): InferenceXAvailab
     hardware,
     framework,
     specMethod: normalizeSpecMethod(readString(record, 'spec_method')),
-    disagg: readBoolean(record, 'disagg') ?? false,
+    disagg,
     date: readString(record, 'date')
   };
 }
@@ -540,6 +541,7 @@ function benchmarkRecordMatchesConfig(
   const precision = readString(record, 'precision').toLowerCase();
   const hardware = readString(record, 'hardware').toLowerCase();
   const framework = readString(record, 'framework').toLowerCase();
+  const disagg = readBoolean(record, 'disagg') ?? false;
   const specMethod = normalizeSpecMethod(readString(record, 'spec_method'));
   const metrics = readMetrics(record);
   const throughput = readMetricNumber(metrics, THROUGHPUT_METRIC_KEYS);
@@ -551,11 +553,16 @@ function benchmarkRecordMatchesConfig(
     sequenceValuesMatch({ scenario, isl, osl }, config) &&
     precision === config.precision.toLowerCase() &&
     hardwareMatches(hardware, config.hardware) &&
-    framework === config.framework.toLowerCase() &&
+    normalizeUpstreamFramework(framework, disagg) === config.framework.toLowerCase() &&
     (isAgenticScenario(config.scenario) || specMethod === normalizeSpecMethod(config.specMethod)) &&
     throughput !== null &&
     hasXMetric
   );
+}
+
+function normalizeUpstreamFramework(framework: string, disagg: boolean): string {
+  const normalized = framework.toLowerCase();
+  return disagg && normalized === 'sglang' ? 'mori-sglang' : normalized;
 }
 
 function filterLatestBenchmarkRecords(records: InferenceXBenchmarkRecord[]): InferenceXBenchmarkRecord[] {
