@@ -550,6 +550,8 @@ select {
   padding: 6px 10px;
   background-color: color-mix(in srgb, var(--background) 92%, var(--accent));
   color: var(--foreground);
+  cursor: pointer;
+  transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
 }
 
 select option {
@@ -564,7 +566,8 @@ select[multiple] {
 }
 
 select:disabled {
-  opacity: 0.68;
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 input:focus,
@@ -643,7 +646,7 @@ p {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .filter-card span {
@@ -655,9 +658,9 @@ p {
 
 .filter-card select {
   width: 100%;
-  min-height: 40px;
+  min-height: 42px;
   font-size: 13px;
-  background: var(--background);
+  font-weight: 500;
 }
 
 .metric-row {
@@ -2614,12 +2617,13 @@ p {
   align-items: center;
   gap: 5px;
   padding: 5px 7px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--background) 86%, transparent);
+  border: 1px solid var(--input);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--card) 60%, var(--accent));
   color: var(--foreground);
   cursor: pointer;
   list-style: none;
+  transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
 }
 
 .line-style-menu summary::-webkit-details-marker {
@@ -2627,11 +2631,19 @@ p {
 }
 
 .line-style-menu summary::after {
-  content: "⌄";
+  content: "";
   grid-column: 3;
-  justify-self: end;
+  justify-self: center;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
   color: var(--muted-foreground);
-  font-size: 11px;
+  transform: translateY(-2px) rotate(45deg);
+}
+
+.line-style-menu[open] summary::after {
+  transform: translateY(2px) rotate(225deg);
 }
 
 .line-style-menu summary > span {
@@ -2654,21 +2666,21 @@ p {
 .line-style-menu-list {
   position: absolute;
   z-index: 80;
-  top: calc(100% + 4px);
+  top: calc(100% + 6px);
   left: 0;
   display: grid;
   width: min(240px, 85vw);
   gap: 2px;
-  padding: 5px;
-  border: 1px solid color-mix(in srgb, var(--border) 62%, transparent);
-  border-radius: 7px;
+  padding: 6px;
+  border: 1px solid var(--input);
+  border-radius: 12px;
   background: var(--popover);
   box-shadow: 0 16px 36px rgb(0 0 0 / 24%);
 }
 
 .line-style-menu-list button {
   display: grid;
-  min-height: 30px;
+  min-height: 34px;
   grid-template-columns: 42px minmax(0, 1fr);
   align-items: center;
   justify-content: initial;
@@ -2680,9 +2692,13 @@ p {
   text-align: left;
 }
 
-.line-style-menu-list button:hover,
+.line-style-menu-list button:hover {
+  background: var(--accent);
+}
+
 .line-style-menu-list button.selected {
-  background: color-mix(in srgb, var(--accent) 70%, transparent);
+  background: var(--brand-soft);
+  color: var(--brand);
 }
 
 .color-controls {
@@ -3177,7 +3193,124 @@ button.primary:not(:disabled):hover {
   background: var(--primary-hover);
 }
 
-:where(button, a, select, input, [tabindex]):focus-visible {
+/* Keep native select semantics, including keyboard and mobile interactions. */
+select:not([multiple]):not([size]) {
+  appearance: none;
+  padding-inline: 12px 36px;
+  border-radius: 9px;
+  background-color: color-mix(in srgb, var(--card) 60%, var(--accent));
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted-foreground) 50%),
+    linear-gradient(135deg, var(--muted-foreground) 50%, transparent 50%);
+  background-position: right 19px center, right 14px center;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+  text-overflow: ellipsis;
+}
+
+select:not(:disabled):hover,
+.line-style-menu summary:hover {
+  border-color: color-mix(in srgb, var(--brand) 50%, var(--input));
+  background-color: var(--accent);
+}
+
+select:not(:disabled):focus-visible,
+.line-style-menu summary:focus-visible,
+.line-style-menu[open] summary {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 14%, transparent);
+}
+
+/* Browsers without customizable selects retain their native popup menu. */
+@supports (appearance: base-select) {
+  select:not([multiple]):not([size]),
+  select:not([multiple]):not([size])::picker(select) {
+    appearance: base-select;
+  }
+
+  select:not([multiple]):not([size]) {
+    align-items: center;
+    gap: 12px;
+    padding-inline-end: 14px;
+    background-image: none;
+  }
+
+  select:not([multiple]):not([size])::picker-icon {
+    content: "";
+    width: 7px;
+    height: 7px;
+    flex-shrink: 0;
+    margin-block: auto;
+    border-right: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
+    color: var(--muted-foreground);
+    transform: translateY(-2px) rotate(45deg);
+  }
+
+  select:not([multiple]):not([size]):open {
+    border-color: var(--ring);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 14%, transparent);
+  }
+
+  select:not([multiple]):not([size]):open::picker-icon {
+    transform: translateY(2px) rotate(225deg);
+  }
+
+  select:not([multiple]):not([size])::picker(select) {
+    max-inline-size: calc(100vw - 24px);
+    max-block-size: min(360px, 60dvh);
+    margin-block: 6px;
+    padding: 6px;
+    border: 1px solid var(--input);
+    border-radius: 12px;
+    background: var(--popover);
+    color: var(--popover-foreground);
+    box-shadow: 0 12px 32px rgb(0 0 0 / 18%), 0 2px 6px rgb(0 0 0 / 6%);
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+  }
+
+  select:not([multiple]):not([size]) option {
+    min-block-size: 36px;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 1.4;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  select:not([multiple]):not([size]) option:not(:disabled):is(:hover, :focus-visible) {
+    outline: none;
+    background: var(--accent);
+  }
+
+  select:not([multiple]):not([size]) option:checked {
+    background: var(--brand-soft);
+    color: var(--brand);
+    font-weight: 600;
+  }
+
+  select:not([multiple]):not([size]) option::checkmark {
+    color: var(--brand);
+  }
+
+  select:not([multiple]):not([size]) option:disabled {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  select,
+  .line-style-menu summary {
+    transition: none;
+  }
+}
+
+:where(button, a, select, input, summary, [tabindex]):focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 3px;
 }
