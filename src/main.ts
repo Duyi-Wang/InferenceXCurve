@@ -1370,6 +1370,7 @@ app.innerHTML = `
 
 const chartEl = document.querySelector<HTMLElement>('#chart')!;
 const legendEl = document.querySelector<HTMLElement>('#legend')!;
+let legendCollapsed = false;
 const chartSubtitleEl = document.querySelector<HTMLParagraphElement>('#chart-subtitle')!;
 const watermarkMenuEl = document.querySelector<HTMLElement>('#watermark-menu')!;
 const watermarkMenuToggleEl = document.querySelector<HTMLButtonElement>('#watermark-menu-toggle')!;
@@ -3940,7 +3941,11 @@ function renderLegend(): void {
   const precisionKey = renderPrecisionKey();
 
   legendEl.innerHTML = `
-    <div class="legend-container">
+    <div class="legend-container${legendCollapsed ? ' collapsed' : ''}">
+      <button class="legend-collapse-toggle" type="button" aria-expanded="${!legendCollapsed}" aria-label="${legendCollapsed ? 'Expand' : 'Collapse'} curve legend">
+        <span>Curves</span>${renderIcon(legendCollapsed ? 'chevron-down' : 'chevron-up')}
+      </button>
+      <div class="legend-content">
       <div class="legend-search">
         <input id="legend-search" type="text" value="${escapeAttribute(state.search)}" placeholder="Search..." />
         ${state.search ? '<button id="legend-clear" type="button" aria-label="Clear search">×</button>' : ''}
@@ -4026,8 +4031,20 @@ function renderLegend(): void {
           'Drag a label along its curve; cross the curve to switch sides. Double-click to reset.')}
         ${renderSwitch('showOffloadRings', 'Offload Rings', state.showOffloadRings)}
       </div>
+      </div>
     </div>
   `;
+
+  legendEl.querySelector<HTMLButtonElement>('.legend-collapse-toggle')?.addEventListener('click', () => {
+    legendCollapsed = !legendCollapsed;
+    const container = legendEl.querySelector<HTMLElement>('.legend-container');
+    const toggle = legendEl.querySelector<HTMLButtonElement>('.legend-collapse-toggle');
+    container?.classList.toggle('collapsed', legendCollapsed);
+    toggle?.setAttribute('aria-expanded', String(!legendCollapsed));
+    toggle?.setAttribute('aria-label', `${legendCollapsed ? 'Expand' : 'Collapse'} curve legend`);
+    const icon = toggle?.querySelector('svg');
+    if (icon) icon.outerHTML = renderIcon(legendCollapsed ? 'chevron-down' : 'chevron-up');
+  });
 
   legendEl.querySelector('#legend-search')?.addEventListener('input', (event) => {
     state.search = (event.currentTarget as HTMLInputElement).value;

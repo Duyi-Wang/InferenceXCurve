@@ -977,6 +977,47 @@ p {
   font-size: 14px;
 }
 
+.legend-collapse-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 30px;
+  margin: 0 0 6px;
+  padding: 3px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.legend-collapse-toggle svg {
+  width: 14px;
+  height: 14px;
+}
+
+.legend-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.legend-container.collapsed {
+  height: auto;
+}
+
+.legend-container.collapsed .legend-collapse-toggle {
+  margin-bottom: 0;
+}
+
+.legend-container.collapsed .legend-content {
+  display: none;
+}
+
 .legend-search {
   position: relative;
   margin-bottom: 6px;
