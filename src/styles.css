@@ -484,8 +484,9 @@ button.primary {
 .quick-toolbar {
   position: fixed;
   z-index: 120;
-  bottom: 24px;
-  right: 10px;
+  top: 50%;
+  /* Stay beside the centered workspace, including on wide monitors. */
+  right: max(10px, calc((100vw - 1440px) / 2 - 60px));
   display: grid;
   gap: 8px;
   padding: 6px;
@@ -493,6 +494,7 @@ button.primary {
   border-radius: 10px;
   background: var(--popover);
   box-shadow: 0 16px 38px rgb(0 0 0 / 22%);
+  transform: translateY(-50%);
 }
 
 .quick-tool-button {
@@ -3334,11 +3336,7 @@ input[type="checkbox"] {
   }
 
   .quick-toolbar {
-    top: auto;
-    right: 12px;
-    bottom: 12px;
-    grid-auto-flow: column;
-    transform: none;
+    right: 8px;
   }
 
   .container {
