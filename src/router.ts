@@ -10,6 +10,12 @@ if (!app) throw new Error('Missing #app root');
 app.innerHTML = `
   <header class="workspace-header no-export">
     <div class="workspace-toolbar">
+      <a class="workspace-brand" href="#/inferencex" aria-label="InferenceX home">
+        <span class="workspace-brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" fill="none"><path d="M7 23V9m0 14h18" stroke="currentColor" stroke-width="1.5" opacity=".45"/><path d="m10 19 5-7 5 3 5-8" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="25" cy="7" r="2" fill="currentColor"/></svg>
+        </span>
+        <span>Inference<span class="workspace-brand-accent">X</span></span>
+      </a>
       <nav class="workspace-tabs" aria-label="Workspace">
         <a class="workspace-tab" href="#/inferencex" data-workspace="inferencex">InferenceX Curve</a>
         <a class="workspace-tab" href="#/plot-tool" data-workspace="plot-tool">Plot Tool</a>
@@ -39,6 +45,7 @@ function updateThemeToggle(): void {
   const isLight = getTheme() === 'light';
   themeToggle.setAttribute('aria-pressed', String(isLight));
   themeToggle.title = isLight ? 'Switch to dark background' : 'Switch to light background';
+  themeToggle.setAttribute('aria-label', themeToggle.title);
   themeToggleLabel.textContent = isLight ? 'Dark background' : 'Light background';
 }
 

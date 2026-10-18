@@ -170,6 +170,14 @@ export function mountPlotTool(root: HTMLElement): () => void {
 
   root.innerHTML = `
     <main class="container page plot-tool-page">
+      <header class="page-intro no-export">
+        <div>
+          <p class="page-eyebrow">Plot workspace</p>
+          <h1>Find your frontier<span class="heading-period">.</span></h1>
+          <p class="page-description">Turn your data into clear comparisons. Shape, style, and export your curves.</p>
+        </div>
+        <a class="workspace-shortcut" href="#/inferencex">Explore benchmarks <span aria-hidden="true">↗</span></a>
+      </header>
       <section class="filter-card plot-settings-card no-export" aria-label="Plot settings">
         ${renderTextSetting('title', 'Title', state.title)}
         ${renderTextSetting('subtitle', 'Subtitle', state.subtitle)}
@@ -1209,10 +1217,8 @@ function exportPlotPng(
       text { font-family: ${styles.fontFamily || 'sans-serif'}; }
       .chart-root .x-axis .domain, .chart-root .y-axis .domain, .chart-root .tick line { stroke: ${border}; }
       .chart-root .tick text, .x-axis-label, .y-axis-label { fill: ${foreground}; }
-      .goal-direction-glow { fill: ${foreground}; stroke: ${foreground}; stroke-width: 8px; stroke-linejoin: round; opacity: .14; }
-      .goal-direction-arrow, .goal-direction-label { fill: ${foreground}; }
-      .goal-direction-arrow { stroke: none; }
-      .goal-direction-label { font-size: 14px; font-weight: 900; letter-spacing: .08em; paint-order: stroke; stroke: ${background}; stroke-width: 4px; stroke-linejoin: round; }
+      .goal-direction-arrow { fill: ${foreground}; stroke: ${foreground}; stroke-width: 4; stroke-linejoin: round; opacity: .95; }
+      .goal-direction-label { fill: ${muted}; font-size: 10px; font-weight: 700; letter-spacing: .12em; paint-order: stroke; stroke: ${background}; stroke-width: 3px; stroke-linejoin: round; }
       .chart-root .grid line { stroke: ${borderAlt}; }
       .chart-watermark { fill: ${foreground}; opacity: .055; font-weight: 800; }
       .pill-text { fill: #fff; font-size: 11px; font-weight: 700; }

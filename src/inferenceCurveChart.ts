@@ -1026,7 +1026,7 @@ export function renderInferenceCurveChart(
     return;
   }
 
-  const width = Math.max(container.clientWidth, 720);
+  const width = Math.max(container.clientWidth, 480);
   const height = options.height;
   const innerWidth = width - CHART_MARGIN.left - CHART_MARGIN.right;
   const innerHeight = height - CHART_MARGIN.top - CHART_MARGIN.bottom;
@@ -1053,7 +1053,8 @@ export function renderInferenceCurveChart(
     .select(container)
     .append('div')
     .attr('class', 'chart-shell')
-    .style('height', `${height}px`);
+    // Match the SVG aspect ratio on narrow screens instead of letterboxing it.
+    .style('height', `${height * Math.min(1, container.clientWidth / width)}px`);
 
   const tooltip = root.append('div').attr('class', 'chart-tooltip').style('opacity', 0);
   const svg = root
@@ -1344,22 +1345,19 @@ function drawGoalIndicator(
 ): void {
   const xMaximize = xGoal === 'maximize';
   const yMaximize = yGoal === 'maximize';
-  const startX = xMaximize ? 10 : 62;
-  const endX = xMaximize ? 62 : 10;
-  const startY = yMaximize ? 48 : 18;
-  const endY = yMaximize ? 8 : 58;
-  const deltaX = endX - startX;
-  const deltaY = endY - startY;
-  const length = Math.hypot(deltaX, deltaY);
-  const unitX = deltaX / length;
-  const unitY = deltaY / length;
+  const startX = xMaximize ? 20 : 60;
+  const endX = xMaximize ? 60 : 20;
+  const startY = yMaximize ? 52 : 12;
+  const endY = yMaximize ? 12 : 52;
+  const length = Math.hypot(endX - startX, endY - startY);
+  const unitX = (endX - startX) / length;
+  const unitY = (endY - startY) / length;
   const perpendicularX = -unitY;
   const perpendicularY = unitX;
   const stemHalfWidth = 5;
   const headHalfWidth = 12;
-  const headLength = 19;
-  const headBaseX = endX - unitX * headLength;
-  const headBaseY = endY - unitY * headLength;
+  const headBaseX = endX - unitX * 20;
+  const headBaseY = endY - unitY * 20;
   const arrowPoints: Array<[number, number]> = [
     [startX + perpendicularX * stemHalfWidth, startY + perpendicularY * stemHalfWidth],
     [headBaseX + perpendicularX * stemHalfWidth, headBaseY + perpendicularY * stemHalfWidth],
@@ -1370,20 +1368,14 @@ function drawGoalIndicator(
     [startX - perpendicularX * stemHalfWidth, startY - perpendicularY * stemHalfWidth]
   ];
   const arrowPath = `${arrowPoints
-    .map(([x, y], index) => `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`)
+    .map(([x, y], index) => `${index === 0 ? 'M' : 'L'} ${x} ${y}`)
     .join(' ')} Z`;
-  const labelNormalSign = yMaximize
-    ? Math.sign(perpendicularY) || 1
-    : -(Math.sign(perpendicularY) || 1);
-  const labelX = (startX + endX) / 2 + perpendicularX * labelNormalSign * 19;
-  const labelY = (startY + endY) / 2 + perpendicularY * labelNormalSign * 19;
-  const labelAngle = xMaximize === yMaximize ? -37.6 : 37.6;
   const group = plot
     .append('g')
     .attr('class', 'goal-direction-indicator')
     .attr(
       'transform',
-      `translate(${xMaximize ? Math.max(4, innerWidth - 76) : 4},${yMaximize ? 4 : Math.max(4, innerHeight - 70)})`
+      `translate(${xMaximize ? Math.max(8, innerWidth - 88) : 8},${yMaximize ? 10 : Math.max(10, innerHeight - 92)})`
     )
     .attr('pointer-events', 'none')
     .attr('role', 'img')
@@ -1396,18 +1388,13 @@ function drawGoalIndicator(
   );
   group
     .append('path')
-    .attr('class', 'goal-direction-glow')
-    .attr('d', arrowPath);
-  group
-    .append('path')
     .attr('class', 'goal-direction-arrow')
     .attr('d', arrowPath);
   group
     .append('text')
     .attr('class', 'goal-direction-label')
-    .attr('x', labelX)
-    .attr('y', labelY)
-    .attr('transform', `rotate(${labelAngle} ${labelX} ${labelY})`)
+    .attr('x', 40)
+    .attr('y', 78)
     .attr('text-anchor', 'middle')
     .attr('dominant-baseline', 'middle')
     .text('BETTER');

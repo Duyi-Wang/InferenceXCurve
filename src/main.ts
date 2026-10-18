@@ -1127,7 +1127,15 @@ reconcileActiveSeriesForChart();
 
 app.innerHTML = `
   <main class="container page">
-    <section class="filter-card no-export">
+    <header class="page-intro no-export">
+      <div>
+        <p class="page-eyebrow">Benchmark workspace</p>
+        <h1>Inference performance<span class="heading-period">.</span></h1>
+        <p class="page-description">Explore the trade-offs between throughput, latency, and cost.</p>
+      </div>
+      <a class="workspace-shortcut" href="#/plot-tool">Open Plot Tool <span aria-hidden="true">↗</span></a>
+    </header>
+    <section class="filter-card no-export" aria-label="Benchmark filters">
       <label>
         <span>Model</span>
         <select id="model-filter"></select>
@@ -8454,10 +8462,8 @@ function buildExportStyle(palette: ExportPalette): string {
       .chart-root .grid .plot-border { stroke: ${palette.border}; }
       .chart-watermark { fill: ${palette.foreground}; font-weight: 800; opacity: 0.055; user-select: none; }
       .y-axis-label, .x-axis-label { fill: ${palette.foreground}; font-size: 12px; }
-      .goal-direction-glow { fill: ${palette.foreground}; stroke: ${palette.foreground}; stroke-width: 8px; stroke-linejoin: round; opacity: 0.14; }
-      .goal-direction-arrow, .goal-direction-label { fill: ${palette.foreground}; }
-      .goal-direction-arrow { stroke: none; }
-      .goal-direction-label { font-size: 14px; font-weight: 900; letter-spacing: 0.08em; paint-order: stroke; stroke: ${palette.background}; stroke-width: 4px; stroke-linejoin: round; }
+      .goal-direction-arrow { fill: ${palette.foreground}; stroke: ${palette.foreground}; stroke-width: 4; stroke-linejoin: round; opacity: .95; }
+      .goal-direction-label { fill: ${palette.mutedForeground}; font-size: 10px; font-weight: 700; letter-spacing: .12em; paint-order: stroke; stroke: ${palette.background}; stroke-width: 3px; stroke-linejoin: round; }
       .point-label { paint-order: stroke; stroke: ${palette.background}; stroke-width: 3px; fill: ${palette.foreground}; font-size: 10px; font-weight: 700; }
       .parallelism-label text, .line-label text, .pill-text { fill: #fff; font-size: 9px; font-weight: 700; }
       .line-label text { font-size: 11px; }
