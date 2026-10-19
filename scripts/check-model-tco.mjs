@@ -118,25 +118,40 @@ try {
   assert.equal(tcoSync.shouldRefreshInferenceXTcoPrices(snapshot, now + 23 * 3600000), false);
   assert.equal(tcoSync.shouldRefreshInferenceXTcoPrices(snapshot, now + 24 * 3600000), true);
   assert.equal(tcoSync.shouldRefreshInferenceXTcoPrices(null, now), true);
+  const priceSources = {
+    'packages/constants/src/gpu-keys.ts': registry,
+    'packages/app/src/lib/catalog/constants.ts': policy,
+    'packages/constants/src/tco.ts': attribution
+  };
+  const priceSourceResponse = (url, ref) => {
+    const path = new URL(url).pathname.split(`/${ref}/`)[1];
+    return Object.hasOwn(priceSources, path)
+      ? new Response(priceSources[path])
+      : new Response('', { status: 404 });
+  };
   const priceRequests = [];
   globalThis.fetch = async (url, options) => {
     priceRequests.push(String(url));
     assert.equal(options.credentials, 'omit');
     if (String(url).includes('api.github.com')) return Response.json([{ sha: revision }]);
     assert.ok(String(url).includes(`/${revision}/`), 'All price files use the same commit');
-    return new Response(String(url).endsWith('/gpu-keys.ts') ? registry
-      : String(url).endsWith('/constants.ts') ? policy : attribution);
+    return priceSourceResponse(url, revision);
   };
   assert.equal((await tcoSync.fetchInferenceXTcoPrices()).costs.b200.hyperscaler, 2);
   assert.equal(priceRequests.length, 4);
   globalThis.fetch = async (url) => {
     if (String(url).includes('api.github.com')) return new Response('', { status: 403 });
     assert.ok(String(url).includes('/HEAD/'));
-    return new Response(String(url).endsWith('/gpu-keys.ts') ? registry
-      : String(url).endsWith('/constants.ts') ? policy : attribution);
+    return priceSourceResponse(url, 'HEAD');
   };
   assert.equal((await tcoSync.fetchInferenceXTcoPrices()).costs.b200.hyperscaler, 2,
     'Raw sources work when GitHub API quota is exhausted');
+  globalThis.fetch = async (url) => {
+    if (String(url).includes('api.github.com')) return Response.json([{ sha: revision }]);
+    if (String(url).endsWith('/catalog/constants.ts')) return new Response('', { status: 404 });
+    return priceSourceResponse(url, revision);
+  };
+  await assert.rejects(tcoSync.fetchInferenceXTcoPrices(), /HTTP 404, .*\/catalog\/constants\.ts/);
   globalThis.fetch = async () => new Response('', { status: 403 });
   await assert.rejects(tcoSync.fetchInferenceXTcoPrices(), /HTTP 403/);
   console.log('Model aliases, sync, TCO math, Pareto, price parsing, cache expiry, and price refresh checks passed.');

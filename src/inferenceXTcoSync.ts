@@ -44,7 +44,7 @@ export async function fetchInferenceXTcoPrices(): Promise<InferenceXTcoPriceSnap
   const root = `https://raw.githubusercontent.com/SemiAnalysisAI/InferenceX-app/${revision}`;
   const [registry, policy, attribution] = await Promise.all([
     'packages/constants/src/gpu-keys.ts',
-    'packages/app/src/lib/constants.ts',
+    'packages/app/src/lib/catalog/constants.ts',
     'packages/constants/src/tco.ts'
   ].map(async (path) => (await fetchPriceSource(`${root}/${path}`)).text()));
   return {
@@ -56,7 +56,9 @@ export async function fetchInferenceXTcoPrices(): Promise<InferenceXTcoPriceSnap
 
 async function fetchPriceSource(url: string): Promise<Response> {
   const response = await fetch(url, { signal: AbortSignal.timeout(15000), credentials: 'omit' });
-  if (!response.ok) throw new Error(`Could not fetch upstream prices (HTTP ${response.status}).`);
+  if (!response.ok) {
+    throw new Error(`Could not fetch upstream prices (HTTP ${response.status}, ${new URL(url).pathname}).`);
+  }
   return response;
 }
 
