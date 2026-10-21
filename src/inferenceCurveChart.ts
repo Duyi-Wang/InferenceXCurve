@@ -96,6 +96,8 @@ export interface InferenceCurveLineLabelPosition {
   // Fraction of the rendered curve's arc length, independent of zoom and pan.
   fraction: number;
   side: 'left' | 'right';
+  // Direction around a single point, in radians; ignored for multi-point curves.
+  angle?: number;
 }
 
 interface LegacyLineLabelPosition {
@@ -120,10 +122,10 @@ export function normalizeInferenceCurveLineLabelPositions(value: unknown): Infer
   ][] => {
     if (!position || typeof position !== 'object') return [];
     if ('fraction' in position) {
-      const { fraction, side } = position as { fraction?: unknown; side?: unknown };
+      const { fraction, side, angle } = position as { fraction?: unknown; side?: unknown; angle?: unknown };
       return typeof fraction === 'number' && Number.isFinite(fraction) && fraction >= 0 && fraction <= 1
         && (side === 'left' || side === 'right')
-        ? [[key, { fraction, side }]]
+        ? [[key, { fraction, side, ...(typeof angle === 'number' && Number.isFinite(angle) ? { angle } : {}) }]]
         : [];
     }
     // Old free-floating positions are snapped to their curve when it is drawn.
@@ -262,7 +264,8 @@ interface PillLabel {
 interface LineLabel extends PillLabel {
   anchor: { x: number; y: number };
   side: InferenceCurveLineLabelPosition['side'];
-  path: SVGPathElement;
+  angle?: number;
+  path?: SVGPathElement;
   pathLength: number;
 }
 
@@ -1700,6 +1703,17 @@ function findNearestCurvePoint(
 }
 
 function positionLineLabel(label: LineLabel, bounds: DOMRect): void {
+  if (!label.path) {
+    const angle = label.angle ?? (label.side === 'left' ? Math.PI : 0);
+    const dx = Math.cos(angle);
+    const dy = Math.sin(angle);
+    // Put the pill outside the point in any direction, accounting for its size.
+    const radius = Math.min(bounds.width / 2 / Math.abs(dx), bounds.height / 2 / Math.abs(dy))
+      + LINE_LABEL_GAP;
+    label.x = label.anchor.x + dx * radius - bounds.x - bounds.width / 2;
+    label.y = label.anchor.y + dy * radius - bounds.y - bounds.height / 2;
+    return;
+  }
   label.x = label.side === 'left'
     ? label.anchor.x - LINE_LABEL_GAP - bounds.x - bounds.width
     : label.anchor.x + LINE_LABEL_GAP - bounds.x;
@@ -1729,13 +1743,13 @@ function drawLineLabels(
   const placed: { x: number; y: number }[] = [];
   const labels: LineLabel[] = [];
   const sorted = [...series]
-    .filter((line) => line.roofline.length >= 2)
+    .filter((line) => line.roofline.length >= 1)
     .sort((a, b) => yScale(a.roofline[0]!.y) - yScale(b.roofline[0]!.y));
 
   sorted.forEach((line) => {
     const path = paths.get(line.id);
-    if (!path) return;
-    const pathLength = path.getTotalLength();
+    if (!path && line.roofline.length > 1) return;
+    const pathLength = path?.getTotalLength() ?? 0;
     const candidates = [
       line.roofline[Math.min(1, line.roofline.length - 1)]!,
       line.roofline[Math.floor(line.roofline.length / 2)]!,
@@ -1751,19 +1765,28 @@ function drawLineLabels(
       }) ?? candidates[0]!;
     let anchor = { x: xScale(chosen.x), y: yScale(chosen.y) };
     let side: InferenceCurveLineLabelPosition['side'] = 'right';
+    // Single-point charts can place their only point on the bottom axis.
+    let angle = path ? undefined : -Math.PI / 2;
     const key = positionKey(line.id);
     const position = options.lineLabelPositions[key];
     if (position && 'fraction' in position) {
-      anchor = path.getPointAtLength(position.fraction * pathLength);
+      if (path) anchor = path.getPointAtLength(position.fraction * pathLength);
       side = position.side;
+      angle = position.angle;
     } else if (position) {
       const x = xScale(position.x);
       const y = yScale(position.y);
       if (Number.isFinite(x) && Number.isFinite(y)) {
-        const nearest = findNearestCurvePoint(path, sampleCurvePath(path, pathLength), x, y);
+        const nearest = path
+          ? findNearestCurvePoint(path, sampleCurvePath(path, pathLength), x, y)
+          : { ...anchor, length: 0 };
         anchor = nearest;
         side = x < nearest.x ? 'left' : 'right';
-        options.lineLabelPositions[key] = { fraction: pathLength ? nearest.length / pathLength : 0, side };
+        if (!path) angle = Math.atan2(y - anchor.y, x - anchor.x);
+        options.lineLabelPositions[key] = {
+          fraction: pathLength ? nearest.length / pathLength : 0, side,
+          ...(angle !== undefined ? { angle } : {})
+        };
       } else {
         delete options.lineLabelPositions[key];
       }
@@ -1772,7 +1795,7 @@ function drawLineLabels(
     placed.push(anchor);
     labels.push({
       key: line.id, seriesId: line.id, x: anchor.x, y: anchor.y,
-      label: line.name, color: line.color, anchor, side, path, pathLength
+      label: line.name, color: line.color, anchor, side, angle, path, pathLength
     });
   });
 
@@ -1798,9 +1821,12 @@ function drawLineLabels(
     })
     .call(d3.drag<SVGGElement, LineLabel, LineLabelDragSubject>()
       .subject(function (event, label) {
+        const bounds = this.getBBox();
         return {
-          x: event.x, y: event.y, bounds: this.getBBox(), moved: false,
-          samples: sampleCurvePath(label.path, label.pathLength)
+          x: label.path ? event.x : label.x + bounds.x + bounds.width / 2,
+          y: label.path ? event.y : label.y + bounds.y + bounds.height / 2,
+          bounds, moved: false,
+          samples: label.path ? sampleCurvePath(label.path, label.pathLength) : []
         };
       })
       .clickDistance(3)
@@ -1812,17 +1838,21 @@ function drawLineLabels(
         event.subject.moved = true;
         // Project each movement from the current anchor to avoid a jump when
         // grabbing text away from the curve. Crossing the curve switches sides.
-        const nearest = findNearestCurvePoint(
-          label.path, event.subject.samples, label.anchor.x + event.dx, label.anchor.y + event.dy
-        );
+        const nearest = label.path
+          ? findNearestCurvePoint(
+              label.path, event.subject.samples, label.anchor.x + event.dx, label.anchor.y + event.dy
+            )
+          : { ...label.anchor, length: 0 };
         label.anchor = nearest;
+        if (!label.path) label.angle = Math.atan2(event.y - nearest.y, event.x - nearest.x);
         if (event.x < nearest.x - LINE_LABEL_GAP) label.side = 'left';
         else if (event.x > nearest.x + LINE_LABEL_GAP) label.side = 'right';
         positionLineLabel(label, event.subject.bounds);
         d3.select(this).attr('transform', `translate(${label.x},${label.y})`);
         options.lineLabelPositions[positionKey(label.key)] = {
           fraction: label.pathLength ? nearest.length / label.pathLength : 0,
-          side: label.side
+          side: label.side,
+          ...(label.angle !== undefined ? { angle: label.angle } : {})
         };
       })
       .on('end', function (event) {
@@ -1833,7 +1863,9 @@ function drawLineLabels(
     .selectAll<SVGTitleElement, LineLabel>('title')
     .data((label) => [label])
     .join('title')
-    .text('Drag along the curve; cross it to switch sides. Double-click to reset.');
+    .text((label) => label.path
+      ? 'Drag along the curve; cross it to switch sides. Double-click to reset.'
+      : 'Drag around the point to change the label direction. Double-click to reset.');
   if (migratedPosition) notifyChange();
 }
 
