@@ -96,7 +96,7 @@ export interface InferenceCurveLineLabelPosition {
   // Fraction of the rendered curve's arc length, independent of zoom and pan.
   fraction: number;
   side: 'left' | 'right';
-  // Direction around a single point, in radians; ignored for multi-point curves.
+  // Direction around a single point or curve endpoint, in radians.
   angle?: number;
 }
 
@@ -278,6 +278,8 @@ interface CurvePathSample {
 interface LineLabelDragSubject {
   x: number;
   y: number;
+  anchorOffsetX: number;
+  anchorOffsetY: number;
   bounds: DOMRect;
   moved: boolean;
   samples: CurvePathSample[];
@@ -1703,7 +1705,7 @@ function findNearestCurvePoint(
 }
 
 function positionLineLabel(label: LineLabel, bounds: DOMRect): void {
-  if (!label.path) {
+  if (!label.path || label.angle !== undefined) {
     const angle = label.angle ?? (label.side === 'left' ? Math.PI : 0);
     const dx = Math.cos(angle);
     const dy = Math.sin(angle);
@@ -1772,7 +1774,7 @@ function drawLineLabels(
     if (position && 'fraction' in position) {
       if (path) anchor = path.getPointAtLength(position.fraction * pathLength);
       side = position.side;
-      angle = position.angle;
+      angle = !path || position.fraction === 0 || position.fraction === 1 ? position.angle : undefined;
     } else if (position) {
       const x = xScale(position.x);
       const y = yScale(position.y);
@@ -1820,11 +1822,14 @@ function drawLineLabels(
       drawLineLabels(zoomGroup, series, xScale, yScale, options, setDragging);
     })
     .call(d3.drag<SVGGElement, LineLabel, LineLabelDragSubject>()
-      .subject(function (event, label) {
+      .subject(function (_event, label) {
         const bounds = this.getBBox();
+        const x = label.x + bounds.x + bounds.width / 2;
+        const y = label.y + bounds.y + bounds.height / 2;
         return {
-          x: label.path ? event.x : label.x + bounds.x + bounds.width / 2,
-          y: label.path ? event.y : label.y + bounds.y + bounds.height / 2,
+          x, y,
+          anchorOffsetX: x - label.anchor.x,
+          anchorOffsetY: y - label.anchor.y,
           bounds, moved: false,
           samples: label.path ? sampleCurvePath(label.path, label.pathLength) : []
         };
@@ -1836,15 +1841,19 @@ function drawLineLabels(
       })
       .on('drag', function (event, label) {
         event.subject.moved = true;
-        // Project each movement from the current anchor to avoid a jump when
-        // grabbing text away from the curve. Crossing the curve switches sides.
+        // Preserve the grab offset, but project the total drag displacement so
+        // the anchor can reach an endpoint even when the pointer moves past it.
         const nearest = label.path
           ? findNearestCurvePoint(
-              label.path, event.subject.samples, label.anchor.x + event.dx, label.anchor.y + event.dy
+              label.path, event.subject.samples,
+              event.x - event.subject.anchorOffsetX, event.y - event.subject.anchorOffsetY
             )
           : { ...label.anchor, length: 0 };
         label.anchor = nearest;
-        if (!label.path) label.angle = Math.atan2(event.y - nearest.y, event.x - nearest.x);
+        const atEndpoint = nearest.length === 0 || nearest.length === label.pathLength;
+        label.angle = !label.path || atEndpoint
+          ? Math.atan2(event.y - nearest.y, event.x - nearest.x)
+          : undefined;
         if (event.x < nearest.x - LINE_LABEL_GAP) label.side = 'left';
         else if (event.x > nearest.x + LINE_LABEL_GAP) label.side = 'right';
         positionLineLabel(label, event.subject.bounds);
@@ -1864,7 +1873,7 @@ function drawLineLabels(
     .data((label) => [label])
     .join('title')
     .text((label) => label.path
-      ? 'Drag along the curve; cross it to switch sides. Double-click to reset.'
+      ? 'Drag along the curve; cross it to switch sides, or drag around an endpoint. Double-click to reset.'
       : 'Drag around the point to change the label direction. Double-click to reset.');
   if (migratedPosition) notifyChange();
 }
