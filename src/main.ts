@@ -1309,7 +1309,6 @@ app.innerHTML = `
               </button>
             </div>
           </div>
-          <p id="status" class="status data-header-status" role="status"></p>
         </div>
       </div>
 
@@ -1381,6 +1380,12 @@ app.innerHTML = `
       <div id="series-editor" class="series-editor"></div>
     </section>
   </main>
+  <div id="status-toast" class="status-toast no-export" hidden>
+    <p id="status" role="status" aria-atomic="true"></p>
+    <button id="dismiss-status" class="status-dismiss" type="button" aria-label="Dismiss notification">
+      ${renderIcon('x')}
+    </button>
+  </div>
   <aside class="quick-toolbar no-export" aria-label="Quick actions">
     <button id="quick-render" class="quick-tool-button" type="button" title="Render chart (Ctrl/Cmd+Enter)" aria-label="Render chart">
       ${renderIcon('redraw')}
@@ -1410,6 +1415,8 @@ const metricSwitchEl = document.querySelector<HTMLElement>('#metric-switch')!;
 const chartTitleEl = document.querySelector<HTMLHeadingElement>('#chart-title')!;
 const seriesEditorEl = document.querySelector<HTMLElement>('#series-editor')!;
 const statusEl = document.querySelector<HTMLParagraphElement>('#status')!;
+const statusToastEl = document.querySelector<HTMLDivElement>('#status-toast')!;
+let statusDismissTimer: number | undefined;
 const githubActionUrlEl = document.querySelector<HTMLInputElement>('#github-action-url')!;
 const githubTokenEl = document.querySelector<HTMLInputElement>('#github-token')!;
 const githubTokenRememberEl = document.querySelector<HTMLInputElement>('#github-token-remember')!;
@@ -1428,9 +1435,7 @@ renderFilterControls();
 renderInferenceXSyncPanel();
 renderSeriesEditor();
 renderAll();
-if (initialData.loadedFromStorage) {
-  setStatus('Loaded saved browser data');
-}
+document.querySelector('#dismiss-status')?.addEventListener('click', clearStatus);
 
 document.querySelector('#render-data')?.addEventListener('click', renderDraftData);
 document.querySelector('#quick-render')?.addEventListener('click', renderDraftData);
@@ -8690,16 +8695,25 @@ function downloadBlob(filename: string, content: string, type: string): void {
   URL.revokeObjectURL(url);
 }
 
+function clearStatus(): void {
+  window.clearTimeout(statusDismissTimer);
+  statusDismissTimer = undefined;
+  statusToastEl.hidden = true;
+  statusEl.textContent = '';
+}
+
 function setStatus(message: string, error = false): void {
+  clearStatus();
+  statusToastEl.classList.toggle('error', error);
+  statusToastEl.hidden = !message;
   statusEl.textContent = message;
-  statusEl.classList.toggle('error', error);
-  statusEl.classList.remove('dirty');
+  if (message && !error) {
+    statusDismissTimer = window.setTimeout(clearStatus, 5000);
+  }
 }
 
 function markChartDirty(): void {
-  statusEl.textContent = 'Rendering chart changes...';
-  statusEl.classList.remove('error');
-  statusEl.classList.add('dirty');
+  setStatus('Rendering chart changes...');
   scheduleAutoRender();
 }
 
