@@ -64,6 +64,7 @@ type CsvExportMode = 'all' | 'visible';
 type SeriesField =
   | 'id'
   | 'name'
+  | 'group'
   | 'model'
   | 'islOsl'
   | 'precision'
@@ -103,6 +104,7 @@ interface AppState {
   logY: boolean;
   search: string;
   watermark: string;
+  collapsedEditorGroups: Set<string>;
 }
 
 interface TableColumn {
@@ -114,6 +116,7 @@ interface TableColumn {
 
 interface SeriesDraft {
   id: string;
+  group?: string;
   hwKey?: string;
   name: string;
   model: string;
@@ -187,6 +190,7 @@ interface PersistedAppState {
   logY?: boolean;
   search?: string;
   watermark?: string;
+  collapsedEditorGroups?: string[];
 }
 
 type InferenceXSyncStatus =
@@ -741,6 +745,7 @@ function restorePersistedSeriesDrafts(value: unknown): SeriesDraft[] {
     const restored: SeriesDraft = {
       id: readPersistedText(draft, 'id', `line-${index + 1}`),
       name: readPersistedText(draft, 'name', `Line ${index + 1}`),
+      group: readPersistedText(draft, 'group').trim(),
       model: getInferenceXDisplayModel(readPersistedText(draft, 'model', DEFAULT_MODEL)),
       hwKey: readPersistedText(draft, 'hwKey') || undefined,
       islOsl: readPersistedText(draft, 'islOsl', DEFAULT_ISL_OSL),
@@ -798,6 +803,7 @@ function restorePersistedState(value: unknown): PersistedAppState {
     tcoCostMode: normalizeTcoCostMode(value.tcoCostMode),
     tcoCustomCosts: normalizeTcoCustomCosts(value.tcoCustomCosts),
     latencyPercentile: normalizeLatencyPercentile(value.latencyPercentile),
+    collapsedEditorGroups: readPersistedStringArray(value.collapsedEditorGroups),
     activeSeriesIds: readPersistedStringArray(value.activeSeriesIds),
     activeSeriesIdsByView: readPersistedActiveSeriesByView(value.activeSeriesIdsByView),
     selectedPrecisions: readPersistedStringArray(value.selectedPrecisions),
@@ -847,7 +853,7 @@ function restoreAppState(defaults: AppState, saved: PersistedAppState, series: I
     tcoCustomCosts: saved.tcoCustomCosts ?? defaults.tcoCustomCosts,
     latencyPercentile: saved.latencyPercentile ?? defaults.latencyPercentile,
     activeSeriesIds:
-      activeSeriesIds.length > 0 || series.length === 0
+      saved.activeSeriesIds !== undefined || series.length === 0
         ? new Set(activeSeriesIds)
         : new Set(defaults.activeSeriesIds),
     activeSeriesIdsByView,
@@ -874,6 +880,7 @@ function restoreAppState(defaults: AppState, saved: PersistedAppState, series: I
     highContrast: saved.highContrast ?? defaults.highContrast,
     logY: saved.logY ?? defaults.logY,
     search: saved.search ?? defaults.search,
+    collapsedEditorGroups: new Set(saved.collapsedEditorGroups ?? []),
     watermark: saved.watermark ?? defaults.watermark
   };
 }
@@ -906,6 +913,7 @@ function serializeAppState(): PersistedAppState {
     highContrast: state.highContrast,
     logY: state.logY,
     search: state.search,
+    collapsedEditorGroups: Array.from(state.collapsedEditorGroups),
     watermark: state.watermark
   };
 }
@@ -1129,6 +1137,10 @@ let localStorageWarningShown = false;
 let skipNextBeforeUnloadSave = false;
 let draggedSeriesIndex: number | null = null;
 let seriesDragCollapseFrame: number | null = null;
+let draggedGroupName: string | null = null;
+let editorSelectionMode = false;
+let editorGroupAction: 'create' | 'move' | null = null;
+let editingEditorGroup: string | null = null;
 let pendingActiveSeriesIds = new Set<string>();
 
 sortSeriesDraftsByLayer();
@@ -1377,6 +1389,7 @@ app.innerHTML = `
 
       <div id="merge-preview" class="merge-preview"></div>
 
+      <div id="series-editor-toolbar" class="series-editor-toolbar"></div>
       <div id="series-editor" class="series-editor"></div>
     </section>
   </main>
@@ -1415,6 +1428,9 @@ const latencyPercentileFilterEl = document.querySelector<HTMLSelectElement>('#la
 const metricSwitchEl = document.querySelector<HTMLElement>('#metric-switch')!;
 const chartTitleEl = document.querySelector<HTMLHeadingElement>('#chart-title')!;
 const seriesEditorEl = document.querySelector<HTMLElement>('#series-editor')!;
+const seriesToolbarEl = document.querySelector<HTMLElement>('#series-editor-toolbar')!;
+const selectedGroupDrafts = new Set<SeriesDraft>();
+const collapsedCurveGroups = new Set<string>();
 const statusEl = document.querySelector<HTMLParagraphElement>('#status')!;
 const statusToastEl = document.querySelector<HTMLDivElement>('#status-toast')!;
 let statusDismissTimer: number | undefined;
@@ -1432,6 +1448,8 @@ const inferenceXSyncEl = document.querySelector<HTMLElement>('#inferencex-sync')
 const mergeLinesEl = document.querySelector<HTMLButtonElement>('#merge-lines')!;
 const mergePreviewEl = document.querySelector<HTMLElement>('#merge-preview')!;
 
+attachEditorOutsideDropEvents();
+
 renderFilterControls();
 renderInferenceXSyncPanel();
 renderSeriesEditor();
@@ -1446,6 +1464,8 @@ document.querySelector('#quick-top')?.addEventListener('click', () => {
 
 document.querySelector('#reset-data')?.addEventListener('click', () => {
   clearAutoRenderTimer();
+  editorSelectionMode = false;
+  editingEditorGroup = null;
   currentSeries = structuredClone(exampleSeries);
   seriesDrafts = seriesToDrafts(currentSeries);
   inferenceXSync = createInferenceXSyncState();
@@ -1467,6 +1487,8 @@ document.querySelector('#reset-data')?.addEventListener('click', () => {
 
 document.querySelector('#clear-data')?.addEventListener('click', () => {
   clearAutoRenderTimer();
+  editorSelectionMode = false;
+  editingEditorGroup = null;
   currentSeries = [];
   seriesDrafts = [makeEmptySeriesDraft(0)];
   inferenceXSync.stagedResult = null;
@@ -1548,6 +1570,7 @@ document.querySelector('#download-csv')?.addEventListener('click', () => downloa
 document.querySelector('#download-visible-csv')?.addEventListener('click', () => downloadCsv('visible'));
 document.querySelector('#reset-zoom')?.addEventListener('click', resetInferenceCurveZoom);
 window.addEventListener('resize', () => {
+  updateCurveGroupScrollMargin();
   if (!app.hidden) renderAll();
 });
 window.addEventListener(THEME_CHANGE_EVENT, () => {
@@ -1596,6 +1619,12 @@ function handleDocumentClick(event: MouseEvent): void {
 }
 
 function handleDocumentKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape' && editorGroupAction !== null) {
+    const action = editorGroupAction;
+    editorGroupAction = null;
+    renderSeriesToolbar();
+    seriesToolbarEl.querySelector<HTMLButtonElement>(`[data-group-action="${action}"]`)?.focus({ preventScroll: true });
+  }
   if (event.key !== 'Escape' || watermarkMenuPanelEl.hidden) return;
   setWatermarkPanelOpen(false);
   watermarkMenuToggleEl.focus();
@@ -2470,6 +2499,7 @@ function applyExistingSyncLineStyle(
   existingLine: InferenceCurveSeries | undefined
 ): InferenceCurveSeries {
   const styled: InferenceCurveSeries = { ...line };
+  styled.group = (draft?.group ?? existingLine?.group)?.trim() || undefined;
   const color = draft?.color ?? existingLine?.color ?? '';
   const lineStyle = draft?.lineStyle ?? existingLine?.lineStyle ?? '';
   const marker = draft?.marker ?? String(existingLine?.marker ?? '');
@@ -2981,19 +3011,452 @@ function renderMetricSwitchOptions(): string {
     .join('');
 }
 
+function renderSeriesToolbar(): void {
+  const entries = getFilteredDraftEntries();
+  const visibleDrafts = new Set(entries.map(({ draft }) => draft));
+  selectedGroupDrafts.forEach((draft) => {
+    if (!visibleDrafts.has(draft)) selectedGroupDrafts.delete(draft);
+  });
+  if (!editorSelectionMode || !selectedGroupDrafts.size) editorGroupAction = null;
+  const groupName = seriesToolbarEl.querySelector<HTMLInputElement>('#new-curve-group-name')?.value ?? '';
+  const moveTarget = seriesToolbarEl.querySelector<HTMLSelectElement>('#curve-group-target')?.value ?? '';
+  const groups = uniqueSorted(seriesDrafts.map((draft) => draft.group?.trim() ?? '').filter(Boolean));
+  const count = selectedGroupDrafts.size;
+  seriesToolbarEl.innerHTML = `
+    <datalist id="curve-group-names">${groups.map((group) => `<option value="${escapeAttribute(group)}"></option>`).join('')}</datalist>
+    ${editorSelectionMode ? `
+      <span class="editor-selection-count" role="status">${count} selected</span>
+      <button type="button" class="series-action-button" data-group-action="select-all">${renderIcon('check-square')}<span>Select all</span></button>
+      <button type="button" class="series-action-button" data-group-action="select-none">${renderIcon('x')}<span>Clear</span></button>
+      <button type="button" class="series-action-button" data-group-action="create" aria-expanded="${editorGroupAction === 'create'}" aria-controls="editor-group-action-panel" ${count ? '' : 'disabled'}>${renderIcon('folder-plus')}<span>Create new group</span></button>
+      <button type="button" class="series-action-button" data-group-action="move" aria-expanded="${editorGroupAction === 'move'}" aria-controls="editor-group-action-panel" ${count ? '' : 'disabled'}>${renderIcon('folder-arrow')}<span>Move to</span></button>
+      <button type="button" class="series-action-button" data-group-action="ungroup" ${count ? '' : 'disabled'}>${renderIcon('folder-minus')}<span>Remove from group</span></button>
+      <button type="button" class="series-action-button" data-group-action="merge" ${count >= 2 ? '' : 'disabled'}>${renderIcon('merge')}<span>Merge selected</span></button>
+      <button type="button" class="series-action-button danger" data-group-action="delete" title="Delete the selected curves and all their point data" ${count ? '' : 'disabled'}>${renderIcon('trash')}<span>Delete selected (${count})</span></button>
+      <button type="button" class="series-action-button" data-group-action="done">${renderIcon('check')}<span>Done</span></button>
+    ` : `<button type="button" class="series-action-button editor-select-button" data-group-action="start">${renderIcon('check-square')}<span>Select curves</span></button>`}
+    ${editorGroupAction ? `
+      <form id="editor-group-action-panel" class="editor-group-action-panel" aria-label="${editorGroupAction === 'create' ? 'Create a new group' : 'Move selected curves to a group'}">
+        ${editorGroupAction === 'create' ? `
+          <label><span>New group name</span><input id="new-curve-group-name" type="text" value="${escapeAttribute(groupName)}" placeholder="Enter a new name" autocomplete="off" required /></label>
+        ` : groups.length ? `
+          <label><span>Destination group</span><select id="curve-group-target" required>
+            <option value="" disabled ${!groups.includes(moveTarget) ? 'selected' : ''}>Choose a group</option>
+            ${groups.map((group) => `<option value="${escapeAttribute(group)}" ${moveTarget === group ? 'selected' : ''}>${escapeHtml(group)}</option>`).join('')}
+          </select></label>
+        ` : '<span>No groups yet. Use Create new group first.</span>'}
+        <button type="submit" class="series-action-button" ${editorGroupAction === 'move' && !groups.length ? 'disabled' : ''}>${renderIcon(editorGroupAction === 'create' ? 'folder-plus' : 'folder-arrow')}<span>${editorGroupAction === 'create' ? 'Create group' : 'Move curves'}</span></button>
+        <button type="button" class="series-action-button" data-group-action="cancel">${renderIcon('x')}<span>Cancel</span></button>
+        <p class="editor-group-error" id="editor-group-error" role="alert" hidden></p>
+      </form>` : ''}
+  `;
+  seriesToolbarEl.querySelectorAll<HTMLButtonElement>('[data-group-action]').forEach((button) => {
+    button.addEventListener('click', () => {
+      commitSeriesDom();
+      const action = button.dataset.groupAction;
+      if (action === 'create' || action === 'move' || action === 'cancel') {
+        const previousAction = editorGroupAction;
+        editorGroupAction = action === 'cancel' || editorGroupAction === action ? null : action;
+        renderSeriesToolbar();
+        seriesToolbarEl.querySelector<HTMLElement>('#editor-group-action-panel input, #editor-group-action-panel select')?.focus({ preventScroll: true });
+        if (editorGroupAction === null && previousAction) {
+          seriesToolbarEl.querySelector<HTMLButtonElement>(`[data-group-action="${previousAction}"]`)?.focus({ preventScroll: true });
+        }
+        return;
+      }
+      editorGroupAction = null;
+      if (action === 'merge') {
+        renderSeriesToolbar();
+        openMergePreview();
+        return;
+      }
+      if (action === 'delete') {
+        deleteSelectedCurves();
+        return;
+      }
+      clearMergePreview();
+      if (action === 'start') editorSelectionMode = true;
+      else if (action === 'done') {
+        editorSelectionMode = false;
+        selectedGroupDrafts.clear();
+      } else if (action === 'select-all') entries.forEach(({ draft }) => selectedGroupDrafts.add(draft));
+      else if (action === 'select-none') selectedGroupDrafts.clear();
+      else if (action === 'ungroup') {
+        selectedGroupDrafts.forEach((draft) => { draft.group = ''; });
+        selectedGroupDrafts.clear();
+        editorSelectionMode = false;
+        applyCurveGroupChanges();
+      }
+      renderSeriesEditor();
+    });
+  });
+  const actionPanel = seriesToolbarEl.querySelector<HTMLFormElement>('#editor-group-action-panel');
+  actionPanel?.addEventListener('input', () => {
+    const error = actionPanel.querySelector<HTMLElement>('#editor-group-error');
+    if (error) error.hidden = true;
+  });
+  actionPanel?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const creating = editorGroupAction === 'create';
+    const name = creating
+      ? seriesToolbarEl.querySelector<HTMLInputElement>('#new-curve-group-name')!.value.trim()
+      : seriesToolbarEl.querySelector<HTMLSelectElement>('#curve-group-target')?.value ?? '';
+    const currentGroups = new Set(seriesDrafts.map((draft) => draft.group?.trim()).filter(Boolean));
+    const error = !name ? 'Enter a group name or choose a destination.'
+      : creating && currentGroups.has(name) ? 'This group already exists. Use Move to instead.'
+      : !creating && !currentGroups.has(name) ? 'Choose an existing group.' : '';
+    if (error) {
+      const message = seriesToolbarEl.querySelector<HTMLElement>('#editor-group-error')!;
+      message.textContent = error;
+      message.hidden = false;
+      return;
+    }
+    if (!selectedGroupDrafts.size) return;
+    commitSeriesDom();
+    const movedCount = selectedGroupDrafts.size;
+    selectedGroupDrafts.forEach((draft) => { draft.group = name; });
+    if (creating) state.collapsedEditorGroups.delete(name);
+    selectedGroupDrafts.clear();
+    editorSelectionMode = false;
+    editorGroupAction = null;
+    clearMergePreview();
+    applyCurveGroupChanges();
+    renderSeriesEditor();
+    setStatus(`${creating ? 'Created' : 'Moved curves to'} ${name} (${movedCount} ${movedCount === 1 ? 'curve' : 'curves'})`);
+  });
+  syncCurveGroupSelection();
+}
+
+function syncCurveGroupSelection(): void {
+  seriesEditorEl.classList.toggle('is-group-selecting', editorSelectionMode);
+  seriesToolbarEl.classList.toggle('is-selecting', editorSelectionMode);
+  seriesEditorEl.querySelectorAll<HTMLElement>('[data-series-card]').forEach((card) => {
+    const selected = selectedGroupDrafts.has(seriesDrafts[Number(card.dataset.seriesIndex)]!);
+    card.classList.toggle('group-selected', selected);
+    const checkbox = card.querySelector<HTMLInputElement>('[data-group-select]');
+    if (checkbox) checkbox.checked = selected;
+  });
+  const entries = getFilteredDraftEntries();
+  seriesEditorEl.querySelectorAll<HTMLInputElement>('[data-editor-group-select]').forEach((checkbox) => {
+    const members = entries.filter(({ draft }) => draft.group?.trim() === checkbox.dataset.editorGroupSelect);
+    const selectedCount = members.filter(({ draft }) => selectedGroupDrafts.has(draft)).length;
+    checkbox.checked = members.length > 0 && selectedCount === members.length;
+    checkbox.indeterminate = selectedCount > 0 && selectedCount < members.length;
+  });
+  seriesEditorEl.querySelectorAll<HTMLButtonElement>('[data-editor-group-action="move-selected"]').forEach((button) => {
+    button.hidden = selectedGroupDrafts.size === 0;
+  });
+  seriesEditorEl.querySelectorAll<HTMLElement>('[data-group-selection-count]').forEach((label) => {
+    const count = Array.from(selectedGroupDrafts).filter((draft) => draft.group?.trim() === label.dataset.groupSelectionCount).length;
+    label.textContent = count ? `${count} selected` : '';
+  });
+  const count = selectedGroupDrafts.size;
+  mergeLinesEl.disabled = editorSelectionMode && count < 2;
+  mergeLinesEl.querySelector('span')!.textContent = editorSelectionMode ? `Merge Lines (${count})` : 'Merge Lines';
+  mergeLinesEl.title = editorSelectionMode ? 'Review a merge of the selected curves' : 'Review merge candidates in the current filters';
+  updateCurveGroupScrollMargin();
+}
+
+function deleteSelectedCurves(): void {
+  commitSeriesDom();
+  const removed = seriesDrafts.filter((draft) => selectedGroupDrafts.has(draft));
+  if (!removed.length) return;
+  clearAutoRenderTimer();
+  const removedIds = new Set(removed.map((draft) => draft.id.trim()));
+  seriesDrafts = seriesDrafts.filter((draft) => !selectedGroupDrafts.has(draft));
+  currentSeries = currentSeries.filter((line) => !removedIds.has(line.id));
+  removedIds.forEach((id) => {
+    state.activeSeriesIds.delete(id);
+    pendingActiveSeriesIds.delete(id);
+    state.activeSeriesIdsByView.forEach((ids) => ids.delete(id));
+  });
+  selectedGroupDrafts.clear();
+  editorSelectionMode = false;
+  if (!seriesDrafts.length) seriesDrafts = [makeEmptySeriesDraft(0)];
+  normalizeDraftRenderOrderFromPanelOrder();
+  syncCurrentSeriesOrderFromDrafts();
+  if (currentSeries.length) reconcileFiltersForSeries(currentSeries);
+  else setDefaultFiltersForSeries(currentSeries);
+  reconcileActiveSeriesForChart();
+  clearMergePreview();
+  renderFilterControls();
+  renderSeriesEditor();
+  renderAll();
+  scheduleLocalSave();
+  setStatus(`Deleted ${removed.length} ${removed.length === 1 ? 'curve' : 'curves'}.`);
+}
+
+function updateCurveGroupScrollMargin(): void {
+  const headerHeight = document.querySelector<HTMLElement>('.workspace-header')?.offsetHeight ?? 72;
+  seriesToolbarEl.style.top = `${headerHeight + 8}px`;
+  seriesEditorEl.style.setProperty('--group-scroll-margin', `${headerHeight + seriesToolbarEl.offsetHeight + 24}px`);
+}
+
+function getDraggedDrafts(): SeriesDraft[] {
+  if (draggedGroupName !== null) return seriesDrafts.filter((draft) => draft.group?.trim() === draggedGroupName);
+  const source = draggedSeriesIndex === null ? undefined : seriesDrafts[draggedSeriesIndex];
+  if (!source) return [];
+  return selectedGroupDrafts.has(source) ? Array.from(selectedGroupDrafts) : [source];
+}
+
+function clearOutsideDropIndicators(): void {
+  seriesEditorEl.querySelectorAll<HTMLElement>('[data-editor-outside-drop]').forEach((element) => {
+    clearSeriesDropPosition(element);
+    delete element.dataset.editorOutsideDrop;
+  });
+}
+
+function attachEditorOutsideDropEvents(): void {
+  const project = seriesEditorEl.closest<HTMLElement>('.data-card')!;
+  const findOutsideTarget = (event: DragEvent): { element: HTMLElement; draft: SeriesDraft; position: 'before' | 'after' } | null => {
+    if (!getDraggedDrafts().length || !(event.target instanceof Element)) return null;
+    if (event.target.closest('[data-editor-group], [data-series-card], #series-editor-toolbar, button, input, select, textarea, [contenteditable="true"]')) return null;
+    // The list's gutters, gaps and surrounding padding all accept an ungroup
+    // drop. Controls and the other panels above the editor keep their own use.
+    if (event.clientY < seriesToolbarEl.getBoundingClientRect().bottom) return null;
+    const items = Array.from(seriesEditorEl.querySelectorAll<HTMLElement>(':scope > .series-group, :scope > .series-card'));
+    const next = items.find((element) => {
+      const rect = element.getBoundingClientRect();
+      return event.clientY < rect.top + rect.height / 2;
+    });
+    const element = next ?? items[items.length - 1];
+    if (!element) return null;
+    const draft = element.dataset.editorGroup !== undefined
+      ? seriesDrafts.find((draft) => draft.group?.trim() === element.dataset.editorGroup)
+      : seriesDrafts[Number(element.dataset.seriesIndex)];
+    return draft ? { element, draft, position: next ? 'before' : 'after' } : null;
+  };
+  project.addEventListener('dragover', (event) => {
+    clearOutsideDropIndicators();
+    const target = findOutsideTarget(event);
+    if (!target) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+    target.element.dataset.editorOutsideDrop = 'true';
+    setSeriesDropPosition(target.element, target.position);
+  }, { capture: true });
+  project.addEventListener('dragleave', (event) => {
+    if (!(event.relatedTarget instanceof Node) || !project.contains(event.relatedTarget)) clearOutsideDropIndicators();
+  });
+  project.addEventListener('drop', (event) => {
+    const target = findOutsideTarget(event);
+    if (!target) return;
+    event.preventDefault();
+    commitSeriesDom();
+    finishEditorDrag(moveDraggedDrafts(target.draft, target.position, false, true));
+  });
+}
+
+function getGroupDropMode(event: DragEvent, target: HTMLElement): 'before' | 'after' | 'inside' {
+  const rect = target.getBoundingClientRect();
+  if (draggedGroupName !== null) return event.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
+  const edge = Math.min(14, rect.height / 4);
+  if (event.clientY < rect.top + edge) return 'before';
+  if (event.clientY > rect.bottom - edge) return 'after';
+  return 'inside';
+}
+
+function finishEditorDrag(changed: boolean): void {
+  clearSeriesDragState();
+  if (!changed) return;
+  clearMergePreview();
+  syncCurrentSeriesOrderFromDrafts();
+  applyCurveGroupChanges();
+  renderSeriesEditor();
+  renderAll();
+  setStatus('Curve layout updated');
+}
+
+function attachCurveGroupDropEvents(): void {
+  seriesEditorEl.querySelectorAll<HTMLElement>('[data-group-drop]').forEach((target) => {
+    const group = target.dataset.groupDrop!;
+    const section = target.closest<HTMLElement>('[data-editor-group]');
+    target.addEventListener('dragover', (event) => {
+      const moving = getDraggedDrafts();
+      if (!moving.length || (draggedGroupName !== null && group === draggedGroupName)) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+      target.classList.remove('group-drop-target');
+      if (section) clearSeriesDropPosition(section);
+      const mode = getGroupDropMode(event, target);
+      if (mode === 'inside') target.classList.add('group-drop-target');
+      else if (section) setSeriesDropPosition(section, mode);
+    });
+    target.addEventListener('dragleave', (event) => {
+      if (!(event.relatedTarget instanceof Node) || !target.contains(event.relatedTarget)) {
+        target.classList.remove('group-drop-target');
+        if (section) clearSeriesDropPosition(section);
+      }
+    });
+    target.addEventListener('drop', (event) => {
+      const moving = getDraggedDrafts();
+      if (!moving.length || (draggedGroupName !== null && group === draggedGroupName)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      commitSeriesDom();
+      const mode = getGroupDropMode(event, target);
+      const targetDraft = seriesDrafts.find((draft) => draft.group?.trim() === group);
+      if (!targetDraft) {
+        clearSeriesDragState();
+        return;
+      }
+      const changed = moveDraggedDrafts(targetDraft, mode === 'inside' ? 'after' : mode, mode === 'inside', true);
+      finishEditorDrag(changed);
+    });
+  });
+}
+
+function applyCurveGroupChanges(): void {
+  const groupsById = new Map(seriesDrafts.map((draft, index) => [getDraftSeriesId(draft, index), draft.group?.trim()]));
+  currentSeries.forEach((line) => { line.group = groupsById.get(line.id) || undefined; });
+  renderLegend();
+  scheduleLocalSave();
+}
+
+function renderEditorGroup(group: string, members: { draft: SeriesDraft; index: number }[], cards: string): string {
+  const collapsed = state.collapsedEditorGroups.has(group);
+  const total = seriesDrafts.filter((draft) => draft.group?.trim() === group).length;
+  const count = members.length === total ? `${total} ${total === 1 ? 'curve' : 'curves'}` : `${members.length} of ${total} curves`;
+  const bodyId = `editor-group-body-${members[0]!.index}`;
+  return `
+    <section class="series-group" data-editor-group="${escapeAttribute(group)}">
+      <div class="series-group-head" data-group-drop="${escapeAttribute(group)}" title="Drag a curve to the top or bottom edge to reorder; drop in the middle to join this group">
+        <input type="checkbox" data-editor-group-select="${escapeAttribute(group)}" aria-label="Select all curves in group ${escapeAttribute(group)} within the current filters" title="Select this group's curves within the current filters" />
+        <button type="button" class="series-drag-handle" draggable="true" data-editor-group-drag="${escapeAttribute(group)}" aria-label="Drag group ${escapeAttribute(group)} to reorder" title="Drag the whole group to reorder">${renderIcon('grip-vertical')}</button>
+        ${editingEditorGroup === group ? `
+          <form class="series-group-rename" data-editor-group-rename="${escapeAttribute(group)}">
+            <input type="text" value="${escapeAttribute(group)}" aria-label="New group name" required />
+            <button type="submit" class="series-action-button">${renderIcon('check')}<span>Save</span></button>
+            <button type="button" class="series-action-button" data-editor-group-action="cancel-rename">${renderIcon('x')}<span>Cancel</span></button>
+          </form>` : `
+          <button type="button" class="series-group-toggle" data-editor-group-toggle aria-expanded="${!collapsed}" aria-controls="${bodyId}">
+            ${renderIcon(collapsed ? 'chevron-right' : 'chevron-down')}
+            <strong>${escapeHtml(group)}</strong><span class="series-group-count">${count}</span>
+          </button>`}
+        <span class="series-group-selection" data-group-selection-count="${escapeAttribute(group)}"></span>
+        <button type="button" class="series-action-button" data-editor-group-action="move-selected" ${selectedGroupDrafts.size ? '' : 'hidden'}>${renderIcon('folder-arrow')}<span>Move selected here</span></button>
+        <div class="series-group-actions">
+          <button type="button" class="series-action-button" data-editor-group-action="rename">${renderIcon('pencil')}<span>Rename</span></button>
+          <button type="button" class="series-action-button" data-editor-group-action="dissolve" title="Remove this group from all its curves, including those outside the current filters. Curves and points are kept.">${renderIcon('folder-minus')}<span>Dissolve group</span></button>
+        </div>
+      </div>
+      <div id="${bodyId}" class="series-group-body" ${collapsed ? 'hidden' : ''}>${cards}</div>
+    </section>`;
+}
+
+function syncEditorGroupCollapse(): void {
+  seriesEditorEl.querySelectorAll<HTMLElement>('[data-editor-group]').forEach((section) => {
+    const group = section.dataset.editorGroup!;
+    const temporarilyCollapsed = draggedGroupName !== null || (draggedSeriesIndex !== null && !section.querySelector('.dragging'));
+    const collapsed = state.collapsedEditorGroups.has(group) || temporarilyCollapsed;
+    section.querySelector<HTMLElement>('.series-group-body')!.hidden = collapsed;
+    const toggle = section.querySelector<HTMLButtonElement>('[data-editor-group-toggle]');
+    if (toggle) {
+      toggle.setAttribute('aria-expanded', String(!collapsed));
+      const icon = toggle.querySelector('svg');
+      if (icon) icon.outerHTML = renderIcon(collapsed ? 'chevron-right' : 'chevron-down');
+    }
+  });
+}
+
+function attachEditorGroupEvents(): void {
+  seriesEditorEl.querySelectorAll<HTMLInputElement>('[data-editor-group-select]').forEach((checkbox) => {
+    checkbox.addEventListener('change', () => {
+      commitSeriesDom();
+      getFilteredDraftEntries().forEach(({ draft }) => {
+        if (draft.group?.trim() !== checkbox.dataset.editorGroupSelect) return;
+        if (checkbox.checked) selectedGroupDrafts.add(draft);
+        else selectedGroupDrafts.delete(draft);
+      });
+      clearMergePreview();
+      renderSeriesToolbar();
+    });
+  });
+  seriesEditorEl.querySelectorAll<HTMLButtonElement>('[data-editor-group-toggle]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const section = button.closest<HTMLElement>('[data-editor-group]')!;
+      const group = section.dataset.editorGroup!;
+      if (!state.collapsedEditorGroups.delete(group)) state.collapsedEditorGroups.add(group);
+      syncEditorGroupCollapse();
+      section.querySelectorAll<HTMLTextAreaElement>('textarea[data-series-field="note"]').forEach(autoResizeSeriesNote);
+      scheduleLocalSave();
+    });
+  });
+  seriesEditorEl.querySelectorAll<HTMLButtonElement>('[data-editor-group-action]').forEach((button) => {
+    button.addEventListener('click', () => {
+      commitSeriesDom();
+      const group = button.closest<HTMLElement>('[data-editor-group]')!.dataset.editorGroup!;
+      const action = button.dataset.editorGroupAction;
+      if (action === 'rename') editingEditorGroup = group;
+      else if (action === 'cancel-rename') editingEditorGroup = null;
+      else if (action === 'move-selected') {
+        selectedGroupDrafts.forEach((draft) => { draft.group = group; });
+        selectedGroupDrafts.clear();
+        editorSelectionMode = false;
+        applyCurveGroupChanges();
+      } else if (action === 'dissolve') {
+        seriesDrafts.forEach((draft) => { if (draft.group?.trim() === group) draft.group = ''; });
+        state.collapsedEditorGroups.delete(group);
+        collapsedCurveGroups.delete(group);
+        editingEditorGroup = null;
+        applyCurveGroupChanges();
+      }
+      renderSeriesEditor();
+      if (action === 'rename') seriesEditorEl.querySelector<HTMLInputElement>('[data-editor-group-rename] input')?.focus();
+    });
+  });
+  seriesEditorEl.querySelectorAll<HTMLFormElement>('[data-editor-group-rename]').forEach((form) => {
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const name = form.querySelector('input')!.value.trim();
+      if (!name) {
+        setStatus('Enter a group name.', true);
+        return;
+      }
+      commitSeriesDom();
+      const oldName = form.dataset.editorGroupRename!;
+      const targetExists = seriesDrafts.some((draft) => draft.group?.trim() === name);
+      seriesDrafts.forEach((draft) => { if (draft.group?.trim() === oldName) draft.group = name; });
+      if (oldName !== name) {
+        if (state.collapsedEditorGroups.delete(oldName) && !targetExists) state.collapsedEditorGroups.add(name);
+        if (collapsedCurveGroups.delete(oldName) && !targetExists) collapsedCurveGroups.add(name);
+      }
+      editingEditorGroup = null;
+      applyCurveGroupChanges();
+      renderSeriesEditor();
+    });
+  });
+}
+
 function renderSeriesEditor(): void {
   clearSeriesDragState();
+  renderSeriesToolbar();
   const previewColors = resolveInferenceCurveColors(draftsToPreviewSeries(seriesDrafts), state.highContrast, state.theme);
   const entries = getFilteredDraftEntries();
-  seriesEditorEl.innerHTML =
-    entries.length > 0
-      ? entries
-          .map(({ draft, index }) =>
-            renderSeriesCard(draft, index, previewColors.get(getDraftSeriesId(draft, index)) ?? '')
-          )
-          .join('')
-      : renderEmptySeriesFilter();
+  const groups = new Map<string, typeof entries>();
+  entries.forEach((entry) => {
+    const group = entry.draft.group?.trim();
+    if (!group) return;
+    const members = groups.get(group) ?? [];
+    members.push(entry);
+    groups.set(group, members);
+  });
+  const renderedGroups = new Set<string>();
+  const renderCard = ({ draft, index }: typeof entries[number]): string =>
+    renderSeriesCard(draft, index, previewColors.get(getDraftSeriesId(draft, index)) ?? '');
+  const items = entries.map((entry) => {
+    const group = entry.draft.group?.trim();
+    if (!group) return renderCard(entry);
+    if (renderedGroups.has(group)) return '';
+    renderedGroups.add(group);
+    const members = groups.get(group)!;
+    return renderEditorGroup(group, members, members.map(renderCard).join(''));
+  }).join('');
+  seriesEditorEl.innerHTML = items || renderEmptySeriesFilter();
   attachSeriesEditorEvents();
+  attachEditorGroupEvents();
+  attachCurveGroupDropEvents();
+  syncCurveGroupSelection();
 }
 
 function refreshEditorTheme(): void {
@@ -3021,14 +3484,15 @@ function renderSeriesCard(series: SeriesDraft, seriesIndex: number, autoColor: s
     >
       <div class="series-card-head">
         <div class="series-card-title">
+          <input type="checkbox" data-group-select="${seriesIndex}" aria-label="Select ${escapeAttribute(series.name)} for batch actions" ${selectedGroupDrafts.has(series) ? 'checked' : ''} />
           <button
             class="series-drag-handle"
             type="button"
             draggable="true"
             data-series-drag-handle
             data-series-index="${seriesIndex}"
-            title="Drag to reorder layer"
-            aria-label="Drag to reorder layer"
+            title="Drag to reorder layer or move to a group"
+            aria-label="Drag to reorder layer or move to a group"
           >
             ${renderIcon('grip-vertical')}
           </button>
@@ -3087,6 +3551,7 @@ function renderSeriesCard(series: SeriesDraft, seriesIndex: number, autoColor: s
         ${renderSeriesInput(seriesIndex, 'islOsl', 'ISL / OSL or Agentic Scenario', series.islOsl, true)}
         ${renderSeriesInput(seriesIndex, 'precision', 'Precision', series.precision, true)}
         ${renderSeriesMtpField(seriesIndex, series.mtp)}
+        ${renderSeriesInput(seriesIndex, 'group', 'Group', series.group ?? '')}
         ${renderSeriesInput(seriesIndex, 'title', 'Title', series.title)}
         ${renderLineMarkerField(seriesIndex, series.marker)}
         ${renderLineStyleField(seriesIndex, series.lineStyle)}
@@ -3134,6 +3599,7 @@ function renderSeriesInput(
         data-series-index="${seriesIndex}"
         data-series-field="${field}"
         value="${escapeAttribute(value)}"
+        ${field === 'group' ? 'list="curve-group-names" placeholder="No group"' : ''}
         ${required ? 'required' : ''}
       />
     </label>
@@ -3406,6 +3872,11 @@ function renderPointDataToggle(seriesIndex: number, pointCount: number, collapse
 
 function renderIcon(name: string): string {
   const paths: Record<string, string> = {
+    'check-square': '<rect x="3" y="3" width="18" height="18" rx="3"/><path d="m7 12 3 3 7-7"/>',
+    'folder-plus': '<path d="M20 20H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2Z"/><path d="M12 10v7m-3.5-3.5h7"/>',
+    'folder-arrow': '<path d="M20 20H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2Z"/><path d="M7 14h10m-3-3 3 3-3 3"/>',
+    'folder-minus': '<path d="M20 20H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2Z"/><path d="M8 14h8"/>',
+    pencil: '<path d="m16 3 5 5-12 12-6 1 1-6Z"/><path d="m13 6 5 5"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
     refresh: '<path d="M20 6v5h-5"/><path d="M4 18v-5h5"/><path d="M18.5 9A7 7 0 0 0 6.4 6.6L4 9"/><path d="M5.5 15A7 7 0 0 0 17.6 17.4L20 15"/>',
     play: '<path d="m8 5 11 7-11 7z"/>',
@@ -3532,6 +4003,25 @@ function renderPointShapeOption(
 
 function attachSeriesEditorEvents(): void {
   attachSeriesDragEvents();
+  seriesEditorEl.querySelectorAll<HTMLInputElement>('[data-group-select]').forEach((input) => {
+    input.addEventListener('change', () => {
+      commitSeriesDom();
+      const draft = seriesDrafts[Number(input.dataset.groupSelect)];
+      if (!draft) return;
+      if (input.checked) selectedGroupDrafts.add(draft);
+      else selectedGroupDrafts.delete(draft);
+      clearMergePreview();
+      renderSeriesToolbar();
+      input.closest<HTMLElement>('[data-series-card]')?.scrollIntoView({ behavior: 'instant', block: 'nearest' });
+    });
+  });
+  seriesEditorEl.querySelectorAll<HTMLInputElement>('[data-series-field="group"]').forEach((input) => {
+    input.addEventListener('change', () => {
+      commitSeriesDom();
+      applyCurveGroupChanges();
+      renderSeriesEditor();
+    });
+  });
 
   seriesEditorEl
     .querySelectorAll<HTMLTextAreaElement>('textarea[data-series-field="note"]')
@@ -3750,53 +4240,52 @@ function autoResizeSeriesNote(textarea: HTMLTextAreaElement): void {
 }
 
 function attachSeriesDragEvents(): void {
-  seriesEditorEl.querySelectorAll<HTMLElement>('[data-series-drag-handle]').forEach((handle) => {
+  seriesEditorEl.querySelectorAll<HTMLElement>('[data-series-drag-handle], [data-editor-group-drag]').forEach((handle) => {
     handle.addEventListener('dragstart', (event) => {
       commitSeriesDom();
-      const seriesIndex = Number(handle.dataset.seriesIndex);
-      if (!Number.isInteger(seriesIndex)) return;
-      draggedSeriesIndex = seriesIndex;
-      event.dataTransfer?.setData('text/plain', String(seriesIndex));
+      if (handle.dataset.editorGroupDrag !== undefined) {
+        draggedGroupName = handle.dataset.editorGroupDrag;
+        draggedSeriesIndex = null;
+        handle.closest<HTMLElement>('[data-editor-group]')?.classList.add('dragging');
+      } else {
+        const seriesIndex = Number(handle.dataset.seriesIndex);
+        if (!Number.isInteger(seriesIndex)) return;
+        draggedSeriesIndex = seriesIndex;
+        draggedGroupName = null;
+        handle.closest<HTMLElement>('[data-series-card]')?.classList.add('dragging');
+      }
+      event.dataTransfer?.setData('text/plain', draggedGroupName ?? String(draggedSeriesIndex));
       if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
-      handle.closest<HTMLElement>('[data-series-card]')?.classList.add('dragging');
-      // Let the browser capture the drag image before changing the list layout.
+      // Capture the drag image before collapsing the list.
       seriesDragCollapseFrame = window.requestAnimationFrame(() => {
         seriesDragCollapseFrame = null;
         seriesEditorEl.classList.add('is-reordering');
+        seriesEditorEl.classList.toggle('is-group-dragging', draggedGroupName !== null);
+        syncEditorGroupCollapse();
+        updateCurveGroupScrollMargin();
         handle.scrollIntoView({ behavior: 'instant', block: 'nearest', inline: 'nearest' });
       });
     });
     handle.addEventListener('dragend', clearSeriesDragState);
   });
-
   seriesEditorEl.querySelectorAll<HTMLElement>('[data-series-card]').forEach((card) => {
     card.addEventListener('dragover', (event) => {
-      if (draggedSeriesIndex === null) return;
-      const targetIndex = Number(card.dataset.seriesIndex);
-      if (!Number.isInteger(targetIndex) || targetIndex === draggedSeriesIndex) return;
+      const moving = getDraggedDrafts();
+      const target = seriesDrafts[Number(card.dataset.seriesIndex)];
+      if (!target || !moving.length || moving.includes(target)) return;
       event.preventDefault();
       if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
       setSeriesDropPosition(card, getSeriesDropPosition(event, card));
     });
-
     card.addEventListener('dragleave', (event) => {
-      const related = event.relatedTarget;
-      if (!(related instanceof Node) || !card.contains(related)) clearSeriesDropPosition(card);
+      if (!(event.relatedTarget instanceof Node) || !card.contains(event.relatedTarget)) clearSeriesDropPosition(card);
     });
-
     card.addEventListener('drop', (event) => {
+      const target = seriesDrafts[Number(card.dataset.seriesIndex)];
+      if (!target || !getDraggedDrafts().length) return;
       event.preventDefault();
-      const targetIndex = Number(card.dataset.seriesIndex);
-      const sourceIndex = draggedSeriesIndex ?? Number(event.dataTransfer?.getData('text/plain'));
-      const position = getSeriesDropPosition(event, card);
-      clearSeriesDragState();
-      if (!Number.isInteger(sourceIndex) || !Number.isInteger(targetIndex)) return;
-      if (!moveSeriesDraftInPanelOrder(sourceIndex, targetIndex, position)) return;
-      syncCurrentSeriesOrderFromDrafts();
-      renderSeriesEditor();
-      renderAll();
-      setStatus('Line layer order updated');
-      scheduleLocalSave();
+      const changed = moveDraggedDrafts(target, getSeriesDropPosition(event, card), true, draggedGroupName !== null);
+      finishEditorDrag(changed);
     });
   });
 }
@@ -3816,13 +4305,18 @@ function clearSeriesDropPosition(card: HTMLElement): void {
 }
 
 function clearSeriesDragState(): void {
+  clearOutsideDropIndicators();
   draggedSeriesIndex = null;
+  draggedGroupName = null;
   if (seriesDragCollapseFrame !== null) {
     window.cancelAnimationFrame(seriesDragCollapseFrame);
     seriesDragCollapseFrame = null;
   }
-  seriesEditorEl.classList.remove('is-reordering');
-  seriesEditorEl.querySelectorAll<HTMLElement>('[data-series-card]').forEach((card) => {
+  seriesEditorEl.classList.remove('is-reordering', 'is-group-dragging');
+  syncEditorGroupCollapse();
+  seriesEditorEl.querySelectorAll('.group-drop-target').forEach((target) => target.classList.remove('group-drop-target'));
+  updateCurveGroupScrollMargin();
+  seriesEditorEl.querySelectorAll<HTMLElement>('[data-series-card], [data-editor-group]').forEach((card) => {
     card.classList.remove('dragging', 'drop-before', 'drop-after');
   });
 }
@@ -3945,6 +4439,9 @@ function commitSeriesDom(): void {
 }
 
 function renderLegend(): void {
+  const searchInput = legendEl.querySelector<HTMLInputElement>('#legend-search');
+  const searchFocused = document.activeElement === searchInput;
+  const searchSelection = searchInput?.selectionStart ?? null;
   const previousListScrollTop = legendEl.querySelector<HTMLElement>('.legend-list')?.scrollTop ?? 0;
   const filteredSeries = getFilteredSeriesForChart();
   const colorSeries = getChartColorSourceSeries(filteredSeries);
@@ -3961,13 +4458,66 @@ function renderLegend(): void {
     state.chartYMetric,
     getTcoHourlyCosts()
   );
+  const groupById = new Map(filteredSeries.map((line) => [line.id, line.group?.trim() ?? '']));
   const query = state.search.trim().toLowerCase();
   const visibleItems = prepared.filter(
     (series) =>
       !query ||
+      (groupById.get(series.id) ?? '').toLowerCase().includes(query) ||
       series.name.toLowerCase().includes(query) ||
       (series.title && series.title.toLowerCase().includes(query))
   );
+  const groups = new Map<string, typeof visibleItems>();
+  visibleItems.forEach((series) => {
+    const group = groupById.get(series.id) ?? '';
+    const members = groups.get(group) ?? [];
+    members.push(series);
+    groups.set(group, members);
+  });
+  const hasGroups = filteredSeries.some((line) => line.group?.trim());
+  const renderItems = (items: typeof visibleItems): string => items
+    .map((series) => {
+      const active = state.activeSeriesIds.has(series.id);
+      return `
+        <li class="${active ? '' : 'inactive'}">
+          <label title="${escapeAttribute(series.title ?? series.name)}">
+            <input type="checkbox" data-series="${escapeAttribute(series.id)}" ${active ? 'checked' : ''} />
+            <svg class="legend-line" viewBox="0 0 34 12" aria-hidden="true">
+              <line x1="2" y1="6" x2="32" y2="6" stroke="${escapeAttribute(series.color)}" stroke-width="3" stroke-linecap="round"
+                ${series.lineDasharray ? `stroke-dasharray="${escapeAttribute(series.lineDasharray)}"` : ''}></line>
+            </svg>
+            <span class="legend-text">${escapeHtml(series.name)}</span>
+          </label>
+          <span class="legend-row-actions">
+            <button class="legend-only" type="button" data-series-only="${escapeAttribute(series.id)}" title="Show only this line">Only</button>
+            <button class="legend-locate" type="button" data-series-locate="${escapeAttribute(series.id)}" title="Locate in data panel" aria-label="Locate ${escapeAttribute(series.name)} in data panel">${renderIcon('target')}</button>
+          </span>
+        </li>`;
+    }).join('');
+  const renderedLegendGroups = new Set<string>();
+  const groupedItems = visibleItems.map((series, index) => {
+    const group = groupById.get(series.id) ?? '';
+    if (!group) return renderItems([series]);
+    if (renderedLegendGroups.has(group)) return '';
+    renderedLegendGroups.add(group);
+    const members = groups.get(group)!;
+    const allMembers = filteredSeries.filter((line) => (line.group?.trim() ?? '') === group);
+    const active = allMembers.filter((line) => state.activeSeriesIds.has(line.id)).length;
+    const collapsed = collapsedCurveGroups.has(group) && !query;
+    return `
+      <li class="legend-group">
+        <div class="legend-group-head">
+          <button type="button" class="legend-group-collapse" data-group-collapse="${escapeAttribute(group)}" aria-expanded="${!collapsed}" aria-controls="legend-group-${index}" aria-label="${collapsed ? 'Expand' : 'Collapse'} ${escapeAttribute(group)}">${renderIcon(collapsed ? 'chevron-right' : 'chevron-down')}</button>
+          <label title="Show or hide this group in the current filters">
+            <input type="checkbox" data-group-visible="${escapeAttribute(group)}" data-mixed="${active > 0 && active < allMembers.length}" ${active === allMembers.length ? 'checked' : ''} />
+            <span class="legend-text">${escapeHtml(group)}</span>
+            <span class="legend-group-count">${active}/${allMembers.length}</span>
+          </label>
+          <button type="button" class="legend-only" data-group-only="${escapeAttribute(group)}" title="Show only this group in the current filters">Only</button>
+        </div>
+        <ul id="legend-group-${index}" class="legend-group-items" ${collapsed ? 'hidden' : ''}>${renderItems(members)}</ul>
+      </li>`;
+  }).join('');
   const activeCount = prepared.filter((series) => state.activeSeriesIds.has(series.id)).length;
   const precisionKey = renderPrecisionKey();
 
@@ -3982,45 +4532,7 @@ function renderLegend(): void {
         ${state.search ? '<button id="legend-clear" type="button" aria-label="Clear search">×</button>' : ''}
       </div>
       <ul class="legend-list">
-        ${visibleItems
-          .map((series) => {
-            const active = state.activeSeriesIds.has(series.id);
-            return `
-              <li class="${active ? '' : 'inactive'}">
-                <label title="${escapeAttribute(series.title ?? series.name)}">
-                  <input type="checkbox" data-series="${escapeAttribute(series.id)}" ${active ? 'checked' : ''} />
-                  <svg class="legend-line" viewBox="0 0 34 12" aria-hidden="true">
-                    <line
-                      x1="2"
-                      y1="6"
-                      x2="32"
-                      y2="6"
-                      stroke="${escapeAttribute(series.color)}"
-                      stroke-width="3"
-                      stroke-linecap="round"
-                      ${series.lineDasharray ? `stroke-dasharray="${escapeAttribute(series.lineDasharray)}"` : ''}
-                    ></line>
-                  </svg>
-                  <span class="legend-text">${escapeHtml(series.name)}</span>
-                </label>
-                <span class="legend-row-actions">
-                  <button class="legend-only" type="button" data-series-only="${escapeAttribute(series.id)}" title="Show only this line">
-                    Only
-                  </button>
-                  <button
-                    class="legend-locate"
-                    type="button"
-                    data-series-locate="${escapeAttribute(series.id)}"
-                    title="Locate in data panel"
-                    aria-label="Locate ${escapeAttribute(series.name)} in data panel"
-                  >
-                    ${renderIcon('target')}
-                  </button>
-                </span>
-              </li>
-            `;
-          })
-          .join('')}
+        ${hasGroups ? groupedItems : renderItems(visibleItems)}
       </ul>
       <div class="legend-bottom">
         <div class="legend-options-toolbar">
@@ -4073,6 +4585,38 @@ function renderLegend(): void {
     </div>
   `;
 
+  legendEl.querySelectorAll<HTMLInputElement>('[data-group-visible]').forEach((input) => {
+    input.indeterminate = input.dataset.mixed === 'true';
+    input.addEventListener('change', () => {
+      filteredSeries.forEach((line) => {
+        if ((line.group?.trim() ?? '') !== input.dataset.groupVisible) return;
+        if (input.checked) state.activeSeriesIds.add(line.id);
+        else state.activeSeriesIds.delete(line.id);
+      });
+      saveActiveSeriesForCurrentView();
+      renderAll();
+      scheduleLocalSave();
+    });
+  });
+  legendEl.querySelectorAll<HTMLButtonElement>('[data-group-only]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.activeSeriesIds = new Set(filteredSeries
+        .filter((line) => (line.group?.trim() ?? '') === button.dataset.groupOnly)
+        .map((line) => line.id));
+      saveActiveSeriesForCurrentView();
+      renderAll();
+      scheduleLocalSave();
+    });
+  });
+  legendEl.querySelectorAll<HTMLButtonElement>('[data-group-collapse]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const group = button.dataset.groupCollapse!;
+      if (collapsedCurveGroups.has(group)) collapsedCurveGroups.delete(group);
+      else collapsedCurveGroups.add(group);
+      renderLegend();
+    });
+  });
+
   legendEl.querySelector('#legend-options-toggle')?.addEventListener('click', () => {
     legendOptionsCollapsed = !legendOptionsCollapsed;
     renderLegend();
@@ -4107,10 +4651,8 @@ function renderLegend(): void {
       const id = input.dataset.series!;
       if (input.checked) {
         state.activeSeriesIds.add(id);
-      } else if (state.activeSeriesIds.size > 1) {
-        state.activeSeriesIds.delete(id);
       } else {
-        input.checked = true;
+        state.activeSeriesIds.delete(id);
       }
       saveActiveSeriesForCurrentView();
       renderAll();
@@ -4187,9 +4729,22 @@ function renderLegend(): void {
 
   const nextList = legendEl.querySelector<HTMLElement>('.legend-list');
   if (nextList) nextList.scrollTop = previousListScrollTop;
+  if (searchFocused) {
+    const nextSearch = legendEl.querySelector<HTMLInputElement>('#legend-search');
+    nextSearch?.focus({ preventScroll: true });
+    nextSearch?.setSelectionRange(searchSelection, searchSelection);
+  }
 }
 
 function locateSeriesInEditor(seriesId: string): void {
+  const draft = seriesDrafts.find((draft, index) => getDraftSeriesId(draft, index) === seriesId);
+  if (draft) {
+    commitSeriesDom();
+    editorSelectionMode = false;
+    selectedGroupDrafts.clear();
+    if (draft.group && state.collapsedEditorGroups.delete(draft.group.trim())) scheduleLocalSave();
+    renderSeriesEditor();
+  }
   const card = Array.from(seriesEditorEl.querySelectorAll<HTMLElement>('[data-series-card]')).find(
     (element) => element.dataset.seriesId === seriesId
   );
@@ -4278,25 +4833,53 @@ function normalizeDraftRenderOrderFromPanelOrder(): void {
   });
 }
 
-function moveSeriesDraftInPanelOrder(
-  sourceIndex: number,
-  targetIndex: number,
-  position: 'before' | 'after'
+function moveDraggedDrafts(
+  target: SeriesDraft,
+  position: 'before' | 'after',
+  joinTargetGroup: boolean,
+  wholeTargetGroup: boolean
 ): boolean {
-  if (sourceIndex === targetIndex) return false;
-  const entries = getSortedDraftEntries();
-  const sourcePosition = entries.findIndex((entry) => entry.index === sourceIndex);
-  const targetPosition = entries.findIndex((entry) => entry.index === targetIndex);
-  if (sourcePosition < 0 || targetPosition < 0) return false;
-
-  const [source] = entries.splice(sourcePosition, 1);
-  if (!source) return false;
-  let insertPosition = targetPosition;
-  if (sourcePosition < targetPosition) insertPosition -= 1;
-  if (position === 'after') insertPosition += 1;
-  entries.splice(Math.max(0, Math.min(entries.length, insertPosition)), 0, source);
-
-  seriesDrafts = entries.map((entry) => entry.draft);
+  const moving = new Set(getDraggedDrafts());
+  if (!moving.size || (moving.has(target) && !wholeTargetGroup)) return false;
+  // Use the same contiguous group blocks shown by the editor, including members
+  // outside the current filters, so a whole-group move never splits its layers.
+  const sorted = getSortedDraftEntries().map(({ draft }) => draft);
+  const grouped = new Map<string, SeriesDraft[]>();
+  sorted.forEach((draft) => {
+    const group = draft.group?.trim();
+    if (!group) return;
+    const members = grouped.get(group) ?? [];
+    members.push(draft);
+    grouped.set(group, members);
+  });
+  const emitted = new Set<string>();
+  const ordered = sorted.flatMap((draft) => {
+    const group = draft.group?.trim();
+    if (!group) return [draft];
+    if (emitted.has(group)) return [];
+    emitted.add(group);
+    return grouped.get(group)!;
+  });
+  const moved = ordered.filter((draft) => moving.has(draft));
+  const remaining = ordered.filter((draft) => !moving.has(draft));
+  const targetGroup = target.group?.trim() ?? '';
+  const targets = remaining.filter((draft) => draft === target || (wholeTargetGroup && targetGroup && draft.group?.trim() === targetGroup));
+  const anchor = position === 'before' ? targets[0] : targets[targets.length - 1];
+  let insertPosition: number;
+  if (anchor) {
+    insertPosition = remaining.indexOf(anchor) + (position === 'after' ? 1 : 0);
+  } else {
+    // A batch can already contain every member of the destination group.
+    // Keep its original position while adding the other selected curves.
+    const originalTargets = ordered.filter((draft) => draft === target || (wholeTargetGroup && targetGroup && draft.group?.trim() === targetGroup));
+    const originalAnchor = position === 'before' ? originalTargets[0] : originalTargets[originalTargets.length - 1];
+    if (!originalAnchor) return false;
+    const boundary = ordered.indexOf(originalAnchor) + (position === 'after' ? 1 : 0);
+    insertPosition = ordered.slice(0, boundary).filter((draft) => !moving.has(draft)).length;
+  }
+  if (draggedGroupName === null) moved.forEach((draft) => { draft.group = joinTargetGroup ? targetGroup : ''; });
+  remaining.splice(insertPosition, 0, ...moved);
+  seriesDrafts = remaining;
   normalizeDraftRenderOrderFromPanelOrder();
   return true;
 }
@@ -4352,6 +4935,7 @@ function draftsToPreviewSeries(drafts: SeriesDraft[]): InferenceCurveSeries[] {
     const line: InferenceCurveSeries = {
       id: getDraftSeriesId(draft, index),
       name: draft.name.trim() || `Line ${index + 1}`,
+      group: draft.group?.trim() || undefined,
       hwKey: draft.hwKey,
       model: draft.model.trim() || getDefaultDraftModel(),
       islOsl: draft.islOsl.trim() || getDefaultDraftIslOsl(),
@@ -4387,6 +4971,7 @@ function seriesToDrafts(series: InferenceCurveSeries[]): SeriesDraft[] {
   const drafts = series.map((line, index) => ({
     id: line.id,
     name: line.name,
+    group: line.group ?? '',
     hwKey: line.hwKey,
     model: getSeriesModel(line),
     islOsl: getSeriesIslOsl(line),
@@ -4665,6 +5250,7 @@ function draftsToSeriesInternal(drafts: SeriesDraft[]): InferenceCurveSeries[] {
     const line: InferenceCurveSeries = {
       id: lineId,
       name: lineName,
+      group: draft.group?.trim() || undefined,
       hwKey: draft.hwKey,
       model,
       islOsl,
@@ -5392,6 +5978,7 @@ function createInitialState(series: InferenceCurveSeries[]): AppState {
     highContrast: false,
     logY: false,
     search: '',
+    collapsedEditorGroups: new Set(),
     watermark: DEFAULT_CHART_WATERMARK
   };
 }
@@ -5694,16 +6281,21 @@ function openMergePreview(): void {
   pendingMergeGroups = buildPendingMergeGroups();
   renderMergePreview();
   if (pendingMergeGroups.length === 0) {
-    setStatus('No merge candidates in the current filtered line list.', true);
+    setStatus(editorSelectionMode ? 'Select at least two compatible curves with point data to merge.' : 'No merge candidates in the current filtered line list.', true);
     return;
   }
-  setStatus(`Found ${pendingMergeGroups.length} merge candidate groups. Select the exact lines to merge.`);
+  const includedCount = pendingMergeGroups.reduce((count, group) => count + group.lines.length, 0);
+  const skippedCount = editorSelectionMode ? selectedGroupDrafts.size - includedCount : 0;
+  setStatus(editorSelectionMode
+    ? `Review ${includedCount} selected curves in ${pendingMergeGroups.length} compatible sets.${skippedCount ? ` ${skippedCount} selected curves have no compatible partner or no point data and will be kept.` : ''}`
+    : `Found ${pendingMergeGroups.length} merge candidate groups. Select the exact lines to merge.`);
+  mergePreviewEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function buildPendingMergeGroups(): PendingMergeGroup[] {
   const groups = new Map<string, PendingMergeGroup>();
   getFilteredDraftEntries()
-    .filter(({ draft }) => countPointRows([draft]) > 0)
+    .filter(({ draft }) => (!editorSelectionMode || selectedGroupDrafts.has(draft)) && countPointRows([draft]) > 0)
     .forEach(({ draft, index }) => {
       const key = getMergeGroupKey(draft);
       const group =
@@ -5714,7 +6306,7 @@ function buildPendingMergeGroups(): PendingMergeGroup[] {
           lines: []
         } satisfies PendingMergeGroup);
       group.lines.push({
-        selected: false,
+        selected: editorSelectionMode,
         main: false,
         draftIndex: index,
         draftId: getDraftSeriesId(draft, index)
@@ -5722,7 +6314,9 @@ function buildPendingMergeGroups(): PendingMergeGroup[] {
       groups.set(key, group);
     });
 
-  return Array.from(groups.values()).filter((group) => group.lines.length > 1);
+  const candidates = Array.from(groups.values()).filter((group) => group.lines.length > 1);
+  if (editorSelectionMode) candidates.forEach((group) => { group.lines[0]!.main = true; });
+  return candidates;
 }
 
 function renderMergePreview(): void {
@@ -5853,7 +6447,19 @@ function handleMergePreviewInput(event: Event): void {
     line.selected = true;
   }
 
+  syncSelectionFromMergePreview();
   renderMergePreview();
+}
+
+function syncSelectionFromMergePreview(): void {
+  editorSelectionMode = true;
+  pendingMergeGroups.forEach((group) => group.lines.forEach((line) => {
+    const draft = seriesDrafts[line.draftIndex];
+    if (!draft || getDraftSeriesId(draft, line.draftIndex) !== line.draftId) return;
+    if (line.selected) selectedGroupDrafts.add(draft);
+    else selectedGroupDrafts.delete(draft);
+  }));
+  renderSeriesToolbar();
 }
 
 function handleMergePreviewClick(event: MouseEvent): void {
@@ -5867,6 +6473,7 @@ function handleMergePreviewClick(event: MouseEvent): void {
         line.main = false;
       });
     });
+    syncSelectionFromMergePreview();
     renderMergePreview();
   } else if (action === 'cancel') {
     clearMergePreview();
@@ -5919,6 +6526,8 @@ function mergeSelectedLines(): void {
     reconcileFiltersForSeries(currentSeries);
     reconcileActiveSeriesForChart();
     renderFilterControls();
+    selectedGroupDrafts.clear();
+    editorSelectionMode = false;
     renderSeriesEditor();
     renderAll();
     clearMergePreview();
@@ -6848,6 +7457,7 @@ function readNativeSeries(value: unknown): InferenceCurveSeries[] {
   return series.map((line, index) => ({
     id: String(line.id ?? `imported-line-${index + 1}`),
     name: String(line.name ?? `Imported Line ${index + 1}`),
+    group: asOptionalString(line.group)?.trim() || undefined,
     hwKey: asOptionalString(line.hwKey),
     model: asOptionalString(line.model),
     islOsl: asOptionalString(line.islOsl),
@@ -7262,6 +7872,7 @@ function seriesFromEditorRecords(records: Record<string, unknown>[]): InferenceC
       ({
         id,
         name,
+        group: readMetricString(record, ['Group', 'curve group', 'curve_group']).trim(),
         model: getInferenceXDisplayModel(readMetricString(record, ['model']) || getDefaultDraftModel()),
         hwKey: readMetricString(record, ['hwKey', 'hw_key', 'hw key', 'hardware']) || undefined,
         islOsl: readEditorSequence(record) || getDefaultDraftIslOsl(),
@@ -8218,6 +8829,7 @@ function buildChartCsvRows(mode: CsvExportMode): string[][] {
       'Line Name',
       'Title',
       'Line Note',
+      'Group',
       'Model',
       'Scenario',
       'Precision',
@@ -8291,6 +8903,7 @@ function buildChartCsvRows(mode: CsvExportMode): string[][] {
         line.name,
         line.title ?? '',
         line.note ?? '',
+        line.group ?? '',
         getSeriesModel(line),
         getSeriesIslOsl(line),
         getSeriesPrecision(line),
@@ -8534,6 +9147,7 @@ function getExportLegendItems(): ExportLegendItem[] {
     state.chartYMetric,
     getTcoHourlyCosts()
   );
+  const groupById = new Map(filteredSeries.map((line) => [line.id, line.group?.trim() ?? '']));
   const query = state.search.trim().toLowerCase();
 
   return prepared
@@ -8541,6 +9155,7 @@ function getExportLegendItems(): ExportLegendItem[] {
       (series) =>
         state.activeSeriesIds.has(series.id) &&
         (!query ||
+          (groupById.get(series.id) ?? '').toLowerCase().includes(query) ||
           series.name.toLowerCase().includes(query) ||
           Boolean(series.title?.toLowerCase().includes(query)))
     )

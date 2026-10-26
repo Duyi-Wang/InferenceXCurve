@@ -43,6 +43,7 @@ export interface InferenceCurvePoint {
 export interface InferenceCurveSeries {
   id: string;
   name: string;
+  group?: string;
   hwKey?: string;
   model?: string;
   islOsl?: string;
