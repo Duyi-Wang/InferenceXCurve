@@ -1399,6 +1399,7 @@ app.innerHTML = `
 const chartEl = document.querySelector<HTMLElement>('#chart')!;
 const legendEl = document.querySelector<HTMLElement>('#legend')!;
 let legendCollapsed = false;
+let legendOptionsCollapsed = false;
 const chartSubtitleEl = document.querySelector<HTMLParagraphElement>('#chart-subtitle')!;
 const watermarkMenuEl = document.querySelector<HTMLElement>('#watermark-menu')!;
 const watermarkMenuToggleEl = document.querySelector<HTMLButtonElement>('#watermark-menu-toggle')!;
@@ -4022,6 +4023,14 @@ function renderLegend(): void {
           .join('')}
       </ul>
       <div class="legend-bottom">
+        <button id="legend-options-toggle" class="legend-options-toggle" type="button" aria-expanded="${!legendOptionsCollapsed}" aria-controls="legend-extra-options">
+          <span>${legendOptionsCollapsed ? 'Expand options' : 'Collapse options'}</span>${renderIcon(legendOptionsCollapsed ? 'chevron-right' : 'chevron-down')}
+        </button>
+        ${renderSwitch('showNonOptimalPoints', 'Optimal Only', !state.showNonOptimalPoints)}
+        ${renderSwitch('hidePointLabels', 'Hide Labels', state.hidePointLabels)}
+        ${renderSwitch('showLineLabels', 'Line Labels', state.showLineLabels,
+          'Drag a label along its curve; cross the curve to switch sides. Drag around an endpoint or a single point to change direction. Double-click to reset.')}
+        <div id="legend-extra-options" class="legend-extra-options" ${legendOptionsCollapsed ? 'hidden' : ''}>
         ${
           precisionKey || activeCount < prepared.length
             ? `<div class="legend-line-toolbar">
@@ -4038,7 +4047,6 @@ function renderLegend(): void {
             : ''
         }
         ${renderSwitch('logY', 'Log Scale', state.logY)}
-        ${renderSwitch('showNonOptimalPoints', 'Optimal Only', !state.showNonOptimalPoints)}
         ${renderSwitch('showGoalDirection', 'Better Direction', state.showGoalDirection)}
         ${
           state.scenarioFilter === AGENTIC_SCENARIO
@@ -4050,20 +4058,24 @@ function renderLegend(): void {
               )
             : ''
         }
-        ${renderSwitch('hidePointLabels', 'Hide Labels', state.hidePointLabels)}
         ${renderSwitch('highContrast', 'High Contrast', state.highContrast)}
         ${renderSwitch('showConcurrencyLabels', 'Only Concurrency Labels', state.showConcurrencyLabels)}
         ${renderSwitch('useAdvancedLabels', 'Parallelism Labels', state.useAdvancedLabels,
           'DCP: P = Prefill, D = Decode, ? = not provided. Disaggregated labels list Prefill then Decode.')}
         ${renderSwitch('showGradientLabels', 'Gradient Labels', state.showGradientLabels,
           'Color and label strategies including phase DCP: P = Prefill, D = Decode, ? = not provided.')}
-        ${renderSwitch('showLineLabels', 'Line Labels', state.showLineLabels,
-          'Drag a label along its curve; cross the curve to switch sides. Drag around an endpoint or a single point to change direction. Double-click to reset.')}
         ${renderSwitch('showOffloadRings', 'Offload Rings', state.showOffloadRings)}
+        </div>
       </div>
       </div>
     </div>
   `;
+
+  legendEl.querySelector('#legend-options-toggle')?.addEventListener('click', () => {
+    legendOptionsCollapsed = !legendOptionsCollapsed;
+    renderLegend();
+    legendEl.querySelector<HTMLButtonElement>('#legend-options-toggle')?.focus({ preventScroll: true });
+  });
 
   legendEl.querySelector<HTMLButtonElement>('.legend-collapse-toggle')?.addEventListener('click', () => {
     legendCollapsed = !legendCollapsed;
