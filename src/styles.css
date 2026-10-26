@@ -1298,14 +1298,26 @@ p {
   padding-top: 8px;
 }
 
-.legend-options-toggle {
+.legend-options-toolbar {
   grid-column: 1 / -1;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  width: 100%;
-  min-height: 26px;
+  gap: 8px;
   margin-bottom: 4px;
+}
+
+.legend-options-toolbar .legend-line-action {
+  margin-top: 0;
+  white-space: nowrap;
+}
+
+.legend-options-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 26px;
+  white-space: nowrap;
   padding: 0;
   border: 0;
   background: transparent;

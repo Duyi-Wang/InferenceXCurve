@@ -4023,26 +4023,28 @@ function renderLegend(): void {
           .join('')}
       </ul>
       <div class="legend-bottom">
+        <div class="legend-options-toolbar">
         <button id="legend-options-toggle" class="legend-options-toggle" type="button" aria-expanded="${!legendOptionsCollapsed}" aria-controls="legend-extra-options">
           <span>${legendOptionsCollapsed ? 'Expand options' : 'Collapse options'}</span>${renderIcon(legendOptionsCollapsed ? 'chevron-right' : 'chevron-down')}
         </button>
+        <button
+          id="show-all-lines"
+          class="legend-line-action"
+          type="button"
+          ${activeCount < prepared.length ? '' : 'disabled aria-hidden="true" tabindex="-1"'}
+        >
+          Show all lines
+        </button>
+        </div>
         ${renderSwitch('showNonOptimalPoints', 'Optimal Only', !state.showNonOptimalPoints)}
         ${renderSwitch('hidePointLabels', 'Hide Labels', state.hidePointLabels)}
         ${renderSwitch('showLineLabels', 'Line Labels', state.showLineLabels,
           'Drag a label along its curve; cross the curve to switch sides. Drag around an endpoint or a single point to change direction. Double-click to reset.')}
         <div id="legend-extra-options" class="legend-extra-options" ${legendOptionsCollapsed ? 'hidden' : ''}>
         ${
-          precisionKey || activeCount < prepared.length
+          precisionKey
             ? `<div class="legend-line-toolbar">
                 <div class="legend-line-toolbar-precision">${precisionKey}</div>
-                <button
-                  id="show-all-lines"
-                  class="legend-line-action"
-                  type="button"
-                  ${activeCount < prepared.length ? '' : 'disabled aria-hidden="true" tabindex="-1"'}
-                >
-                  Show all lines
-                </button>
               </div>`
             : ''
         }
