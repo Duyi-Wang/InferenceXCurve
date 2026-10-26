@@ -179,17 +179,29 @@ The `InferenceX Sync` panel can keep chart data aligned with the public
 InferenceX API without editing `src/exampleData.ts`.
 
 On first open, if no browser data exists, the app tries to load the default
-InferenceX sync configuration from the API. If the request fails or no matching
+InferenceX sync configurations from the API. If the request fails or no matching
 rows are returned, it falls back to the bundled `exampleSeries`. On later opens,
 the app checks for updates once and stages the result, but it does not overwrite
 the current chart until you click `Update`.
 
-The default data and single sync config are **DeepSeek-V4-Pro / Agentic Traces /
-FP4 / MI355X / MoRI SGLang**. The bundled fallback contains seven points from
-the September 17, 2026 curve snapshot, including both KV offload branches and
-Agentic latency percentiles. Speculative decoding remains point metadata.
-**Reset All** replaces saved chart data and configs with this default;
-ordinary reloads retain the user's saved workspace.
+The two enabled default sync configs use **DeepSeek-V4-Pro / Agentic Traces /
+FP4**:
+
+- **MI355X / MoRI SGLang** (`mi355x` / `mori-sglang`).
+- **B200 / Dynamo SGLang** (`b200` / `dynamo-sglang`).
+
+The bundled fallback contains eight MI355X points and three B200 points from
+the October 21, 2026 curve snapshots, fetched on October 26, 2026 (Asia/Shanghai).
+It uses the same snapshot selection as live sync and preserves Agentic latency
+percentiles, derived normalized interactivity, offload, and speculative decoding
+metadata. B200 is matched strictly and is not an alias for GB200.
+
+Ordinary reloads retain the user's saved workspace and configs. If an existing
+browser still shows older R1 configs, use **Manage Configs → Reset to Default
+Configs** to replace the config list with these two defaults, then **Check
+Updates → Update** to load their curves. Resetting configs leaves chart data
+intact. **Reset All** replaces both saved chart data and configs with the bundled
+defaults.
 
 For each enabled sync config, the API may return historical rows across many
 dates. Sync mirrors the upstream chart behavior by keeping only the newest

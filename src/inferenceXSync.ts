@@ -155,7 +155,14 @@ interface InferenceXDerivedAgenticMetrics {
 }
 
 export function createDefaultInferenceXSyncConfigs(): InferenceXSyncConfig[] {
-  return [normalizeInferenceXSyncConfig(DEFAULT_SYNC_CONFIG)];
+  return [
+    normalizeInferenceXSyncConfig(DEFAULT_SYNC_CONFIG),
+    normalizeInferenceXSyncConfig({
+      ...DEFAULT_SYNC_CONFIG,
+      hardware: 'b200',
+      framework: 'dynamo-sglang'
+    })
+  ];
 }
 
 export function normalizeInferenceXSyncConfigs(value: unknown): InferenceXSyncConfig[] {

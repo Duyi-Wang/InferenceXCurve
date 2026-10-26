@@ -1250,7 +1250,7 @@ p {
 }
 
 .editor-select-button {
-  margin-left: auto;
+  margin-left: 0;
 }
 
 .series-editor-toolbar button[aria-expanded="true"] {
@@ -1263,12 +1263,6 @@ p {
   border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
   background: color-mix(in srgb, var(--danger) 8%, var(--card));
   color: var(--danger);
-}
-
-@media (max-width: 600px) {
-  .editor-select-button {
-    margin-left: 0;
-  }
 }
 
 .series-editor-toolbar input[type="text"],
