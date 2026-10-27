@@ -2312,6 +2312,62 @@ p {
   line-height: 1.45;
 }
 
+.inferencex-sync-updates {
+  padding: 0;
+  max-height: 380px;
+  overflow: auto;
+}
+
+.inferencex-sync-model + .inferencex-sync-model {
+  border-top: 1px solid var(--border);
+}
+
+.inferencex-sync-model > summary {
+  padding: 10px;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.inferencex-sync-model > summary span {
+  margin-left: 8px;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+
+.inferencex-sync-update-table {
+  margin: 0 10px 10px;
+  overflow-x: auto;
+}
+
+.inferencex-sync-update-table table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.inferencex-sync-update-table caption {
+  padding: 0 10px 6px;
+  text-align: left;
+  color: var(--muted-foreground);
+}
+
+.inferencex-sync-update-table th,
+.inferencex-sync-update-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.inferencex-sync-update-table th,
+.inferencex-sync-update-table small {
+  color: var(--muted-foreground);
+  font-weight: normal;
+}
+
+.inferencex-sync-update-table small {
+  display: block;
+}
+
 .inferencex-sync-manager {
   display: grid;
   gap: 10px;

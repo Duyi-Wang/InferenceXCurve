@@ -1960,17 +1960,48 @@ function renderInferenceXSyncUpdateSummary(items: InferenceXSyncSummaryItem[]): 
   }
   if (inferenceXSync.status !== 'updates-available' || items.length === 0) return '';
 
-  const visible = items
-    .slice(0, 8)
-    .map(
-      (item) =>
-        `${item.name} ${item.precision.toUpperCase()} ${formatInferenceXSummarySequenceLabel(item)}${item.latestDate ? ` (${item.latestDate})` : ''}`
-    );
-  const hiddenCount = Math.max(0, items.length - visible.length);
-  const suffix = hiddenCount > 0 ? `; +${hiddenCount} more` : '';
+  const itemsByModel = new Map<string, InferenceXSyncSummaryItem[]>();
+  for (const item of items) {
+    const group = itemsByModel.get(item.model) ?? [];
+    group.push(item);
+    itemsByModel.set(item.model, group);
+  }
+  const groups = Array.from(itemsByModel)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([model, modelItems]) => `
+      <details class="inferencex-sync-model" ${items.length <= 8 ? 'open' : ''}>
+        <summary>
+          <strong>${escapeHtml(model)}</strong>
+          <span>${modelItems.length} line update${modelItems.length === 1 ? '' : 's'}</span>
+        </summary>
+        <div class="inferencex-sync-update-table" tabindex="0" role="region" aria-label="${escapeHtml(model)} update details">
+          <table>
+            <caption>${escapeHtml(model)} staged updates</caption>
+            <thead>
+              <tr><th scope="col">Hardware / Framework</th><th scope="col">Precision</th><th scope="col">Scenario / ISL/OSL</th><th scope="col">MTP</th><th scope="col">Points</th><th scope="col">Latest date</th></tr>
+            </thead>
+            <tbody>
+              ${modelItems
+                .slice()
+                .sort((a, b) => a.hardware.localeCompare(b.hardware) || a.framework.localeCompare(b.framework) || a.precision.localeCompare(b.precision) || formatInferenceXSummarySequenceLabel(a).localeCompare(formatInferenceXSummarySequenceLabel(b)) || (a.specMethod ?? '').localeCompare(b.specMethod ?? ''))
+                .map((item) => `
+                  <tr>
+                    <td><strong>${escapeHtml(item.hardware.toUpperCase())}</strong><small>${escapeHtml(item.framework)}</small></td>
+                    <td>${escapeHtml(item.precision.toUpperCase())}</td>
+                    <td>${escapeHtml(formatInferenceXSummarySequenceLabel(item))}</td>
+                    <td>${escapeHtml(item.specMethod === undefined ? '—' : item.specMethod === 'mtp' ? 'MTP' : item.specMethod === 'none' ? 'Non-MTP' : item.specMethod)}</td>
+                    <td>${item.pointCount}</td>
+                    <td>${escapeHtml(item.latestDate || '—')}</td>
+                  </tr>
+                `).join('')}
+            </tbody>
+          </table>
+        </div>
+      </details>
+    `).join('');
   return `
-    <div class="inferencex-sync-summary">
-      ${inferenceXSync.availableUpdateCount} line updates staged: ${escapeHtml(visible.join('; '))}${escapeHtml(suffix)}.
+    <div class="inferencex-sync-summary inferencex-sync-updates">
+      ${groups}
     </div>
   `;
 }
@@ -2254,7 +2285,8 @@ function formatInferenceXSyncStatus(): string {
   if (inferenceXSync.status === 'checking') return 'Checking InferenceX for latest benchmark rows...';
   if (inferenceXSync.status === 'updating') return 'Applying staged InferenceX data...';
   if (inferenceXSync.status === 'updates-available') {
-    return `${inferenceXSync.availableUpdateCount} line update${inferenceXSync.availableUpdateCount === 1 ? '' : 's'} available. Click Update to apply.`;
+    const modelCount = new Set(getInferenceXChangedSummaryItems().map((item) => item.model)).size;
+    return `${inferenceXSync.availableUpdateCount} line update${inferenceXSync.availableUpdateCount === 1 ? '' : 's'} available across ${modelCount} model${modelCount === 1 ? '' : 's'}. Review details below, then click Update to apply.`;
   }
   if (inferenceXSync.status === 'up-to-date') return 'No updates available.';
   if (inferenceXSync.status === 'error') return 'Fetch failed. Existing chart data was kept.';
