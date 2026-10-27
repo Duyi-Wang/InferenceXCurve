@@ -4196,13 +4196,13 @@ function attachSeriesEditorEvents(): void {
       const draft = seriesDrafts[seriesIndex];
       if (!draft) return;
 
+      let copiedSeriesId: string | undefined;
       if (action === 'toggle-data') {
         draft.collapsed = !draft.collapsed;
       } else if (action === 'copy-series') {
         const copy = copySeriesDraft(draft);
-        copy.renderOrder = getNextDraftRenderOrder();
-        seriesDrafts.push(copy);
-        queueSeriesActiveByDraft(copy, seriesDrafts.length - 1);
+        insertCopiedDraftsAfter(draft, [copy]);
+        copiedSeriesId = copy.id;
         setStatus(`Copied ${draft.name || `Line ${seriesIndex + 1}`}`);
       } else if (action === 'copy-split-series') {
         const splitDrafts = splitSeriesDraftByPointConfig(draft);
@@ -4210,11 +4210,8 @@ function attachSeriesEditorEvents(): void {
           setStatus(`No point rows to split in ${draft.name || `Line ${seriesIndex + 1}`}.`, true);
           return;
         }
-        placeDraftsOnTop(splitDrafts);
-        splitDrafts.forEach((splitDraft) => {
-          seriesDrafts.push(splitDraft);
-          queueSeriesActiveByDraft(splitDraft, seriesDrafts.length - 1);
-        });
+        insertCopiedDraftsAfter(draft, splitDrafts);
+        copiedSeriesId = splitDrafts[0]!.id;
         setStatus(`Copied and split ${draft.name || `Line ${seriesIndex + 1}`} into ${splitDrafts.length} lines.`);
       } else if (action === 'add-row') {
         draft.points.push(makeEmptyPointRow());
@@ -4235,6 +4232,7 @@ function attachSeriesEditorEvents(): void {
       normalizeDraftRenderOrderFromPanelOrder();
       syncCurrentSeriesOrderFromDrafts();
       renderSeriesEditor();
+      if (copiedSeriesId) locateSeriesInEditor(copiedSeriesId);
       scheduleLocalSave();
       if (action !== 'toggle-data') markChartDirty();
     });
@@ -5543,9 +5541,17 @@ function copySeriesDraft(source: SeriesDraft): SeriesDraft {
   const copy = structuredClone(source);
   copy.id = makeUniqueLineId(`${source.id.trim() || 'line'}-copy`);
   copy.name = `${source.name.trim() || 'Line'} Copy`;
-  copy.renderOrder = getNextDraftRenderOrder();
   copy.collapsed = true;
   return copy;
+}
+
+function insertCopiedDraftsAfter(source: SeriesDraft, copies: SeriesDraft[]): void {
+  // Keep copies beside their source so a group's highest layer stays in place.
+  sortSeriesDraftsByLayer();
+  const insertIndex = seriesDrafts.indexOf(source) + 1;
+  seriesDrafts.splice(insertIndex, 0, ...copies);
+  normalizeDraftRenderOrderFromPanelOrder();
+  copies.forEach((copy, index) => queueSeriesActiveByDraft(copy, insertIndex + index));
 }
 
 function splitSeriesDraftByPointConfig(source: SeriesDraft): SeriesDraft[] {
