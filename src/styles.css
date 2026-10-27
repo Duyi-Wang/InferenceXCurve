@@ -2318,6 +2318,12 @@ p {
   overflow: auto;
 }
 
+.inferencex-sync-summary a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .inferencex-sync-model + .inferencex-sync-model {
   border-top: 1px solid var(--border);
 }

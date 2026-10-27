@@ -1956,7 +1956,7 @@ function renderInferenceXSyncPanel(): void {
 
 function renderInferenceXSyncUpdateSummary(items: InferenceXSyncSummaryItem[]): string {
   if (inferenceXSync.status === 'error' && inferenceXSync.lastError) {
-    return `<div class="inferencex-sync-summary error">${escapeHtml(inferenceXSync.lastError)}</div>`;
+    return `<div class="inferencex-sync-summary error">${renderInferenceXSyncError(inferenceXSync.lastError)}</div>`;
   }
   if (inferenceXSync.status !== 'updates-available' || items.length === 0) return '';
 
@@ -2004,6 +2004,38 @@ function renderInferenceXSyncUpdateSummary(items: InferenceXSyncSummaryItem[]): 
       ${groups}
     </div>
   `;
+}
+
+function renderInferenceXSyncError(message: string): string {
+  if (!message.startsWith('InferenceX sync is blocked by CORS:')) return escapeHtml(message);
+
+  const extensions: Record<string, { chrome: string; edge: string }> = {
+    'Allow CORS': {
+      chrome: 'https://chromewebstore.google.com/detail/allow-cors-access-control/lhobafahddgcelffkeicbaginigeejlf',
+      edge: 'https://microsoftedge.microsoft.com/addons/detail/allow-cors-accesscontro/bhjepjpgngghppolkjdhckmnfphffdag'
+    },
+    'CORS Unblock': {
+      chrome: 'https://chromewebstore.google.com/detail/cors-unblock/lfhmikememgdcahcdlaciloancbhjino',
+      edge: 'https://microsoftedge.microsoft.com/addons/detail/cors-unblock/hkjklmhkbkdhlgnnfbbcihcajofmjgbh'
+    }
+  };
+  const browserNavigator = navigator as Navigator & {
+    userAgentData?: { brands?: Array<{ brand: string }> };
+  };
+  const brands = browserNavigator.userAgentData?.brands ?? [];
+  // Edge also advertises Chrome in its user agent, so detect Edge first.
+  const isEdge = brands.some(({ brand }) => brand === 'Microsoft Edge') || /\bEdg(?:e|A|iOS)?\//u.test(navigator.userAgent);
+  const isChrome = brands.some(({ brand }) => brand === 'Google Chrome') || /\b(?:Chrome|CriOS)\//u.test(navigator.userAgent);
+  const stores: Array<'chrome' | 'edge'> = isEdge ? ['edge'] : isChrome ? ['chrome'] : ['chrome', 'edge'];
+
+  return message.split(/(Allow CORS|CORS Unblock)/u).map((part, index) => {
+    if (index % 2 === 0) return escapeHtml(part);
+    return stores.map((store) => {
+      const storeLabel = store === 'edge' ? 'Edge Add-ons' : 'Chrome Web Store';
+      const label = stores.length > 1 ? `${part} (${storeLabel})` : part;
+      return `<a href="${escapeAttribute(extensions[part][store])}" target="_blank" rel="noopener noreferrer" title="Open in ${storeLabel}">${escapeHtml(label)}</a>`;
+    }).join(' / ');
+  }).join('');
 }
 
 function renderInferenceXSyncManager(): string {
