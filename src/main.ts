@@ -105,6 +105,7 @@ interface AppState {
   search: string;
   watermark: string;
   collapsedEditorGroups: Set<string>;
+  collapsedCurveGroups: Set<string>;
 }
 
 interface TableColumn {
@@ -191,6 +192,7 @@ interface PersistedAppState {
   search?: string;
   watermark?: string;
   collapsedEditorGroups?: string[];
+  collapsedCurveGroups?: string[];
 }
 
 type InferenceXSyncStatus =
@@ -804,6 +806,7 @@ function restorePersistedState(value: unknown): PersistedAppState {
     tcoCustomCosts: normalizeTcoCustomCosts(value.tcoCustomCosts),
     latencyPercentile: normalizeLatencyPercentile(value.latencyPercentile),
     collapsedEditorGroups: readPersistedStringArray(value.collapsedEditorGroups),
+    collapsedCurveGroups: readPersistedStringArray(value.collapsedCurveGroups),
     activeSeriesIds: readPersistedStringArray(value.activeSeriesIds),
     activeSeriesIdsByView: readPersistedActiveSeriesByView(value.activeSeriesIdsByView),
     selectedPrecisions: readPersistedStringArray(value.selectedPrecisions),
@@ -881,6 +884,7 @@ function restoreAppState(defaults: AppState, saved: PersistedAppState, series: I
     logY: saved.logY ?? defaults.logY,
     search: saved.search ?? defaults.search,
     collapsedEditorGroups: new Set(saved.collapsedEditorGroups ?? []),
+    collapsedCurveGroups: new Set(saved.collapsedCurveGroups ?? []),
     watermark: saved.watermark ?? defaults.watermark
   };
 }
@@ -914,6 +918,7 @@ function serializeAppState(): PersistedAppState {
     logY: state.logY,
     search: state.search,
     collapsedEditorGroups: Array.from(state.collapsedEditorGroups),
+    collapsedCurveGroups: Array.from(state.collapsedCurveGroups),
     watermark: state.watermark
   };
 }
@@ -1430,7 +1435,6 @@ const chartTitleEl = document.querySelector<HTMLHeadingElement>('#chart-title')!
 const seriesEditorEl = document.querySelector<HTMLElement>('#series-editor')!;
 const seriesToolbarEl = document.querySelector<HTMLElement>('#series-editor-toolbar')!;
 const selectedGroupDrafts = new Set<SeriesDraft>();
-const collapsedCurveGroups = new Set<string>();
 const statusEl = document.querySelector<HTMLParagraphElement>('#status')!;
 const statusToastEl = document.querySelector<HTMLDivElement>('#status-toast')!;
 let statusDismissTimer: number | undefined;
@@ -3461,7 +3465,7 @@ function attachEditorGroupEvents(): void {
       } else if (action === 'dissolve') {
         seriesDrafts.forEach((draft) => { if (draft.group?.trim() === group) draft.group = ''; });
         state.collapsedEditorGroups.delete(group);
-        collapsedCurveGroups.delete(group);
+        state.collapsedCurveGroups.delete(group);
         editingEditorGroup = null;
         applyCurveGroupChanges();
       }
@@ -3483,7 +3487,7 @@ function attachEditorGroupEvents(): void {
       seriesDrafts.forEach((draft) => { if (draft.group?.trim() === oldName) draft.group = name; });
       if (oldName !== name) {
         if (state.collapsedEditorGroups.delete(oldName) && !targetExists) state.collapsedEditorGroups.add(name);
-        if (collapsedCurveGroups.delete(oldName) && !targetExists) collapsedCurveGroups.add(name);
+        if (state.collapsedCurveGroups.delete(oldName) && !targetExists) state.collapsedCurveGroups.add(name);
       }
       editingEditorGroup = null;
       applyCurveGroupChanges();
@@ -4565,7 +4569,7 @@ function renderLegend(): void {
     const members = groups.get(group)!;
     const allMembers = filteredSeries.filter((line) => (line.group?.trim() ?? '') === group);
     const active = allMembers.filter((line) => state.activeSeriesIds.has(line.id)).length;
-    const collapsed = collapsedCurveGroups.has(group) && !query;
+    const collapsed = state.collapsedCurveGroups.has(group) && !query;
     return `
       <li class="legend-group">
         <div class="legend-group-head">
@@ -4673,9 +4677,10 @@ function renderLegend(): void {
   legendEl.querySelectorAll<HTMLButtonElement>('[data-group-collapse]').forEach((button) => {
     button.addEventListener('click', () => {
       const group = button.dataset.groupCollapse!;
-      if (collapsedCurveGroups.has(group)) collapsedCurveGroups.delete(group);
-      else collapsedCurveGroups.add(group);
+      if (state.collapsedCurveGroups.has(group)) state.collapsedCurveGroups.delete(group);
+      else state.collapsedCurveGroups.add(group);
       renderLegend();
+      scheduleLocalSave();
     });
   });
 
@@ -6049,6 +6054,7 @@ function createInitialState(series: InferenceCurveSeries[]): AppState {
     logY: false,
     search: '',
     collapsedEditorGroups: new Set(),
+    collapsedCurveGroups: new Set(),
     watermark: DEFAULT_CHART_WATERMARK
   };
 }
