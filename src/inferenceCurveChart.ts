@@ -271,6 +271,7 @@ interface LineLabel extends PillLabel {
   path?: SVGPathElement;
   pathLength: number;
   gap: number;
+  samples: CurvePathSample[];
 }
 
 interface CurvePathSample {
@@ -282,11 +283,8 @@ interface CurvePathSample {
 interface LineLabelDragSubject {
   x: number;
   y: number;
-  anchorOffsetX: number;
-  anchorOffsetY: number;
   bounds: DOMRect;
   moved: boolean;
-  samples: CurvePathSample[];
 }
 
 const LINE_LABEL_GAP = 8;
@@ -1676,7 +1674,7 @@ function drawStrategyLabels(
 }
 
 function sampleCurvePath(path: SVGPathElement, length: number): CurvePathSample[] {
-  const count = Math.max(16, Math.min(256, Math.ceil(length / 12)));
+  const count = Math.max(16, Math.ceil(length / 2));
   return Array.from({ length: count + 1 }, (_, index) => {
     const distance = length * index / count;
     const point = path.getPointAtLength(distance);
@@ -1712,15 +1710,38 @@ function findNearestCurvePoint(
   return best;
 }
 
+// Distance from the entire label rectangle to the curve, not to one anchor.
+// Samples are at most two SVG units apart; the extra unit below covers the
+// unsampled arc between them conservatively.
+function lineLabelClearance(label: LineLabel, bounds: DOMRect, x: number, y: number): number {
+  const points = label.samples.length ? label.samples : [label.anchor];
+  let distance = Infinity;
+  for (const point of points) {
+    distance = Math.min(distance, Math.hypot(
+      Math.max(0, Math.abs(point.x - x) - bounds.width / 2),
+      Math.max(0, Math.abs(point.y - y) - bounds.height / 2)
+    ));
+  }
+  return Math.max(0, distance - (label.path ? 1 : 0));
+}
+
 function positionLineLabel(label: LineLabel, bounds: DOMRect): void {
   const angle = label.angle ?? (label.side === 'left' ? Math.PI : 0);
   const dx = Math.cos(angle);
   const dy = Math.sin(angle);
-  // Use identical geometry for curve interiors, endpoints and single points.
-  const radius = Math.min(bounds.width / 2 / Math.abs(dx), bounds.height / 2 / Math.abs(dy))
-    + label.gap;
-  label.x = label.anchor.x + dx * radius - bounds.x - bounds.width / 2;
-  label.y = label.anchor.y + dy * radius - bounds.y - bounds.height / 2;
+  const clearance = (radius: number) => lineLabelClearance(
+    label, bounds, label.anchor.x + dx * radius, label.anchor.y + dy * radius
+  );
+  let low = 0;
+  let high = Math.hypot(bounds.width, bounds.height) / 2 + label.gap;
+  while (clearance(high) < label.gap) high *= 2;
+  for (let iteration = 0; iteration < 20; iteration += 1) {
+    const middle = (low + high) / 2;
+    if (clearance(middle) < label.gap) low = middle;
+    else high = middle;
+  }
+  label.x = label.anchor.x + dx * high - bounds.x - bounds.width / 2;
+  label.y = label.anchor.y + dy * high - bounds.y - bounds.height / 2;
 }
 
 function drawLineLabels(
@@ -1800,6 +1821,7 @@ function drawLineLabels(
     labels.push({
       key: line.id, seriesId: line.id, x: anchor.x, y: anchor.y,
       label: line.name, color: line.color, anchor, side, angle, path, pathLength,
+      samples: path ? sampleCurvePath(path, pathLength) : [],
       gap: (position && 'fraction' in position ? clampLineLabelGap(position.gap ?? LINE_LABEL_GAP) : LINE_LABEL_GAP) * zoomScale
     });
   });
@@ -1831,10 +1853,7 @@ function drawLineLabels(
         const y = label.y + bounds.y + bounds.height / 2;
         return {
           x, y,
-          anchorOffsetX: x - label.anchor.x,
-          anchorOffsetY: y - label.anchor.y,
-          bounds, moved: false,
-          samples: label.path ? sampleCurvePath(label.path, label.pathLength) : []
+          bounds, moved: false
         };
       })
       .clickDistance(3)
@@ -1844,12 +1863,11 @@ function drawLineLabels(
       })
       .on('drag', function (event, label) {
         event.subject.moved = true;
-        // Preserve the grab offset, but project the total drag displacement so
-        // the anchor can reach an endpoint even when the pointer moves past it.
+        // D3 already preserves the pointer's grab offset. Project the requested
+        // center itself; subtracting the initial anchor offset introduces drift.
         const nearest = label.path
           ? findNearestCurvePoint(
-              label.path, event.subject.samples,
-              event.x - event.subject.anchorOffsetX, event.y - event.subject.anchorOffsetY
+              label.path, label.samples, event.x, event.y
             )
           : { ...label.anchor, length: 0 };
         label.anchor = nearest;
@@ -1862,16 +1880,17 @@ function drawLineLabels(
         label.angle ??= label.side === 'left' ? Math.PI : 0;
         if (dx < -LINE_LABEL_GAP) label.side = 'left';
         else if (dx > LINE_LABEL_GAP) label.side = 'right';
-        const { width, height } = event.subject.bounds;
-        // Subtract the pill's extent to measure the visible gap, then store it
-        // before zoom so repeated redraws never accumulate scaling error.
-        const radius = Math.min(
-          width / 2 / Math.abs(Math.cos(label.angle)),
-          height / 2 / Math.abs(Math.sin(label.angle))
-        );
-        const distance = Math.hypot(dx, dy);
-        label.gap = clampLineLabelGap((distance - radius) / zoomScale) * zoomScale;
-        positionLineLabel(label, event.subject.bounds);
+        const clearance = lineLabelClearance(label, event.subject.bounds, event.x, event.y);
+        label.gap = clampLineLabelGap(clearance / zoomScale) * zoomScale;
+        // Follow the pointer through the curve when changing sides. Applying a
+        // minimum gap here would jump a whole pill width across the curve.
+        // Enforce that minimum on release, and only the maximum during dragging.
+        if (clearance <= LINE_LABEL_GAP * 4 * zoomScale) {
+          label.x = event.x - event.subject.bounds.x - event.subject.bounds.width / 2;
+          label.y = event.y - event.subject.bounds.y - event.subject.bounds.height / 2;
+        } else {
+          positionLineLabel(label, event.subject.bounds);
+        }
         d3.select(this).attr('transform', `translate(${label.x},${label.y})`);
         options.lineLabelPositions[positionKey(label.key)] = {
           fraction: label.pathLength ? nearest.length / label.pathLength : 0,
@@ -1880,7 +1899,11 @@ function drawLineLabels(
           ...(label.angle !== undefined ? { angle: label.angle } : {})
         };
       })
-      .on('end', function (event) {
+      .on('end', function (event, label) {
+        if (event.subject.moved) {
+          positionLineLabel(label, event.subject.bounds);
+          d3.select(this).attr('transform', `translate(${label.x},${label.y})`);
+        }
         setDragging(false);
         d3.select(this).classed('dragging', false);
         if (event.subject.moved) notifyChange();
