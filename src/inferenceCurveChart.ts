@@ -99,6 +99,8 @@ export interface InferenceCurveLineLabelPosition {
   side: 'left' | 'right';
   // Direction around a single point or curve endpoint, in radians.
   angle?: number;
+  // Gap in unzoomed SVG units.
+  gap?: number;
 }
 
 interface LegacyLineLabelPosition {
@@ -123,10 +125,10 @@ export function normalizeInferenceCurveLineLabelPositions(value: unknown): Infer
   ][] => {
     if (!position || typeof position !== 'object') return [];
     if ('fraction' in position) {
-      const { fraction, side, angle } = position as { fraction?: unknown; side?: unknown; angle?: unknown };
+      const { fraction, side, angle, gap } = position as { fraction?: unknown; side?: unknown; angle?: unknown; gap?: unknown };
       return typeof fraction === 'number' && Number.isFinite(fraction) && fraction >= 0 && fraction <= 1
         && (side === 'left' || side === 'right')
-        ? [[key, { fraction, side, ...(typeof angle === 'number' && Number.isFinite(angle) ? { angle } : {}) }]]
+        ? [[key, { fraction, side, ...(typeof gap === 'number' && Number.isFinite(gap) ? { gap: clampLineLabelGap(gap) } : {}), ...(typeof angle === 'number' && Number.isFinite(angle) ? { angle } : {}) }]]
         : [];
     }
     // Old free-floating positions are snapped to their curve when it is drawn.
@@ -268,6 +270,7 @@ interface LineLabel extends PillLabel {
   angle?: number;
   path?: SVGPathElement;
   pathLength: number;
+  gap: number;
 }
 
 interface CurvePathSample {
@@ -287,6 +290,10 @@ interface LineLabelDragSubject {
 }
 
 const LINE_LABEL_GAP = 8;
+
+function clampLineLabelGap(gap: number): number {
+  return Math.max(LINE_LABEL_GAP / 2, Math.min(LINE_LABEL_GAP * 4, gap));
+}
 
 type ContinuousScale = d3.ScaleLinear<number, number> | d3.ScaleLogarithmic<number, number>;
 type ShapeKey = 'circle' | 'square' | 'triangle' | 'diamond' | 'star' | 'plus' | 'cross';
@@ -1251,7 +1258,7 @@ export function renderInferenceCurveChart(
     renderAxes(xAxisGroup, yAxisGroup, xs, ys, options);
   };
 
-  const drawData = (xs: ContinuousScale, ys: ContinuousScale) => {
+  const drawData = (xs: ContinuousScale, ys: ContinuousScale, zoomScale = 1) => {
     current.xScale = xs;
     current.yScale = ys;
 
@@ -1282,7 +1289,7 @@ export function renderInferenceCurveChart(
       setHoveredPoint
     );
     drawStrategyLabels(zoomGroup, visibleSeries, xs, ys, strategyColor, options);
-    drawLineLabels(zoomGroup, visibleSeries, xs, ys, options, (dragging) => {
+    drawLineLabels(zoomGroup, visibleSeries, xs, ys, options, zoomScale, (dragging) => {
       draggingLineLabel = dragging;
       if (dragging) {
         clearHoverState();
@@ -1310,7 +1317,7 @@ export function renderInferenceCurveChart(
       const nextX = event.transform.rescaleX(xScale);
       const nextY = event.transform.rescaleY(yScale);
       renderGridAxes(nextX, nextY);
-      drawData(nextX, nextY);
+      drawData(nextX, nextY, event.transform.k);
       hideTooltip(tooltip, rulerGroup);
     });
 
@@ -1712,14 +1719,14 @@ function positionLineLabel(label: LineLabel, bounds: DOMRect): void {
     const dy = Math.sin(angle);
     // Put the pill outside the point in any direction, accounting for its size.
     const radius = Math.min(bounds.width / 2 / Math.abs(dx), bounds.height / 2 / Math.abs(dy))
-      + LINE_LABEL_GAP;
+      + label.gap;
     label.x = label.anchor.x + dx * radius - bounds.x - bounds.width / 2;
     label.y = label.anchor.y + dy * radius - bounds.y - bounds.height / 2;
     return;
   }
   label.x = label.side === 'left'
-    ? label.anchor.x - LINE_LABEL_GAP - bounds.x - bounds.width
-    : label.anchor.x + LINE_LABEL_GAP - bounds.x;
+    ? label.anchor.x - label.gap - bounds.x - bounds.width
+    : label.anchor.x + label.gap - bounds.x;
   label.y = label.anchor.y - bounds.y - bounds.height / 2;
 }
 
@@ -1729,6 +1736,7 @@ function drawLineLabels(
   xScale: ContinuousScale,
   yScale: ContinuousScale,
   options: ResolvedChartOptions,
+  zoomScale: number,
   setDragging: (dragging: boolean) => void
 ): void {
   if (!options.showLineLabels) {
@@ -1798,7 +1806,8 @@ function drawLineLabels(
     placed.push(anchor);
     labels.push({
       key: line.id, seriesId: line.id, x: anchor.x, y: anchor.y,
-      label: line.name, color: line.color, anchor, side, angle, path, pathLength
+      label: line.name, color: line.color, anchor, side, angle, path, pathLength,
+      gap: (position && 'fraction' in position ? clampLineLabelGap(position.gap ?? LINE_LABEL_GAP) : LINE_LABEL_GAP) * zoomScale
     });
   });
 
@@ -1820,7 +1829,7 @@ function drawLineLabels(
       stopChartInteractionEvent(event);
       delete options.lineLabelPositions[positionKey(label.key)];
       notifyChange();
-      drawLineLabels(zoomGroup, series, xScale, yScale, options, setDragging);
+      drawLineLabels(zoomGroup, series, xScale, yScale, options, zoomScale, setDragging);
     })
     .call(d3.drag<SVGGElement, LineLabel, LineLabelDragSubject>()
       .subject(function (_event, label) {
@@ -1857,11 +1866,22 @@ function drawLineLabels(
           : undefined;
         if (event.x < nearest.x - LINE_LABEL_GAP) label.side = 'left';
         else if (event.x > nearest.x + LINE_LABEL_GAP) label.side = 'right';
+        const dx = event.x - nearest.x;
+        const dy = event.y - nearest.y;
+        const { width, height } = event.subject.bounds;
+        // Subtract the pill's extent to measure the visible gap, then store it
+        // before zoom so repeated redraws never accumulate scaling error.
+        const radius = label.angle === undefined
+          ? width / 2
+          : Math.min(width / 2 / Math.abs(Math.cos(label.angle)), height / 2 / Math.abs(Math.sin(label.angle)));
+        const distance = label.angle === undefined ? Math.abs(dx) : Math.hypot(dx, dy);
+        label.gap = clampLineLabelGap((distance - radius) / zoomScale) * zoomScale;
         positionLineLabel(label, event.subject.bounds);
         d3.select(this).attr('transform', `translate(${label.x},${label.y})`);
         options.lineLabelPositions[positionKey(label.key)] = {
           fraction: label.pathLength ? nearest.length / label.pathLength : 0,
           side: label.side,
+          gap: label.gap / zoomScale,
           ...(label.angle !== undefined ? { angle: label.angle } : {})
         };
       })
@@ -1874,8 +1894,8 @@ function drawLineLabels(
     .data((label) => [label])
     .join('title')
     .text((label) => label.path
-      ? 'Drag along the curve; cross it to switch sides, or drag around an endpoint. Double-click to reset.'
-      : 'Drag around the point to change the label direction. Double-click to reset.');
+      ? 'Drag along the curve or nearer/farther (0.5–4× gap); cross it to switch sides, or drag around an endpoint. Double-click to reset.'
+      : 'Drag around the point to change direction, or nearer/farther (0.5–4× gap). Double-click to reset.');
   if (migratedPosition) notifyChange();
 }
 

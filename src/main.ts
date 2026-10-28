@@ -4613,7 +4613,7 @@ function renderLegend(): void {
         ${renderSwitch('showNonOptimalPoints', 'Optimal Only', !state.showNonOptimalPoints)}
         ${renderSwitch('hidePointLabels', 'Hide Labels', state.hidePointLabels)}
         ${renderSwitch('showLineLabels', 'Line Labels', state.showLineLabels,
-          'Drag a label along its curve; cross the curve to switch sides. Drag around an endpoint or a single point to change direction. Double-click to reset.')}
+          'Drag a label along its curve or nearer/farther (0.5–4× gap); cross the curve to switch sides. Drag around an endpoint or a single point to change direction. Double-click to reset.')}
         <div id="legend-extra-options" class="legend-extra-options" ${legendOptionsCollapsed ? 'hidden' : ''}>
         ${
           precisionKey
