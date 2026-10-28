@@ -97,7 +97,7 @@ export interface InferenceCurveLineLabelPosition {
   // Fraction of the rendered curve's arc length, independent of zoom and pan.
   fraction: number;
   side: 'left' | 'right';
-  // Direction around a single point or curve endpoint, in radians.
+  // Direction from the curve anchor to the label center, in radians.
   angle?: number;
   // Gap in unzoomed SVG units.
   gap?: number;
@@ -1713,21 +1713,14 @@ function findNearestCurvePoint(
 }
 
 function positionLineLabel(label: LineLabel, bounds: DOMRect): void {
-  if (!label.path || label.angle !== undefined) {
-    const angle = label.angle ?? (label.side === 'left' ? Math.PI : 0);
-    const dx = Math.cos(angle);
-    const dy = Math.sin(angle);
-    // Put the pill outside the point in any direction, accounting for its size.
-    const radius = Math.min(bounds.width / 2 / Math.abs(dx), bounds.height / 2 / Math.abs(dy))
-      + label.gap;
-    label.x = label.anchor.x + dx * radius - bounds.x - bounds.width / 2;
-    label.y = label.anchor.y + dy * radius - bounds.y - bounds.height / 2;
-    return;
-  }
-  label.x = label.side === 'left'
-    ? label.anchor.x - label.gap - bounds.x - bounds.width
-    : label.anchor.x + label.gap - bounds.x;
-  label.y = label.anchor.y - bounds.y - bounds.height / 2;
+  const angle = label.angle ?? (label.side === 'left' ? Math.PI : 0);
+  const dx = Math.cos(angle);
+  const dy = Math.sin(angle);
+  // Use identical geometry for curve interiors, endpoints and single points.
+  const radius = Math.min(bounds.width / 2 / Math.abs(dx), bounds.height / 2 / Math.abs(dy))
+    + label.gap;
+  label.x = label.anchor.x + dx * radius - bounds.x - bounds.width / 2;
+  label.y = label.anchor.y + dy * radius - bounds.y - bounds.height / 2;
 }
 
 function drawLineLabels(
@@ -1783,7 +1776,7 @@ function drawLineLabels(
     if (position && 'fraction' in position) {
       if (path) anchor = path.getPointAtLength(position.fraction * pathLength);
       side = position.side;
-      angle = !path || position.fraction === 0 || position.fraction === 1 ? position.angle : undefined;
+      angle = position.angle;
     } else if (position) {
       const x = xScale(position.x);
       const y = yScale(position.y);
@@ -1860,21 +1853,23 @@ function drawLineLabels(
             )
           : { ...label.anchor, length: 0 };
         label.anchor = nearest;
-        const atEndpoint = nearest.length === 0 || nearest.length === label.pathLength;
-        label.angle = !label.path || atEndpoint
-          ? Math.atan2(event.y - nearest.y, event.x - nearest.x)
-          : undefined;
-        if (event.x < nearest.x - LINE_LABEL_GAP) label.side = 'left';
-        else if (event.x > nearest.x + LINE_LABEL_GAP) label.side = 'right';
         const dx = event.x - nearest.x;
         const dy = event.y - nearest.y;
+        // Use the same center-to-anchor geometry along the entire curve. A
+        // horizontal-only interior would snap as projection reaches an endpoint.
+        // Keep the previous direction if the center passes through the anchor.
+        if (Math.hypot(dx, dy) > 0.001) label.angle = Math.atan2(dy, dx);
+        label.angle ??= label.side === 'left' ? Math.PI : 0;
+        if (dx < -LINE_LABEL_GAP) label.side = 'left';
+        else if (dx > LINE_LABEL_GAP) label.side = 'right';
         const { width, height } = event.subject.bounds;
         // Subtract the pill's extent to measure the visible gap, then store it
         // before zoom so repeated redraws never accumulate scaling error.
-        const radius = label.angle === undefined
-          ? width / 2
-          : Math.min(width / 2 / Math.abs(Math.cos(label.angle)), height / 2 / Math.abs(Math.sin(label.angle)));
-        const distance = label.angle === undefined ? Math.abs(dx) : Math.hypot(dx, dy);
+        const radius = Math.min(
+          width / 2 / Math.abs(Math.cos(label.angle)),
+          height / 2 / Math.abs(Math.sin(label.angle))
+        );
+        const distance = Math.hypot(dx, dy);
         label.gap = clampLineLabelGap((distance - radius) / zoomScale) * zoomScale;
         positionLineLabel(label, event.subject.bounds);
         d3.select(this).attr('transform', `translate(${label.x},${label.y})`);
