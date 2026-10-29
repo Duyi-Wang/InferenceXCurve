@@ -362,7 +362,8 @@ const DB_MODEL_TO_DISPLAY: Record<string, string> = {
   glm5: 'GLM-5',
   'glm5.1': 'GLM-5',
   minimaxm3: 'MiniMax-M3',
-  dsv4: 'DeepSeek-V4-Pro'
+  dsv4: 'DeepSeek-V4-Pro',
+  dsv41flash: 'DeepSeek-V4.1-Flash'
 };
 
 const MODEL_PREFIX_ALIASES: Record<string, string> = {
@@ -400,7 +401,8 @@ const MODEL_PATH_TO_DB_KEY: Record<string, string> = {
   'minimaxai/minimax-m3': 'minimaxm3',
   'zai-org/glm-5-fp8': 'glm5',
   'amd/glm-5.1-mxfp4': 'glm5.1',
-  'deepseek-ai/deepseek-v4-pro': 'dsv4'
+  'deepseek-ai/deepseek-v4-pro': 'dsv4',
+  'deepseek-ai/deepseek-v4.1-flash': 'dsv41flash'
 };
 
 const MODEL_KEY_PRECISION_SUFFIX = /-(?:fp4|fp8|mxfp4|nvfp4)(?:-.*)?$/iu;

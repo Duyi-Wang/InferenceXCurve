@@ -22,6 +22,7 @@ try {
     assert.equal(sync.makeInferenceXSyncLineId({ ...base, model }), lineId, model);
   }
   assert.equal(sync.getInferenceXDisplayModel('DeepSeek-V4.1-Flash'), 'DeepSeek-V4.1-Flash');
+  assert.equal(sync.getInferenceXDisplayModel('dsv41flash'), 'DeepSeek-V4.1-Flash');
   const configs = sync.normalizeInferenceXSyncConfigs([
     { ...base, enabled: false },
     { ...base, model: 'DeepSeek-V4-Pro-0813', enabled: true }
@@ -48,6 +49,10 @@ try {
   assert.equal(synced.series.length, 1);
   assert.equal(synced.series[0].id, lineId);
   assert.deepEqual(synced.series[0].points.map((point) => point.throughput), [200]);
+  requests.length = 0;
+  await sync.fetchInferenceXSyncSeries([{ ...base, model: 'dsv41flash', enabled: true }]);
+  assert.equal(new URL(requests[0]).searchParams.get('model'), 'DeepSeek-V4.1-Flash',
+    'The benchmarks API rejects availability keys such as dsv41flash');
 
   const costs = Object.fromEntries(Object.entries(chart.INFERENCE_CURVE_TCO_COSTS)
     .map(([hardware, rates]) => [hardware, rates.hyperscaler]));

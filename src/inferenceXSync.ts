@@ -128,7 +128,8 @@ const MODEL_DISPLAY_NAMES: Record<string, string> = {
   glm5: 'GLM-5',
   'glm5.1': 'GLM-5',
   minimaxm3: 'MiniMax-M3',
-  dsv4: 'DeepSeek-V4-Pro'
+  dsv4: 'DeepSeek-V4-Pro',
+  dsv41flash: 'DeepSeek-V4.1-Flash'
 };
 
 const MODEL_API_PARAMS: Record<string, string> = {
