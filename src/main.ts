@@ -98,6 +98,7 @@ interface AppState {
   useAdvancedLabels: boolean;
   showGradientLabels: boolean;
   showLineLabels: boolean;
+  hiddenLabelSeriesIds: Set<string>;
   lineLabelPositions: InferenceCurveLineLabelPositions;
   showGoalDirection: boolean;
   showOffloadRings: boolean;
@@ -185,6 +186,7 @@ interface PersistedAppState {
   useAdvancedLabels?: boolean;
   showGradientLabels?: boolean;
   showLineLabels?: boolean;
+  hiddenLabelSeriesIds?: string[];
   lineLabelPositions?: InferenceCurveLineLabelPositions;
   showGoalDirection?: boolean;
   showOffloadRings?: boolean;
@@ -810,6 +812,7 @@ function restorePersistedState(value: unknown): PersistedAppState {
     useAdvancedLabels: readPersistedBoolean(value.useAdvancedLabels),
     showGradientLabels: readPersistedBoolean(value.showGradientLabels),
     showLineLabels: readPersistedBoolean(value.showLineLabels),
+    hiddenLabelSeriesIds: readPersistedStringArray(value.hiddenLabelSeriesIds),
     lineLabelPositions: normalizeInferenceCurveLineLabelPositions(value.lineLabelPositions),
     showGoalDirection: readPersistedBoolean(value.showGoalDirection),
     showOffloadRings: readPersistedBoolean(value.showOffloadRings),
@@ -865,6 +868,7 @@ function restoreAppState(defaults: AppState, saved: PersistedAppState, series: I
     useAdvancedLabels: saved.useAdvancedLabels ?? defaults.useAdvancedLabels,
     showGradientLabels: saved.showGradientLabels ?? defaults.showGradientLabels,
     showLineLabels: saved.showLineLabels ?? defaults.showLineLabels,
+    hiddenLabelSeriesIds: new Set(saved.hiddenLabelSeriesIds ?? []),
     lineLabelPositions: saved.lineLabelPositions ?? defaults.lineLabelPositions,
     showGoalDirection: saved.showGoalDirection ?? defaults.showGoalDirection,
     showOffloadRings: saved.showOffloadRings ?? defaults.showOffloadRings,
@@ -899,6 +903,7 @@ function serializeAppState(): PersistedAppState {
     useAdvancedLabels: state.useAdvancedLabels,
     showGradientLabels: state.showGradientLabels,
     showLineLabels: state.showLineLabels,
+    hiddenLabelSeriesIds: Array.from(state.hiddenLabelSeriesIds),
     lineLabelPositions: state.lineLabelPositions,
     showGoalDirection: state.showGoalDirection,
     showOffloadRings: state.showOffloadRings,
@@ -1879,6 +1884,7 @@ function getChartOptions(): InferenceCurveChartOptions {
     useAdvancedLabels: state.useAdvancedLabels,
     showGradientLabels: state.showGradientLabels,
     showLineLabels: state.showLineLabels,
+    hiddenLabelSeriesIds: Array.from(state.hiddenLabelSeriesIds),
     lineLabelPositions: state.lineLabelPositions,
     lineLabelPositionScope: JSON.stringify([state.chartMetric, state.chartYMetric, latencyPercentile ?? '']),
     onLineLabelPositionsChange: (positions) => {
@@ -4678,6 +4684,7 @@ function renderLegend(): void {
   const renderItems = (items: typeof visibleItems): string => items
     .map((series) => {
       const active = state.activeSeriesIds.has(series.id);
+      const labelsVisible = !state.hiddenLabelSeriesIds.has(series.id);
       return `
         <li class="${active ? '' : 'inactive'}">
           <label title="${escapeAttribute(series.title ?? series.name)}">
@@ -4689,6 +4696,7 @@ function renderLegend(): void {
             <span class="legend-text">${escapeHtml(series.name)}</span>
           </label>
           <span class="legend-row-actions">
+            <button class="legend-labels${labelsVisible ? '' : ' labels-hidden'}" type="button" data-series-labels="${escapeAttribute(series.id)}" aria-pressed="${labelsVisible}" title="${labelsVisible ? 'Hide' : 'Show'} labels for this line (global label settings still apply)" aria-label="${escapeAttribute(series.name)} labels">Labels</button>
             <button class="legend-only" type="button" data-series-only="${escapeAttribute(series.id)}" title="Show only this line">Only</button>
             <button class="legend-locate" type="button" data-series-locate="${escapeAttribute(series.id)}" title="Locate in data panel" aria-label="Locate ${escapeAttribute(series.name)} in data panel">${renderIcon('target')}</button>
           </span>
@@ -4858,6 +4866,16 @@ function renderLegend(): void {
       saveActiveSeriesForCurrentView();
       renderAll();
       scheduleLocalSave();
+    });
+  });
+  legendEl.querySelectorAll<HTMLButtonElement>('button[data-series-labels]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const id = button.dataset.seriesLabels!;
+      if (!state.hiddenLabelSeriesIds.delete(id)) state.hiddenLabelSeriesIds.add(id);
+      renderAll();
+      scheduleLocalSave();
+      Array.from(legendEl.querySelectorAll<HTMLButtonElement>('button[data-series-labels]'))
+        .find((toggle) => toggle.dataset.seriesLabels === id)?.focus({ preventScroll: true });
     });
   });
   legendEl.querySelectorAll<HTMLButtonElement>('button[data-series-only]').forEach((button) => {
@@ -6181,6 +6199,7 @@ function createInitialState(series: InferenceCurveSeries[]): AppState {
     useAdvancedLabels: false,
     showGradientLabels: false,
     showLineLabels: false,
+    hiddenLabelSeriesIds: new Set(),
     lineLabelPositions: {},
     showGoalDirection: true,
     showOffloadRings: true,

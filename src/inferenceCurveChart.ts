@@ -73,6 +73,7 @@ export interface InferenceCurveChartOptions {
   useAdvancedLabels?: boolean;
   showGradientLabels?: boolean;
   showLineLabels?: boolean;
+  hiddenLabelSeriesIds?: string[];
   lineLabelPositions?: InferenceCurveLineLabelPositions;
   lineLabelPositionScope?: string;
   onLineLabelPositionsChange?: (positions: InferenceCurveLineLabelPositions) => void;
@@ -458,6 +459,7 @@ const defaultOptions: ResolvedChartOptions = {
   useAdvancedLabels: false,
   showGradientLabels: false,
   showLineLabels: false,
+  hiddenLabelSeriesIds: [],
   lineLabelPositions: {},
   lineLabelPositionScope: '',
   showOffloadRings: true,
@@ -1645,6 +1647,7 @@ function drawStrategyLabels(
 
   const labels: PillLabel[] = [];
   series.forEach((line) => {
+    if (options.hiddenLabelSeriesIds.includes(line.id)) return;
     const segments: { label: string; color: string; points: ChartPoint[] }[] = [];
     line.roofline.forEach((point) => {
       if (!point.strategyLabel) return;
@@ -1768,7 +1771,7 @@ function drawLineLabels(
   const placed: { x: number; y: number }[] = [];
   const labels: LineLabel[] = [];
   const sorted = [...series]
-    .filter((line) => line.roofline.length >= 1)
+    .filter((line) => line.roofline.length >= 1 && !options.hiddenLabelSeriesIds.includes(line.id))
     .sort((a, b) => yScale(a.roofline[0]!.y) - yScale(b.roofline[0]!.y));
 
   sorted.forEach((line) => {
@@ -2124,7 +2127,7 @@ function getPointLabelText(
   point: ChartPoint,
   options: ResolvedChartOptions
 ): string {
-  if (options.hidePointLabels || options.showGradientLabels) return '';
+  if (options.hidePointLabels || options.showGradientLabels || options.hiddenLabelSeriesIds.includes(point.seriesId)) return '';
   if (options.showConcurrencyLabels) return getConcurrencyPointLabel(point);
   if (options.useAdvancedLabels) {
     return appendConcurrencyToPointLabel(getAdvancedPointLabel(point), point);

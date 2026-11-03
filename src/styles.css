@@ -1619,6 +1619,7 @@ p {
   transition: opacity 120ms ease;
 }
 
+.legend-labels,
 .legend-only,
 .legend-locate {
   min-height: 20px;
@@ -1631,6 +1632,7 @@ p {
   transition: opacity 120ms ease, color 120ms ease;
 }
 
+.legend-labels,
 .legend-only {
   padding: 1px 5px;
 }
@@ -1651,6 +1653,7 @@ p {
   pointer-events: auto;
 }
 
+.legend-labels:hover,
 .legend-only:hover,
 .legend-locate:hover {
   color: var(--foreground);
@@ -4278,4 +4281,9 @@ input[type="checkbox"] {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+.legend-labels.labels-hidden {
+  text-decoration: line-through;
+  opacity: 0.6;
 }
