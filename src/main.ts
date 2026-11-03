@@ -3422,7 +3422,14 @@ function renderEditorGroupStyle(group: string, total: number, id: string): strin
         <option value="custom">Custom color</option>
         <option value="auto">Auto color</option>
       </select></label>
-      <label data-group-custom-color hidden><span>Custom color</span><input name="color" type="color" value="${escapeAttribute(toColorInputValue(first.color, 0))}" disabled /></label>
+      <div class="editor-group-color" data-group-custom-color hidden>
+        <label><span>Custom color</span><input name="color" type="color" value="${escapeAttribute(toColorInputValue(first.color, 0))}" disabled /></label>
+        <div class="color-presets" role="group" aria-label="Standard colors">
+          ${colorPresets.map((preset) => `
+            <button type="button" class="color-preset" data-group-color-preset="${escapeAttribute(preset.value)}" title="${escapeAttribute(preset.name)}" aria-label="${escapeAttribute(preset.name)}" aria-pressed="false" style="--swatch-color:${escapeAttribute(preset.value)}"></button>
+          `).join('')}
+        </div>
+      </div>
       <label><span>Line Type</span><select name="lineStyle">
         <option value="keep">Keep unchanged</option>
         ${lineStyleOptions.map((option) => `<option value="${option.value}">${option.label}</option>`).join('')}
@@ -3447,11 +3454,28 @@ function attachEditorGroupStyleEvents(): void {
     const dashPattern = form.elements.namedItem('dashPattern') as HTMLInputElement;
     const marker = form.elements.namedItem('marker') as HTMLSelectElement;
     const error = form.querySelector<HTMLElement>('[data-group-style-error]')!;
+    const presets = form.querySelectorAll<HTMLButtonElement>('[data-group-color-preset]');
+    const syncColorPresets = (): void => {
+      presets.forEach((button) => {
+        const selected = colorMode.value === 'custom' && button.dataset.groupColorPreset?.toLowerCase() === color.value.toLowerCase();
+        button.classList.toggle('selected', selected);
+        button.setAttribute('aria-pressed', String(selected));
+      });
+    };
+    presets.forEach((button) => {
+      button.addEventListener('click', () => {
+        color.value = button.dataset.groupColorPreset!;
+        syncColorPresets();
+        error.hidden = true;
+      });
+    });
+    color.addEventListener('input', syncColorPresets);
     form.addEventListener('change', () => {
       form.querySelector<HTMLElement>('[data-group-custom-color]')!.hidden = colorMode.value !== 'custom';
       color.disabled = colorMode.value !== 'custom';
       form.querySelector<HTMLElement>('[data-group-custom-dash]')!.hidden = lineStyle.value !== 'custom';
       dashPattern.disabled = lineStyle.value !== 'custom';
+      syncColorPresets();
       error.hidden = true;
     });
     form.addEventListener('submit', (event) => {
