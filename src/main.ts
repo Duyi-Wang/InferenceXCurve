@@ -3416,33 +3416,46 @@ function renderEditorGroupStyle(group: string, total: number, id: string): strin
   const first = seriesDrafts.find((draft) => draft.group?.trim() === group)!;
   return `
     <form id="${id}" class="editor-group-style" data-editor-group-style="${escapeAttribute(group)}" aria-label="Edit style for group ${escapeAttribute(group)}">
-      <p>Apply to all ${total} ${total === 1 ? 'curve' : 'curves'} in this group, including curves outside the current filters. Only chosen properties will change.</p>
-      <label><span>Color</span><select name="colorMode">
-        <option value="keep">Keep unchanged</option>
-        <option value="custom">Custom color</option>
-        <option value="auto">Auto color</option>
-      </select></label>
-      <div class="editor-group-color" data-group-custom-color hidden>
-        <label><span>Custom color</span><input name="color" type="color" value="${escapeAttribute(toColorInputValue(first.color, 0))}" disabled /></label>
-        <div class="color-presets" role="group" aria-label="Standard colors">
-          ${colorPresets.map((preset) => `
-            <button type="button" class="color-preset" data-group-color-preset="${escapeAttribute(preset.value)}" title="${escapeAttribute(preset.name)}" aria-label="${escapeAttribute(preset.name)}" aria-pressed="false" style="--swatch-color:${escapeAttribute(preset.value)}"></button>
-          `).join('')}
+      <div class="editor-group-style-heading">
+        <strong>Group style</strong><span class="editor-group-style-scope">${total} ${total === 1 ? 'curve' : 'curves'}</span>
+        <p>Includes curves outside the current filters. Unchanged properties keep their existing styles.</p>
+      </div>
+      <div class="editor-group-style-fields">
+        <div class="editor-group-style-field editor-group-style-color">
+          <label><span>Color</span><select name="colorMode">
+          <option value="keep">Keep unchanged</option>
+          <option value="custom">Custom color</option>
+          <option value="auto">Auto color</option>
+          </select></label>
+          <div class="editor-group-color">
+            <input name="color" type="color" aria-label="Pick custom color" title="Pick custom color" value="${escapeAttribute(toColorInputValue(first.color, 0))}" />
+            <div class="color-presets" role="group" aria-label="Standard colors">
+              ${colorPresets.map((preset) => `
+              <button type="button" class="color-preset" data-group-color-preset="${escapeAttribute(preset.value)}" title="${escapeAttribute(preset.name)}" aria-label="${escapeAttribute(preset.name)}" aria-pressed="false" style="--swatch-color:${escapeAttribute(preset.value)}"></button>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+        <div class="editor-group-style-field">
+          <label><span>Line Type</span><select name="lineStyle">
+          <option value="keep">Keep unchanged</option>
+          ${lineStyleOptions.map((option) => `<option value="${option.value}">${option.label}</option>`).join('')}
+          <option value="custom">Custom dash pattern</option>
+          </select></label>
+          <label data-group-custom-dash hidden><span>Dash pattern</span><input name="dashPattern" type="text" placeholder="8 4 2 4" value="8 4" disabled required pattern="[0-9.,\\s]+" /></label>
+        </div>
+        <div class="editor-group-style-field">
+          <label><span>Marker</span><select name="marker">
+          <option value="keep" selected>Keep unchanged</option>
+          ${renderPointShapeOptions('keep', 'Precision')}
+          </select></label>
         </div>
       </div>
-      <label><span>Line Type</span><select name="lineStyle">
-        <option value="keep">Keep unchanged</option>
-        ${lineStyleOptions.map((option) => `<option value="${option.value}">${option.label}</option>`).join('')}
-        <option value="custom">Custom dash pattern</option>
-      </select></label>
-      <label data-group-custom-dash hidden><span>Dash pattern</span><input name="dashPattern" type="text" placeholder="8 4 2 4" value="8 4" disabled required pattern="[0-9.,\\s]+" /></label>
-      <label><span>Marker</span><select name="marker">
-        <option value="keep" selected>Keep unchanged</option>
-        ${renderPointShapeOptions('keep', 'Precision')}
-      </select></label>
-      <button type="submit" class="series-action-button">${renderIcon('check')}<span>Apply style</span></button>
-      <button type="button" class="series-action-button" data-editor-group-action="cancel-style">${renderIcon('x')}<span>Cancel</span></button>
       <p class="editor-group-error" role="alert" data-group-style-error hidden></p>
+      <div class="editor-group-style-footer">
+        <button type="button" class="series-action-button" data-editor-group-action="cancel-style">${renderIcon('x')}<span>Cancel</span></button>
+        <button type="submit" class="series-action-button primary editor-group-style-apply">${renderIcon('check')}<span>Apply style</span></button>
+      </div>
     </form>`;
 }
 
@@ -3465,14 +3478,17 @@ function attachEditorGroupStyleEvents(): void {
     presets.forEach((button) => {
       button.addEventListener('click', () => {
         color.value = button.dataset.groupColorPreset!;
+        colorMode.value = 'custom';
         syncColorPresets();
         error.hidden = true;
       });
     });
-    color.addEventListener('input', syncColorPresets);
+    color.addEventListener('input', () => {
+      colorMode.value = 'custom';
+      syncColorPresets();
+      error.hidden = true;
+    });
     form.addEventListener('change', () => {
-      form.querySelector<HTMLElement>('[data-group-custom-color]')!.hidden = colorMode.value !== 'custom';
-      color.disabled = colorMode.value !== 'custom';
       form.querySelector<HTMLElement>('[data-group-custom-dash]')!.hidden = lineStyle.value !== 'custom';
       dashPattern.disabled = lineStyle.value !== 'custom';
       syncColorPresets();
