@@ -1134,6 +1134,7 @@ let draggedGroupName: string | null = null;
 let editorSelectionMode = false;
 let editorGroupAction: 'create' | 'move' | null = null;
 let editingEditorGroup: string | null = null;
+let stylingEditorGroup: string | null = null;
 let pendingActiveSeriesIds = new Set<string>();
 
 sortSeriesDraftsByLayer();
@@ -1611,6 +1612,15 @@ function handleDocumentClick(event: MouseEvent): void {
 }
 
 function handleDocumentKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape' && stylingEditorGroup !== null) {
+    const group = stylingEditorGroup;
+    commitSeriesDom();
+    stylingEditorGroup = null;
+    renderSeriesEditor();
+    Array.from(seriesEditorEl.querySelectorAll<HTMLElement>('[data-editor-group]'))
+      .find((section) => section.dataset.editorGroup === group)
+      ?.querySelector<HTMLButtonElement>('[data-editor-group-action="style"]')?.focus({ preventScroll: true });
+  }
   if (event.key === 'Escape' && editorGroupAction !== null) {
     const action = editorGroupAction;
     editorGroupAction = null;
@@ -3392,12 +3402,98 @@ function renderEditorGroup(group: string, members: { draft: SeriesDraft; index: 
         <span class="series-group-selection" data-group-selection-count="${escapeAttribute(group)}"></span>
         <button type="button" class="series-action-button" data-editor-group-action="move-selected" ${selectedGroupDrafts.size ? '' : 'hidden'}>${renderIcon('folder-arrow')}<span>Move selected here</span></button>
         <div class="series-group-actions">
+          <button type="button" class="series-action-button" data-editor-group-action="style" aria-expanded="${stylingEditorGroup === group}" aria-controls="${bodyId}-style">${renderIcon('pencil')}<span>Edit style</span></button>
           <button type="button" class="series-action-button" data-editor-group-action="rename">${renderIcon('pencil')}<span>Rename</span></button>
           <button type="button" class="series-action-button" data-editor-group-action="dissolve" title="Remove this group from all its curves, including those outside the current filters. Curves and points are kept.">${renderIcon('folder-minus')}<span>Dissolve group</span></button>
         </div>
       </div>
+      ${stylingEditorGroup === group ? renderEditorGroupStyle(group, total, `${bodyId}-style`) : ''}
       <div id="${bodyId}" class="series-group-body" ${collapsed ? 'hidden' : ''}>${cards}</div>
     </section>`;
+}
+
+function renderEditorGroupStyle(group: string, total: number, id: string): string {
+  const first = seriesDrafts.find((draft) => draft.group?.trim() === group)!;
+  return `
+    <form id="${id}" class="editor-group-style" data-editor-group-style="${escapeAttribute(group)}" aria-label="Edit style for group ${escapeAttribute(group)}">
+      <p>Apply to all ${total} ${total === 1 ? 'curve' : 'curves'} in this group, including curves outside the current filters. Only chosen properties will change.</p>
+      <label><span>Color</span><select name="colorMode">
+        <option value="keep">Keep unchanged</option>
+        <option value="custom">Custom color</option>
+        <option value="auto">Auto color</option>
+      </select></label>
+      <label data-group-custom-color hidden><span>Custom color</span><input name="color" type="color" value="${escapeAttribute(toColorInputValue(first.color, 0))}" disabled /></label>
+      <label><span>Line Type</span><select name="lineStyle">
+        <option value="keep">Keep unchanged</option>
+        ${lineStyleOptions.map((option) => `<option value="${option.value}">${option.label}</option>`).join('')}
+        <option value="custom">Custom dash pattern</option>
+      </select></label>
+      <label data-group-custom-dash hidden><span>Dash pattern</span><input name="dashPattern" type="text" placeholder="8 4 2 4" value="8 4" disabled required pattern="[0-9.,\\s]+" /></label>
+      <label><span>Marker</span><select name="marker">
+        <option value="keep" selected>Keep unchanged</option>
+        ${renderPointShapeOptions('keep', 'Precision')}
+      </select></label>
+      <button type="submit" class="series-action-button">${renderIcon('check')}<span>Apply style</span></button>
+      <button type="button" class="series-action-button" data-editor-group-action="cancel-style">${renderIcon('x')}<span>Cancel</span></button>
+      <p class="editor-group-error" role="alert" data-group-style-error hidden></p>
+    </form>`;
+}
+
+function attachEditorGroupStyleEvents(): void {
+  seriesEditorEl.querySelectorAll<HTMLFormElement>('[data-editor-group-style]').forEach((form) => {
+    const colorMode = form.elements.namedItem('colorMode') as HTMLSelectElement;
+    const color = form.elements.namedItem('color') as HTMLInputElement;
+    const lineStyle = form.elements.namedItem('lineStyle') as HTMLSelectElement;
+    const dashPattern = form.elements.namedItem('dashPattern') as HTMLInputElement;
+    const marker = form.elements.namedItem('marker') as HTMLSelectElement;
+    const error = form.querySelector<HTMLElement>('[data-group-style-error]')!;
+    form.addEventListener('change', () => {
+      form.querySelector<HTMLElement>('[data-group-custom-color]')!.hidden = colorMode.value !== 'custom';
+      color.disabled = colorMode.value !== 'custom';
+      form.querySelector<HTMLElement>('[data-group-custom-dash]')!.hidden = lineStyle.value !== 'custom';
+      dashPattern.disabled = lineStyle.value !== 'custom';
+      error.hidden = true;
+    });
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const style = lineStyle.value === 'custom' ? dashPattern.value.trim() : lineStyle.value;
+      if (lineStyle.value === 'custom') {
+        const lengths = style.split(/[\s,]+/u).map(Number);
+        if (!style || lengths.some((length) => !Number.isFinite(length) || length < 0) || !lengths.some((length) => length > 0)) {
+          error.textContent = 'Enter a dash pattern with non-negative lengths and at least one positive length, such as 8 4.';
+          error.hidden = false;
+          return;
+        }
+      }
+      if (colorMode.value === 'keep' && lineStyle.value === 'keep' && marker.value === 'keep') {
+        error.textContent = 'Choose at least one property to change.';
+        error.hidden = false;
+        return;
+      }
+      commitSeriesDom();
+      const group = form.dataset.editorGroupStyle!;
+      const members = seriesDrafts.filter((draft) => draft.group?.trim() === group);
+      const stylesById = new Map<string, Partial<Pick<SeriesDraft, 'color' | 'lineStyle' | 'marker'>>>();
+      members.forEach((draft) => {
+        const updates: Partial<Pick<SeriesDraft, 'color' | 'lineStyle' | 'marker'>> = {};
+        if (colorMode.value !== 'keep') updates.color = colorMode.value === 'auto' ? '' : color.value;
+        if (lineStyle.value !== 'keep') updates.lineStyle = style;
+        if (marker.value !== 'keep') updates.marker = marker.value;
+        Object.assign(draft, updates);
+        stylesById.set(getDraftSeriesId(draft, seriesDrafts.indexOf(draft)), updates);
+      });
+      currentSeries.forEach((line) => {
+        const updates = stylesById.get(line.id);
+        if (updates) Object.assign(line, updates);
+      });
+      stylingEditorGroup = null;
+      clearMergePreview();
+      renderSeriesEditor();
+      renderAll();
+      scheduleLocalSave();
+      setStatus(`Updated style for ${group} (${members.length} ${members.length === 1 ? 'curve' : 'curves'})`);
+    });
+  });
 }
 
 function syncEditorGroupCollapse(): void {
@@ -3443,7 +3539,14 @@ function attachEditorGroupEvents(): void {
       commitSeriesDom();
       const group = button.closest<HTMLElement>('[data-editor-group]')!.dataset.editorGroup!;
       const action = button.dataset.editorGroupAction;
-      if (action === 'rename') editingEditorGroup = group;
+      if (action === 'style') {
+        stylingEditorGroup = stylingEditorGroup === group ? null : group;
+        editingEditorGroup = null;
+      } else if (action === 'cancel-style') stylingEditorGroup = null;
+      if (action === 'rename') {
+        editingEditorGroup = group;
+        stylingEditorGroup = null;
+      }
       else if (action === 'cancel-rename') editingEditorGroup = null;
       else if (action === 'move-selected') {
         selectedGroupDrafts.forEach((draft) => { draft.group = group; });
@@ -3455,10 +3558,12 @@ function attachEditorGroupEvents(): void {
         state.collapsedEditorGroups.delete(group);
         state.collapsedCurveGroups.delete(group);
         editingEditorGroup = null;
+        stylingEditorGroup = null;
         applyCurveGroupChanges();
       }
       renderSeriesEditor();
       if (action === 'rename') seriesEditorEl.querySelector<HTMLInputElement>('[data-editor-group-rename] input')?.focus();
+      if (action === 'style') seriesEditorEl.querySelector<HTMLSelectElement>('[data-editor-group-style] select')?.focus({ preventScroll: true });
     });
   });
   seriesEditorEl.querySelectorAll<HTMLFormElement>('[data-editor-group-rename]').forEach((form) => {
@@ -3511,6 +3616,7 @@ function renderSeriesEditor(): void {
   seriesEditorEl.innerHTML = items || renderEmptySeriesFilter();
   attachSeriesEditorEvents();
   attachEditorGroupEvents();
+  attachEditorGroupStyleEvents();
   attachCurveGroupDropEvents();
   syncCurveGroupSelection();
 }
