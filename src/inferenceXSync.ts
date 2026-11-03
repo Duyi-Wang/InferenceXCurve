@@ -115,19 +115,28 @@ const E2E_P90_METRIC_KEYS = [
   'p90_end_to_end'
 ] as const;
 
-const MODEL_DISPLAY_NAMES: Record<string, string> = {
+export const INFERENCEX_MODEL_DISPLAY_NAMES: Record<string, string> = {
   dsr1: 'DeepSeek-R1-0528',
   gptoss120b: 'gpt-oss-120b',
   llama70b: 'Llama-3.3-70B-Instruct-FP8',
   'qwen3.5': 'Qwen-3.5-397B-A17B',
+  'qwen3.8next': 'Qwen3.8-Flash-Next',
+  'qwen3.827b': 'Qwen3.8-27B',
+  'qwen3.827beager': 'Qwen3.8-27B-Eager',
   'kimik2.5': 'Kimi-K2.5',
   'kimik2.6': 'Kimi-K2.5',
+  'kimik2.7-code': 'Kimi-K2.5',
   kimik3: 'Kimi-K3',
   'minimaxm2.5': 'MiniMax-M2.5',
   'minimaxm2.7': 'MiniMax-M2.5',
   glm5: 'GLM-5',
   'glm5.1': 'GLM-5',
+  'glm5.2': 'GLM-5.2',
+  'glm5.3': 'GLM-5.2',
+  'glm5.3flash': 'GLM-5.3-Flash',
   minimaxm3: 'MiniMax-M3',
+  minimaxm31flash: 'MiniMax-M3.1-Flash',
+  musespark: 'Muse-Spark-Open',
   dsv4: 'DeepSeek-V4-Pro',
   dsv41flash: 'DeepSeek-V4.1-Flash'
 };
@@ -391,7 +400,7 @@ export function inferenceXAvailabilityRowMatchesConfig(
 
 export function getInferenceXDisplayModel(model: string): string {
   const key = resolveModelKey(model);
-  return MODEL_DISPLAY_NAMES[key] ?? normalizeText(model) ?? key;
+  return INFERENCEX_MODEL_DISPLAY_NAMES[key] ?? normalizeText(model) ?? key;
 }
 
 function readAvailabilityRow(record: Record<string, unknown>): InferenceXAvailabilityRow | null {
@@ -976,15 +985,20 @@ function resolveModelKey(model: string): string {
   const tail = normalized.split(/[\\/]/u).filter(Boolean).at(-1) ?? normalized;
   const compact = tail.replace(/-(?:fp4|fp8|mxfp4|nvfp4)(?:-.*)?$/u, '').replace(/[^a-z0-9]/gu, '');
   if (['dsv4', 'dsv4pro', 'deepseekv4pro', 'deepseekv4pro0813'].includes(compact)) return 'dsv4';
-  if (MODEL_DISPLAY_NAMES[normalized]) return normalized;
-  const displayMatch = Object.entries(MODEL_DISPLAY_NAMES).find(
-    ([, display]) => display.toLowerCase() === normalized
+  // Availability keys and display names must resolve to the same official
+  // model group so aliases share a request, config identity, and curve history.
+  const entries = Object.entries(INFERENCEX_MODEL_DISPLAY_NAMES);
+  const match = entries.find(([key, display]) =>
+    key === normalized || display.toLowerCase() === normalized ||
+    key.replace(/[^a-z0-9]/gu, '') === compact ||
+    display.toLowerCase().replace(/[^a-z0-9]/gu, '') === compact
   );
-  return displayMatch?.[0] ?? normalized;
+  if (!match) return normalized;
+  return entries.find(([, display]) => display === match[1])![0];
 }
 
 function modelKeyToApiParam(modelKey: string): string {
-  return MODEL_API_PARAMS[modelKey] ?? MODEL_DISPLAY_NAMES[modelKey] ?? modelKey;
+  return MODEL_API_PARAMS[modelKey] ?? INFERENCEX_MODEL_DISPLAY_NAMES[modelKey] ?? modelKey;
 }
 
 function hardwareMatches(recordHardware: string, configHardware: string): boolean {

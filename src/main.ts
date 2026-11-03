@@ -19,6 +19,7 @@ import {
   fingerprintInferenceCurveSeries,
   formatInferenceXConfigLabel,
   getInferenceXDisplayModel,
+  INFERENCEX_MODEL_DISPLAY_NAMES,
   inferenceXAvailabilityRowMatchesConfig,
   makeInferenceXSyncLineId,
   normalizeInferenceXSyncConfig,
@@ -349,22 +350,7 @@ const EXPORT_LEGEND_ITEM_GAP = 26;
 const EXPORT_LEGEND_ROW_H = 20;
 const EXPORT_LEGEND_CHAR_W = 6.4;
 
-const DB_MODEL_TO_DISPLAY: Record<string, string> = {
-  dsr1: 'DeepSeek-R1-0528',
-  gptoss120b: 'gpt-oss-120b',
-  llama70b: 'Llama-3.3-70B-Instruct-FP8',
-  'qwen3.5': 'Qwen-3.5-397B-A17B',
-  'kimik2.5': 'Kimi-K2.5',
-  'kimik2.6': 'Kimi-K2.5',
-  kimik3: 'Kimi-K3',
-  'minimaxm2.5': 'MiniMax-M2.5',
-  'minimaxm2.7': 'MiniMax-M2.5',
-  glm5: 'GLM-5',
-  'glm5.1': 'GLM-5',
-  minimaxm3: 'MiniMax-M3',
-  dsv4: 'DeepSeek-V4-Pro',
-  dsv41flash: 'DeepSeek-V4.1-Flash'
-};
+const DB_MODEL_TO_DISPLAY = INFERENCEX_MODEL_DISPLAY_NAMES;
 
 const MODEL_PREFIX_ALIASES: Record<string, string> = {
   gptoss: 'gptoss120b',
@@ -8540,7 +8526,9 @@ function resolveModelKeyFromPrefix(value: string): string | null {
 }
 
 function resolveModelKeyFromModelValue(value: string): string | null {
-  if (getInferenceXDisplayModel(value) === DB_MODEL_TO_DISPLAY.dsv4) return 'dsv4';
+  const displayModel = getInferenceXDisplayModel(value);
+  const displayMatch = Object.entries(DB_MODEL_TO_DISPLAY).find(([, display]) => display === displayModel);
+  if (displayMatch) return displayMatch[0];
   const lower = value.trim().toLowerCase();
   if (!lower) return null;
 
@@ -8564,6 +8552,10 @@ function resolveModelKeyFromModelValue(value: string): string | null {
     kimik25: 'kimik2.5',
     minimaxm25: 'minimaxm2.5',
     glm5: 'glm5',
+    glm51: 'glm5.1',
+    glm52: 'glm5.2',
+    glm53: 'glm5.3',
+    glm53flash: 'glm5.3flash',
     deepseekv4pro: 'dsv4'
   };
   return compactAliases[compact] ?? null;
