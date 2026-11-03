@@ -7084,10 +7084,36 @@ function addSelectedImportLines(): void {
 
   try {
     commitSeriesDom();
-    placeDraftsOnTop(selectedDrafts);
     const existingSeries = draftsToSeriesAllowEmpty(seriesDrafts);
     const selectedSeries = draftsToSeries(selectedDrafts);
-    currentSeries = mergeImportedSeries([...existingSeries, ...selectedSeries]);
+    const seenIds = new Set(existingSeries.map((line) => line.id));
+    const conflictingIds = new Set<string>();
+    selectedSeries.forEach((line) => {
+      if (seenIds.has(line.id)) conflictingIds.add(line.id);
+      seenIds.add(line.id);
+    });
+    if (conflictingIds.size > 0) {
+      const ids = Array.from(conflictingIds);
+      const details = ids.slice(0, 10).map((id) => `• ${id}`).join('\n');
+      const remaining = ids.length > 10 ? `
+… and ${ids.length - 10} more` : '';
+      const confirmed = window.confirm(
+        `${ids.length} duplicate Line ID(s) found:
+
+${details}${remaining}
+
+` +
+        'Lines with the same ID will be merged, keeping the first line’s name and settings. ' +
+        'Duplicate points will be removed. They will not be added as separate curves.\n\n' +
+        'Continue merging? Cancel to change the Line ID or ID suffix before importing.'
+      );
+      if (!confirmed) {
+        setImportStatus('Import cancelled. Change the Line ID or ID suffix to add separate curves.');
+        return;
+      }
+    }
+    placeDraftsOnTop(selectedDrafts);
+    currentSeries = mergeImportedSeries([...existingSeries, ...draftsToSeries(selectedDrafts)]);
     seriesDrafts = seriesToDrafts(currentSeries);
     sortSeriesDraftsByLayer();
     normalizeDraftRenderOrderFromPanelOrder();
