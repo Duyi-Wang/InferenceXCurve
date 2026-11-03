@@ -3499,25 +3499,28 @@ p {
 }
 
 .status-toast {
+  --toast-accent: var(--brand);
   position: fixed;
   z-index: 130;
   bottom: 24px;
   left: 50%;
   transform: translateX(-50%);
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 10px;
   width: max-content;
-  max-width: min(520px, calc(100vw - 120px));
+  max-width: min(720px, calc(100vw - 32px));
   max-height: calc(100dvh - 48px);
   overflow-y: auto;
   padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--popover);
+  border: 1px solid color-mix(in srgb, var(--toast-accent) 55%, var(--border));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--toast-accent) 14%, var(--popover));
   color: var(--popover-foreground);
-  box-shadow: 0 8px 28px rgb(0 0 0 / 16%);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 16%), 0 2px 6px rgb(0 0 0 / 6%);
   font-size: 13px;
+  font-weight: 600;
   line-height: 1.5;
 }
 
@@ -3526,26 +3529,30 @@ p {
 }
 
 .status-toast p {
+  grid-column: 2;
   min-width: 0;
   margin: 0;
-  overflow-wrap: anywhere;
+  text-align: center;
+  text-wrap: pretty;
+  overflow-wrap: break-word;
 }
 
 .status-toast.error {
-  border-color: color-mix(in srgb, var(--danger) 50%, var(--border));
+  --toast-accent: var(--danger);
   color: var(--danger);
 }
 
 .status-dismiss {
+  grid-column: 3;
   display: inline-flex;
-  flex-shrink: 0;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
   padding: 3px;
   border: 0;
-  border-radius: 5px;
+  border-radius: 7px;
   background: transparent;
   color: var(--muted-foreground);
   cursor: pointer;
