@@ -1660,6 +1660,10 @@ p {
   opacity: 1;
 }
 
+.legend-reset-labels {
+  margin: 4px 0 8px;
+}
+
 .legend-line-toolbar {
   display: flex;
   align-items: flex-start;
@@ -1688,6 +1692,11 @@ p {
 .legend-line-action:disabled {
   visibility: hidden;
   pointer-events: none;
+}
+
+.legend-reset-labels:disabled {
+  visibility: visible;
+  opacity: 0.5;
 }
 
 .legend-line-action:hover {
@@ -4286,4 +4295,8 @@ input[type="checkbox"] {
 .legend-labels.labels-hidden {
   text-decoration: line-through;
   opacity: 0.6;
+}
+
+.legend-labels.labels-mixed {
+  text-decoration: underline dotted;
 }

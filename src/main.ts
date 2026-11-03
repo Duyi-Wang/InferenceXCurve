@@ -4681,6 +4681,7 @@ function renderLegend(): void {
     groups.set(group, members);
   });
   const hasGroups = filteredSeries.some((line) => line.group?.trim());
+  const labelsEnabled = state.showLineLabels || !state.hidePointLabels || state.showGradientLabels;
   const renderItems = (items: typeof visibleItems): string => items
     .map((series) => {
       const active = state.activeSeriesIds.has(series.id);
@@ -4696,7 +4697,7 @@ function renderLegend(): void {
             <span class="legend-text">${escapeHtml(series.name)}</span>
           </label>
           <span class="legend-row-actions">
-            <button class="legend-labels${labelsVisible ? '' : ' labels-hidden'}" type="button" data-series-labels="${escapeAttribute(series.id)}" aria-pressed="${labelsVisible}" title="${labelsVisible ? 'Hide' : 'Show'} labels for this line (global label settings still apply)" aria-label="${escapeAttribute(series.name)} labels">Labels</button>
+            ${labelsEnabled ? `<button class="legend-labels${labelsVisible ? '' : ' labels-hidden'}" type="button" data-series-labels="${escapeAttribute(series.id)}" aria-pressed="${labelsVisible}" title="${labelsVisible ? 'Hide' : 'Show'} labels for this line (global label settings still apply)" aria-label="${escapeAttribute(series.name)} labels">Labels</button>` : ''}
             <button class="legend-only" type="button" data-series-only="${escapeAttribute(series.id)}" title="Show only this line">Only</button>
             <button class="legend-locate" type="button" data-series-locate="${escapeAttribute(series.id)}" title="Locate in data panel" aria-label="Locate ${escapeAttribute(series.name)} in data panel">${renderIcon('target')}</button>
           </span>
@@ -4711,6 +4712,8 @@ function renderLegend(): void {
     const members = groups.get(group)!;
     const allMembers = filteredSeries.filter((line) => (line.group?.trim() ?? '') === group);
     const active = allMembers.filter((line) => state.activeSeriesIds.has(line.id)).length;
+    const labeledCount = allMembers.filter((line) => !state.hiddenLabelSeriesIds.has(line.id)).length;
+    const labelsState = labeledCount === allMembers.length ? 'true' : labeledCount === 0 ? 'false' : 'mixed';
     const collapsed = state.collapsedCurveGroups.has(group) && !query;
     return `
       <li class="legend-group">
@@ -4721,6 +4724,7 @@ function renderLegend(): void {
             <span class="legend-text">${escapeHtml(group)}</span>
             <span class="legend-group-count">${active}/${allMembers.length}</span>
           </label>
+          ${labelsEnabled ? `<button type="button" class="legend-labels${labelsState === 'false' ? ' labels-hidden' : labelsState === 'mixed' ? ' labels-mixed' : ''}" data-group-labels="${escapeAttribute(group)}" aria-pressed="${labelsState}" aria-label="${escapeAttribute(group)} labels" title="${labelsState === 'true' ? 'Hide' : 'Show'} labels for this group in the current filters (${labeledCount}/${allMembers.length} enabled)">${labelsState === 'mixed' ? 'Labels ±' : 'Labels'}</button>` : ''}
           <button type="button" class="legend-only" data-group-only="${escapeAttribute(group)}" title="Show only this group in the current filters">Only</button>
         </div>
         <ul id="legend-group-${index}" class="legend-group-items" ${collapsed ? 'hidden' : ''}>${renderItems(members)}</ul>
@@ -4760,6 +4764,11 @@ function renderLegend(): void {
         ${renderSwitch('hidePointLabels', 'Hide Labels', state.hidePointLabels)}
         ${renderSwitch('showLineLabels', 'Line Labels', state.showLineLabels,
           'Drag a label along its curve or nearer/farther (0.5–4× gap); cross the curve to switch sides. Drag around an endpoint or a single point to change direction. Double-click to reset.')}
+        ${labelsEnabled ? `
+          <button id="reset-all-labels" class="legend-line-action legend-reset-labels" type="button"
+            title="Restore label visibility for every line, including lines outside the current filters"
+            ${state.hiddenLabelSeriesIds.size === 0 ? 'disabled' : ''}>Reset all labels</button>
+        ` : ''}
         <div id="legend-extra-options" class="legend-extra-options" ${legendOptionsCollapsed ? 'hidden' : ''}>
         ${
           precisionKey
@@ -4804,6 +4813,21 @@ function renderLegend(): void {
       saveActiveSeriesForCurrentView();
       renderAll();
       scheduleLocalSave();
+    });
+  });
+  legendEl.querySelectorAll<HTMLButtonElement>('[data-group-labels]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const group = button.dataset.groupLabels!;
+      const members = filteredSeries.filter((line) => (line.group?.trim() ?? '') === group);
+      const hideLabels = members.every((line) => !state.hiddenLabelSeriesIds.has(line.id));
+      members.forEach((line) => {
+        if (hideLabels) state.hiddenLabelSeriesIds.add(line.id);
+        else state.hiddenLabelSeriesIds.delete(line.id);
+      });
+      renderAll();
+      scheduleLocalSave();
+      Array.from(legendEl.querySelectorAll<HTMLButtonElement>('[data-group-labels]'))
+        .find((toggle) => toggle.dataset.groupLabels === group)?.focus({ preventScroll: true });
     });
   });
   legendEl.querySelectorAll<HTMLButtonElement>('[data-group-only]').forEach((button) => {
@@ -4867,6 +4891,12 @@ function renderLegend(): void {
       renderAll();
       scheduleLocalSave();
     });
+  });
+  legendEl.querySelector('#reset-all-labels')?.addEventListener('click', () => {
+    state.hiddenLabelSeriesIds.clear();
+    renderAll();
+    scheduleLocalSave();
+    legendEl.querySelector<HTMLButtonElement>('#reset-all-labels')?.focus({ preventScroll: true });
   });
   legendEl.querySelectorAll<HTMLButtonElement>('button[data-series-labels]').forEach((button) => {
     button.addEventListener('click', () => {
