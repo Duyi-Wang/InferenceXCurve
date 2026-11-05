@@ -198,6 +198,31 @@ try {
   const changed = structuredClone(line);
   changed.points[0].spec_algorithm = 'dspark';
   assert.notEqual(sync.fingerprintInferenceCurveSeries(line), sync.fingerprintInferenceCurveSeries(changed));
+  const legacy = structuredClone(line);
+  delete legacy.points[0].spec_algorithm;
+  delete legacy.points[0].spec_draft_model;
+  const legacyFingerprint = sync.fingerprintInferenceCurveSeries(legacy);
+  const detailedFingerprint = sync.fingerprintInferenceCurveSeries(line);
+  assert.equal(sync.hasInferenceXSyncSeriesUpdate(line, legacyFingerprint, legacy), false,
+    'Adding descriptive metadata must not flag previously synced data');
+  assert.equal(sync.hasInferenceXSyncSeriesUpdate(line, undefined, legacy), false,
+    'Imported data without a saved sync fingerprint has the same compatibility');
+  assert.equal(sync.hasInferenceXSyncSeriesUpdate(changed, detailedFingerprint, line), false,
+    'Metadata-only backfills must also work after saving the detailed fingerprint');
+  const updated = structuredClone(line);
+  updated.points[0].throughput += 1;
+  for (const fingerprint of [undefined, legacyFingerprint, detailedFingerprint]) {
+    assert.equal(sync.hasInferenceXSyncSeriesUpdate(updated, fingerprint, legacy), true,
+      'Real throughput changes must still be staged');
+  }
+  const specChanged = structuredClone(line);
+  specChanged.points[0].spec_decoding = 'none';
+  assert.equal(sync.hasInferenceXSyncSeriesUpdate(specChanged, legacyFingerprint, legacy), true,
+    'Changes to the original speculative method still count as data changes');
+  assert.equal(sync.hasInferenceXSyncSeriesUpdate(line, undefined, undefined), true,
+    'A missing curve must still be added');
+  assert.equal(sync.hasInferenceXSyncSeriesUpdate(line, 'different-source-data', legacy), true,
+    'A locally edited curve must not replace the saved upstream baseline');
   console.log('Official model aliases, API parameters, merged curves, and K3.1 Agentic metadata passed.');
 } finally {
   globalThis.fetch = originalFetch;

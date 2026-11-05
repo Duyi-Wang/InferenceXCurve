@@ -323,7 +323,10 @@ export async function fetchInferenceXSyncSeries(
   return { checkedAt, series, fingerprints, lineIdsByConfigKey, matchedCounts, missingConfigIds, summary };
 }
 
-export function fingerprintInferenceCurveSeries(line: InferenceCurveSeries): string {
+export function fingerprintInferenceCurveSeries(
+  line: InferenceCurveSeries,
+  { includeSpecDetails = true }: { includeSpecDetails?: boolean } = {}
+): string {
   const payload = JSON.stringify({
     id: line.id,
     model: line.model ?? '',
@@ -361,8 +364,8 @@ export function fingerprintInferenceCurveSeries(line: InferenceCurveSeries): str
       is_multinode: point.is_multinode ?? '',
       kv_offload: point.kv_offload ?? '',
       ...(point.spec_decoding ? { spec_decoding: point.spec_decoding } : {}),
-      ...(point.spec_algorithm ? { spec_algorithm: point.spec_algorithm } : {}),
-      ...(point.spec_draft_model ? { spec_draft_model: point.spec_draft_model } : {}),
+      ...(includeSpecDetails && point.spec_algorithm ? { spec_algorithm: point.spec_algorithm } : {}),
+      ...(includeSpecDetails && point.spec_draft_model ? { spec_draft_model: point.spec_draft_model } : {}),
       server_gpu_cache_hit_rate: point.server_gpu_cache_hit_rate ?? '',
       server_external_cache_hit_rate: point.server_external_cache_hit_rate ?? '',
       server_cpu_cache_hit_rate: point.server_cpu_cache_hit_rate ?? '',
@@ -372,6 +375,26 @@ export function fingerprintInferenceCurveSeries(line: InferenceCurveSeries): str
     }))
   });
   return `${line.points.length}:${hashString(payload)}`;
+}
+
+export function hasInferenceXSyncSeriesUpdate(
+  latestLine: InferenceCurveSeries,
+  storedFingerprint: string | undefined,
+  currentLine: InferenceCurveSeries | undefined
+): boolean {
+  const latestFingerprint = fingerprintInferenceCurveSeries(latestLine);
+  const dataFingerprint = (line: InferenceCurveSeries): string =>
+    fingerprintInferenceCurveSeries(line, { includeSpecDetails: false });
+  // Older browser data predates the descriptive algorithm/drafter fields.
+  // Backfilling those fields alone must not announce a new benchmark curve.
+  const latestDataFingerprint = dataFingerprint(latestLine);
+  if (storedFingerprint) {
+    if (storedFingerprint === latestFingerprint || storedFingerprint === latestDataFingerprint) return false;
+    // Also accept fingerprints saved by the release that included these fields.
+    // Keep the saved baseline authoritative when the current curve was edited.
+    if (!currentLine || storedFingerprint !== fingerprintInferenceCurveSeries(currentLine)) return true;
+  }
+  return !currentLine || dataFingerprint(currentLine) !== latestDataFingerprint;
 }
 
 export function formatInferenceXConfigLabel(config: InferenceXSyncConfig): string {

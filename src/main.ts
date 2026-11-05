@@ -16,7 +16,7 @@ import {
   createDefaultInferenceXSyncConfigs,
   fetchInferenceXAvailability,
   fetchInferenceXSyncSeries,
-  fingerprintInferenceCurveSeries,
+  hasInferenceXSyncSeriesUpdate,
   formatInferenceXConfigLabel,
   getInferenceXDisplayModel,
   INFERENCEX_MODEL_DISPLAY_NAMES,
@@ -2598,9 +2598,9 @@ function getChangedInferenceXSyncConfigIds(result: InferenceXSyncResult): string
       const latestFingerprint = result.fingerprints[item.configId];
       if (!latestFingerprint) return false;
       const storedFingerprint = inferenceXSync.fingerprints[item.configId];
-      if (storedFingerprint) return storedFingerprint !== latestFingerprint;
       const currentLine = currentLineById.get(item.lineId);
-      return currentLine ? fingerprintInferenceCurveSeries(currentLine) !== latestFingerprint : true;
+      const latestLine = result.series.find((line) => line.id === item.lineId);
+      return latestLine ? hasInferenceXSyncSeriesUpdate(latestLine, storedFingerprint, currentLine) : true;
     })
     .map((item) => item.configId);
 }
