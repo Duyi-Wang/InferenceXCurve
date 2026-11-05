@@ -2121,8 +2121,28 @@ function renderInferenceXSyncConfigRow(config: InferenceXSyncConfig, index: numb
 
 function renderInferenceXSyncAddConfig(): string {
   const options = getInferenceXAddOptions();
+  if (options.shapes.length === 1) {
+    const shape = options.shapes[0]!;
+    inferenceXSync.addShapeSelection = makeInferenceXShapeValue(shape);
+    Object.assign(inferenceXSync.addDraft, shape);
+  }
+  if (options.precisions.length === 1) {
+    inferenceXSync.addPrecisionSelection = options.precisions[0]!;
+    inferenceXSync.addDraft.precision = options.precisions[0]!;
+  }
+  if (options.frameworks.length === 1) {
+    inferenceXSync.addFrameworkSelection = options.frameworks[0]!;
+    inferenceXSync.addDraft.framework = options.frameworks[0]!;
+  }
   const isAgentic = inferenceXSync.addShapeSelection !== ALL_VALUE &&
     isAgenticTraceSequence(inferenceXSync.addDraft.scenario ?? '');
+  if (isAgentic) {
+    inferenceXSync.addSpecMethodSelection = ALL_VALUE;
+    delete inferenceXSync.addDraft.specMethod;
+  } else if (options.specMethods.length === 1) {
+    inferenceXSync.addSpecMethodSelection = options.specMethods[0]!;
+    inferenceXSync.addDraft.specMethod = options.specMethods[0]!;
+  }
   return `
     <div class="inferencex-sync-add">
       <label>
@@ -2190,7 +2210,7 @@ interface InferenceXSequenceOption {
 
 function renderInferenceXShapeOptions(shapes: InferenceXSequenceOption[], selected: string): string {
   return [
-    `<option value="${ALL_VALUE}" ${selected === ALL_VALUE ? 'selected' : ''}>All</option>`,
+    shapes.length === 1 ? '' : `<option value="${ALL_VALUE}" ${selected === ALL_VALUE ? 'selected' : ''}>All</option>`,
     ...shapes.map((shape) => {
       const value = makeInferenceXShapeValue(shape);
       return `<option value="${escapeAttribute(value)}" ${selected === value ? 'selected' : ''}>${escapeHtml(formatInferenceXSequenceOptionLabel(shape))}</option>`;
@@ -2204,7 +2224,7 @@ function renderInferenceXAllOptions(
   formatLabel: (value: string) => string = (value) => value
 ): string {
   return [
-    `<option value="${ALL_VALUE}" ${selected === ALL_VALUE ? 'selected' : ''}>All</option>`,
+    values.length === 1 ? '' : `<option value="${ALL_VALUE}" ${selected === ALL_VALUE ? 'selected' : ''}>All</option>`,
     ...values.map(
       (value) =>
         `<option value="${escapeAttribute(value)}" ${selected === value ? 'selected' : ''}>${escapeHtml(formatLabel(value))}</option>`
@@ -3025,7 +3045,7 @@ function renderIslOslFilterOptions(values: string[]): string {
 
 function renderSelectOptions(values: string[], selected: string, allLabel: string): string {
   return [
-    `<option value="${ALL_VALUE}" ${selected === ALL_VALUE ? 'selected' : ''}>${allLabel}</option>`,
+    values.length === 1 ? '' : `<option value="${ALL_VALUE}" ${selected === ALL_VALUE ? 'selected' : ''}>${allLabel}</option>`,
     ...values.map(
       (value) =>
         `<option value="${escapeAttribute(value)}" ${selected === value ? 'selected' : ''}>${escapeHtml(value)}</option>`
@@ -3036,7 +3056,7 @@ function renderSelectOptions(values: string[], selected: string, allLabel: strin
 function renderPrecisionFilterOptions(precisions: string[]): string {
   const selected = getPrecisionFilterValue(precisions);
   const options = [
-    `<option value="${ALL_VALUE}" ${selected === ALL_VALUE ? 'selected' : ''}>All Precision</option>`
+    precisions.length === 1 ? '' : `<option value="${ALL_VALUE}" ${selected === ALL_VALUE ? 'selected' : ''}>All Precision</option>`
   ];
   if (selected === CUSTOM_VALUE) {
     options.push(`<option value="${CUSTOM_VALUE}" selected disabled>Custom</option>`);
@@ -3052,7 +3072,7 @@ function renderPrecisionFilterOptions(precisions: string[]): string {
 
 function renderMtpFilterOptions(values: string[]): string {
   return [
-    `<option value="${ALL_VALUE}" ${state.mtpFilter === ALL_VALUE ? 'selected' : ''}>All MTP</option>`,
+    values.length === 1 ? '' : `<option value="${ALL_VALUE}" ${state.mtpFilter === ALL_VALUE ? 'selected' : ''}>All MTP</option>`,
     ...values.map(
       (value) =>
         `<option value="${escapeAttribute(value)}" ${state.mtpFilter === value ? 'selected' : ''}>${escapeHtml(formatMtpFilterLabel(value))}</option>`
@@ -6161,7 +6181,7 @@ function reconcileActiveSeriesForChart(): void {
 function reconcileFiltersForSeries(series: InferenceCurveSeries[]): void {
   const models = new Set(series.map(getSeriesModel));
   const sortedModels = uniqueSorted(series.map(getSeriesModel));
-  if (state.modelFilter !== ALL_VALUE && !models.has(state.modelFilter)) {
+  if (sortedModels.length === 1 || (state.modelFilter !== ALL_VALUE && !models.has(state.modelFilter))) {
     state.modelFilter = sortedModels[0] ?? ALL_VALUE;
   }
 
@@ -6190,7 +6210,7 @@ function reconcileFiltersForSeries(series: InferenceCurveSeries[]): void {
   const sortedMtpValues = sortMtpValues(Array.from(mtpValues));
   if (state.scenarioFilter === AGENTIC_SCENARIO) {
     state.mtpFilter = ALL_VALUE;
-  } else if (state.mtpFilter !== ALL_VALUE && !mtpValues.has(state.mtpFilter)) {
+  } else if (sortedMtpValues.length === 1 || (state.mtpFilter !== ALL_VALUE && !mtpValues.has(state.mtpFilter))) {
     state.mtpFilter = sortedMtpValues[0] ?? ALL_VALUE;
   }
 
@@ -6344,6 +6364,7 @@ function getChartColorSourceSeries(series: InferenceCurveSeries[]): InferenceCur
 }
 
 function getPrecisionFilterValue(precisions: string[]): string {
+  if (precisions.length === 1) return precisions[0]!;
   if (precisions.length > 0 && precisions.every((precision) => state.selectedPrecisions.has(precision))) {
     return ALL_VALUE;
   }
