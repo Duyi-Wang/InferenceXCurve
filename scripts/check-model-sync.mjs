@@ -77,6 +77,13 @@ try {
     ]
   ],
   [
+    "Kimi-K3.1-Pro",
+    "Kimi-K3.1-Pro",
+    [
+      "kimik3.1"
+    ]
+  ],
+  [
     "MiniMax-M2.5",
     "MiniMax-M2.5",
     [
@@ -162,7 +169,36 @@ try {
     assert.equal(result.series[0].points.length, keys.length);
     assert.equal(result.series[0].id, canonicalId);
   }
-  console.log('All official model aliases, API parameters, and merged curve points passed.');
+  const agentic = {
+    ...base, model: 'kimik3.1', scenario: 'agentic-traces', isl: 0, osl: 0
+  };
+  const canonicalId = sync.makeInferenceXSyncLineId(agentic);
+  for (const model of ['Kimi-K3.1-Pro', 'moonshotai/Kimi-K3.1-Pro', '/models/Kimi-K3.1-Pro-MXFP4']) {
+    assert.equal(sync.makeInferenceXSyncLineId({ ...agentic, model }), canonicalId);
+    assert.equal(sync.getInferenceXDisplayModel(model), 'Kimi-K3.1-Pro');
+  }
+  assert.notEqual(sync.makeInferenceXSyncLineId({ ...agentic, model: 'Kimi-K3' }), canonicalId);
+  globalThis.fetch = async (url) => {
+    assert.equal(new URL(url).searchParams.get('model'), 'Kimi-K3.1-Pro');
+    return Response.json([{
+      ...agentic, benchmark_type: 'agentic_traces', date: '2026-11-05',
+      spec_method: 'draft_model', conc: 1,
+      metrics: { p90_intvty: 100, tput_per_gpu: 200,
+        spec_algorithm: 'dflash', spec_draft_model: 'RadixArk/Kimi-K3.1-Dflash2-Preview' }
+    }]);
+  };
+  const result = await sync.fetchInferenceXSyncSeries([agentic]);
+  assert.equal(result.series.length, 1);
+  const line = result.series[0];
+  assert.equal(line.id, canonicalId);
+  assert.equal(line.mtp, undefined);
+  assert.equal(line.points[0].spec_decoding, 'draft_model');
+  assert.equal(line.points[0].spec_algorithm, 'dflash');
+  assert.equal(line.points[0].spec_draft_model, 'RadixArk/Kimi-K3.1-Dflash2-Preview');
+  const changed = structuredClone(line);
+  changed.points[0].spec_algorithm = 'dspark';
+  assert.notEqual(sync.fingerprintInferenceCurveSeries(line), sync.fingerprintInferenceCurveSeries(changed));
+  console.log('Official model aliases, API parameters, merged curves, and K3.1 Agentic metadata passed.');
 } finally {
   globalThis.fetch = originalFetch;
   await server.close();

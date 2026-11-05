@@ -17,7 +17,7 @@ round-trips through the app, and is more deterministic than raw benchmark CSV.
 Use this header order for generated CSV:
 
 ```csv
-Line ID,Line Name,Title,Line Note,Group,Model,Scenario,Precision,MTP,HW Key,Color Mode,Resolved Color,Line Type,Line Marker,Layer,Included in Chart,Active Line,Point Index,Roofline Point,Point Marker,Interactivity (tok/s/user),Throughput/GPU (tok/s/gpu),TTFT (s),End-to-end (s),P50 Interactivity (tok/s/user),P75 Interactivity (tok/s/user),P90 Interactivity (tok/s/user),P95 Interactivity (tok/s/user),P50 TTFT (s),P75 TTFT (s),P90 TTFT (s),P95 TTFT (s),P50 End-to-end (s),P75 End-to-end (s),P90 End-to-end (s),P95 End-to-end (s),P75 E2E Normalized Interactivity (tok/s/user),P90 E2E Normalized Interactivity (tok/s/user),Prefill GPUs,Decode GPUs,Total GPUs,Prefill TP,Prefill EP,Prefill DCP,Prefill DPA,Prefill Workers,Decode TP,Decode EP,Decode DCP,Decode DPA,Decode Workers,DPA,Disagg,Multi-node,KV Offload,Chip Cache Hit Rate,External Cache Hit Rate,CPU Cache Hit Rate,Theoretical Cache Hit Rate,Concurrency,Strategy,Note,Speculative Decoding
+Line ID,Line Name,Title,Line Note,Group,Model,Scenario,Precision,MTP,HW Key,Color Mode,Resolved Color,Line Type,Line Marker,Layer,Included in Chart,Active Line,Point Index,Roofline Point,Point Marker,Interactivity (tok/s/user),Throughput/GPU (tok/s/gpu),TTFT (s),End-to-end (s),P50 Interactivity (tok/s/user),P75 Interactivity (tok/s/user),P90 Interactivity (tok/s/user),P95 Interactivity (tok/s/user),P50 TTFT (s),P75 TTFT (s),P90 TTFT (s),P95 TTFT (s),P50 End-to-end (s),P75 End-to-end (s),P90 End-to-end (s),P95 End-to-end (s),P75 E2E Normalized Interactivity (tok/s/user),P90 E2E Normalized Interactivity (tok/s/user),Prefill GPUs,Decode GPUs,Total GPUs,Prefill TP,Prefill EP,Prefill DCP,Prefill DPA,Prefill Workers,Decode TP,Decode EP,Decode DCP,Decode DPA,Decode Workers,DPA,Disagg,Multi-node,KV Offload,Chip Cache Hit Rate,External Cache Hit Rate,CPU Cache Hit Rate,Theoretical Cache Hit Rate,Concurrency,Strategy,Note,Speculative Decoding,Spec Algorithm,Draft Model
 ```
 
 The importer uses the editor parser when at least one row has a non-empty
@@ -96,6 +96,10 @@ These fields are optional in editor CSV:
 - `Speculative Decoding`: optional point metadata, typically `mtp`, `none`, or
   `draft_model`. Preserved in tooltips, browser storage, and CSV export; it
   does not split Agentic curves. It takes precedence over legacy `MTP` values.
+- `Spec Algorithm` and `Draft Model`: optional point metadata from upstream
+  `metrics.spec_algorithm` and `metrics.spec_draft_model`, e.g. `dflash` and
+  `RadixArk/Kimi-K3.1-Dflash2-Preview`. Preserved through storage and CSV
+  round-trips; tooltips prefer these details over the coarse speculative label.
 - `Color Mode`: use `Custom` only when `Resolved Color` should be imported.
   Empty or `Auto` means automatic color.
 - `Resolved Color`: CSS color such as `#22c55e`; ignored unless `Color Mode` is
@@ -200,7 +204,9 @@ Accepted editor CSV aliases include:
   as `num_prefill_gpu`, `decode_tp`, and `prefill_dp_attention`; display labels
   such as `Prefill GPUs`, `Prefill DCP`, `Decode TP`, `Decode DCP`,
   `Prefill Workers`, `DPA`, `Disagg`, `Multi-node`, and `KV Offload`
-- Speculative decoding: `Speculative Decoding`, `spec_decoding`, `spec_method`
+- Speculative decoding: `Speculative Decoding`, `spec_decoding`, `spec_method`;
+  `Spec Algorithm`, `spec_algorithm`, `metrics.spec_algorithm`;
+  `Draft Model`, `spec_draft_model`, `metrics.spec_draft_model`
 - Cache hit rates: `server_gpu_cache_hit_rate`, `Chip Cache Hit Rate`,
   `server_external_cache_hit_rate`, `External Cache Hit Rate`,
   `server_cpu_cache_hit_rate`, `CPU Cache Hit Rate`,
@@ -209,9 +215,9 @@ Accepted editor CSV aliases include:
 ## Example
 
 ```csv
-Line ID,Line Name,Title,Line Note,Model,Scenario,Precision,MTP,HW Key,Color Mode,Resolved Color,Line Type,Line Marker,Layer,Included in Chart,Active Line,Point Index,Roofline Point,Point Marker,Interactivity (tok/s/user),Throughput/GPU (tok/s/gpu),TTFT (s),End-to-end (s),P50 Interactivity (tok/s/user),P75 Interactivity (tok/s/user),P90 Interactivity (tok/s/user),P95 Interactivity (tok/s/user),P50 TTFT (s),P75 TTFT (s),P90 TTFT (s),P95 TTFT (s),P50 End-to-end (s),P75 End-to-end (s),P90 End-to-end (s),P95 End-to-end (s),P75 E2E Normalized Interactivity (tok/s/user),P90 E2E Normalized Interactivity (tok/s/user),Prefill GPUs,Decode GPUs,Total GPUs,Prefill TP,Prefill EP,Prefill DCP,Prefill DPA,Prefill Workers,Decode TP,Decode EP,Decode DCP,Decode DPA,Decode Workers,DPA,Disagg,Multi-node,KV Offload,Chip Cache Hit Rate,External Cache Hit Rate,CPU Cache Hit Rate,Theoretical Cache Hit Rate,Concurrency,Strategy,Note,Speculative Decoding
-dsr1-8192-fp8-b200-trt,B200 TRT,DeepSeek R1 B200 TRT,Production candidate,DeepSeek-R1-0528,ISL 8192 / OSL 1024,fp8,Non-MTP,,Auto,,solid,precision,1,,,,,,8.42,5220.5,0.12,9.04,,,,,,,,,,,,,,,4,8,,4,4,,true,,8,8,,true,,true,true,false,,,,,,1024,,run 123,
-dsr1-agentic-fp8-b200-trt,B200 TRT Agentic,DeepSeek R1 B200 TRT agentic traces,Agentic validation run,DeepSeek-R1-0528,Agentic Traces,fp8,,,Auto,,solid,precision,2,,,,,,8.5,4830.2,0.18,37.4,12,10,8.5,7.8,0.10,0.14,0.18,0.22,25,31,37.4,42,19.78,11.24,4,8,,4,4,8,true,,8,8,8,true,,true,false,false,KV offload off,0.92,0,0,0.97,64,,agentic preview,none
+Line ID,Line Name,Title,Line Note,Model,Scenario,Precision,MTP,HW Key,Color Mode,Resolved Color,Line Type,Line Marker,Layer,Included in Chart,Active Line,Point Index,Roofline Point,Point Marker,Interactivity (tok/s/user),Throughput/GPU (tok/s/gpu),TTFT (s),End-to-end (s),P50 Interactivity (tok/s/user),P75 Interactivity (tok/s/user),P90 Interactivity (tok/s/user),P95 Interactivity (tok/s/user),P50 TTFT (s),P75 TTFT (s),P90 TTFT (s),P95 TTFT (s),P50 End-to-end (s),P75 End-to-end (s),P90 End-to-end (s),P95 End-to-end (s),P75 E2E Normalized Interactivity (tok/s/user),P90 E2E Normalized Interactivity (tok/s/user),Prefill GPUs,Decode GPUs,Total GPUs,Prefill TP,Prefill EP,Prefill DCP,Prefill DPA,Prefill Workers,Decode TP,Decode EP,Decode DCP,Decode DPA,Decode Workers,DPA,Disagg,Multi-node,KV Offload,Chip Cache Hit Rate,External Cache Hit Rate,CPU Cache Hit Rate,Theoretical Cache Hit Rate,Concurrency,Strategy,Note,Speculative Decoding,Spec Algorithm,Draft Model
+dsr1-8192-fp8-b200-trt,B200 TRT,DeepSeek R1 B200 TRT,Production candidate,DeepSeek-R1-0528,ISL 8192 / OSL 1024,fp8,Non-MTP,,Auto,,solid,precision,1,,,,,,8.42,5220.5,0.12,9.04,,,,,,,,,,,,,,,4,8,,4,4,,true,,8,8,,true,,true,true,false,,,,,,1024,,run 123,,,
+dsr1-agentic-fp8-b200-trt,B200 TRT Agentic,DeepSeek R1 B200 TRT agentic traces,Agentic validation run,DeepSeek-R1-0528,Agentic Traces,fp8,,,Auto,,solid,precision,2,,,,,,8.5,4830.2,0.18,37.4,12,10,8.5,7.8,0.10,0.14,0.18,0.22,25,31,37.4,42,19.78,11.24,4,8,,4,4,8,true,,8,8,8,true,,true,false,false,KV offload off,0.92,0,0,0.97,64,,agentic preview,none,,
 ```
 
 ## Raw Benchmark CSV Fallback

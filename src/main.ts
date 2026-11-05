@@ -385,6 +385,7 @@ const MODEL_PATH_TO_DB_KEY: Record<string, string> = {
   'qwen/qwen3.5-397b-a17b-fp8': 'qwen3.5',
   'moonshotai/kimi-k2.5': 'kimik2.5',
   'moonshotai/kimi-k3': 'kimik3',
+  'moonshotai/kimi-k3.1-pro': 'kimik3.1',
   'minimaxai/minimax-m2.5': 'minimaxm2.5',
   'minimaxai/minimax-m3': 'minimaxm3',
   'zai-org/glm-5-fp8': 'glm5',
@@ -479,6 +480,8 @@ const hiddenPointKeys = [
   'is_multinode',
   'kv_offload',
   'spec_decoding',
+  'spec_algorithm',
+  'spec_draft_model',
   'server_gpu_cache_hit_rate',
   'server_external_cache_hit_rate',
   'server_cpu_cache_hit_rate',
@@ -5271,6 +5274,8 @@ function seriesToDrafts(series: InferenceCurveSeries[]): SeriesDraft[] {
             : undefined
         )),
         server_gpu_cache_hit_rate: formatPointFieldValue(point.server_gpu_cache_hit_rate),
+        spec_algorithm: formatPointFieldValue(point.spec_algorithm),
+        spec_draft_model: formatPointFieldValue(point.spec_draft_model),
         server_external_cache_hit_rate: formatPointFieldValue(
           point.server_external_cache_hit_rate
         ),
@@ -5462,6 +5467,8 @@ function draftsToSeriesInternal(drafts: SeriesDraft[]): InferenceCurveSeries[] {
         if (isMultinode !== null) point.is_multinode = isMultinode;
         if (kvOffload) point.kv_offload = kvOffload;
         if (row.spec_decoding?.trim()) point.spec_decoding = row.spec_decoding.trim();
+        if (row.spec_algorithm?.trim()) point.spec_algorithm = row.spec_algorithm.trim();
+        if (row.spec_draft_model?.trim()) point.spec_draft_model = row.spec_draft_model.trim();
         if (serverGpuCacheHitRate !== null) {
           point.server_gpu_cache_hit_rate = serverGpuCacheHitRate;
         }
@@ -5654,6 +5661,12 @@ function detectPointHeaderMap(headerRow: string[]): Map<number, string> | null {
     ['is_multinode', 'is_multinode'],
     ['multi_node', 'is_multinode'],
     ['kv offload', 'kv_offload'],
+    ['speculative decoding', 'spec_decoding'],
+    ['spec_decoding', 'spec_decoding'],
+    ['spec algorithm', 'spec_algorithm'],
+    ['spec_algorithm', 'spec_algorithm'],
+    ['draft model', 'spec_draft_model'],
+    ['spec_draft_model', 'spec_draft_model'],
     ['kv_offload', 'kv_offload'],
     ['kv offloading', 'kv_offload'],
     ['kv_offloading', 'kv_offload'],
@@ -8032,6 +8045,8 @@ const POINT_IMPORT_ALIASES: Record<string, string[]> = {
   disagg: ['disagg', 'Disagg', 'disaggregated'],
   is_multinode: ['is_multinode', 'multi_node', 'multinode', 'Multi-node', 'Multi node'],
   spec_decoding: ['spec_decoding', 'spec_method', 'Speculative Decoding'],
+  spec_algorithm: ['spec_algorithm', 'Spec Algorithm', 'metrics.spec_algorithm'],
+  spec_draft_model: ['spec_draft_model', 'Draft Model', 'metrics.spec_draft_model'],
   kv_offload: [
     'kv_offload',
     'KV Offload',
@@ -8426,6 +8441,10 @@ function importedPointFromBenchmarkRecord(
   if (prefillDpa !== undefined && prefillDpa === decodeDpa) point.dp_attention = prefillDpa;
   if (offload.label) point.kv_offload = offload.label;
   if (isAgentic) point.spec_decoding = specMethod;
+  const specAlgorithm = readMetricString(record, POINT_IMPORT_ALIASES.spec_algorithm!);
+  const specDraftModel = readMetricString(record, POINT_IMPORT_ALIASES.spec_draft_model!);
+  if (specAlgorithm) point.spec_algorithm = specAlgorithm;
+  if (specDraftModel) point.spec_draft_model = specDraftModel;
   if (serverGpuCacheHitRate !== null) point.server_gpu_cache_hit_rate = serverGpuCacheHitRate;
   if (serverExternalCacheHitRate !== null) {
     point.server_external_cache_hit_rate = serverExternalCacheHitRate;
@@ -8528,6 +8547,8 @@ function mergeImportedSeries(series: InferenceCurveSeries[]): InferenceCurveSeri
         point.e2eNormalizedInteractivityPercentiles,
         point.kv_offload,
         point.spec_decoding,
+        point.spec_algorithm,
+        point.spec_draft_model,
         point.prefill_dcp_size,
         point.decode_dcp_size,
         point.server_gpu_cache_hit_rate,
@@ -9166,7 +9187,9 @@ function buildChartCsvRows(mode: CsvExportMode): string[][] {
       'Concurrency',
       'Strategy',
       'Note',
-      'Speculative Decoding'
+      'Speculative Decoding',
+      'Spec Algorithm',
+      'Draft Model'
     ]
   ];
 
@@ -9240,7 +9263,9 @@ function buildChartCsvRows(mode: CsvExportMode): string[][] {
         formatExportValue(point.concurrency),
         String(point.strategy ?? ''),
         String(point.label ?? ''),
-        String(point.spec_decoding ?? '')
+        String(point.spec_decoding ?? ''),
+        String(point.spec_algorithm ?? ''),
+        String(point.spec_draft_model ?? '')
       ]);
     });
   });

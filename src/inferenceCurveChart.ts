@@ -30,6 +30,8 @@ export interface InferenceCurvePoint {
   is_multinode?: boolean;
   kv_offload?: string;
   spec_decoding?: string;
+  spec_algorithm?: string;
+  spec_draft_model?: string;
   server_gpu_cache_hit_rate?: number;
   server_external_cache_hit_rate?: number;
   server_cpu_cache_hit_rate?: number;
@@ -2673,8 +2675,14 @@ function formatTooltip(
     }
   }
   if (point.concurrency !== undefined) fields.push(`Concurrency: ${point.concurrency}`);
-  if (point.spec_decoding) {
-    const label = point.spec_decoding === 'none' ? 'Off' : point.spec_decoding.toUpperCase();
+  if (point.spec_algorithm || point.spec_decoding) {
+    const method = point.spec_algorithm || point.spec_decoding || '';
+    const labels: Record<string, string> = {
+      none: 'Off', mtp: 'MTP', draft_model: 'Draft Model',
+      dflash: 'DFlash', dspark: 'DSpark', eagle3: 'EAGLE3'
+    };
+    const algorithm = labels[method.toLowerCase()] ?? method.toUpperCase();
+    const label = point.spec_draft_model ? `${algorithm} (${point.spec_draft_model})` : algorithm;
     fields.push(`Speculative Decoding: ${escapeHtml(label)}`);
   }
   if (typeof point.kv_offload === 'string' && point.kv_offload.trim()) {
