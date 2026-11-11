@@ -124,6 +124,30 @@ body {
   outline-offset: 3px;
 }
 
+.github-link {
+  display: inline-flex;
+  flex: 0 0 auto;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 8px;
+  border-radius: 8px;
+  color: var(--foreground);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.github-link:hover {
+  background: var(--accent);
+}
+
+.github-link:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+
 :root.dark .theme-icon-moon,
 :root.light .theme-icon-sun {
   display: none;
@@ -4091,6 +4115,10 @@ input[type="checkbox"] {
   }
 
   #theme-toggle-label {
+    display: none;
+  }
+
+  .github-link-label {
     display: none;
   }
 
