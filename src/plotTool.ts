@@ -1,3 +1,4 @@
+import { confirmAction } from './confirmAction';
 import {
   DEFAULT_CHART_WATERMARK,
   normalizeInferenceCurveLineLabelPositions,
@@ -605,7 +606,7 @@ export function mountPlotTool(root: HTMLElement): () => void {
     markDirty();
   }
 
-  function handleEditorClick(event: MouseEvent): void {
+  async function handleEditorClick(event: MouseEvent): Promise<void> {
     const target = (event.target as Element | null)?.closest<HTMLButtonElement>('button');
     if (!target) return;
     const card = target.closest<HTMLElement>('[data-line-card]');
@@ -637,6 +638,10 @@ export function mountPlotTool(root: HTMLElement): () => void {
       line.collapsed = false;
       renderEditor();
     } else if (action === 'remove') {
+      if (!await confirmAction(
+        `Delete "${line.name || line.id}" and all its point data? This cannot be undone.`,
+        'Delete curve', 'Delete curve?'
+      ) || signal.aborted) return;
       lines.splice(lineIndex, 1);
       state.activeLineIds.delete(line.id);
       renderEditor();
@@ -655,6 +660,10 @@ export function mountPlotTool(root: HTMLElement): () => void {
       const pointIndex = Number(row?.dataset.pointRow);
       if (!line.points[pointIndex]) return;
       if (pointAction === 'remove') {
+        if (!await confirmAction(
+          `Delete point ${pointIndex + 1} from "${line.name || line.id}"? This cannot be undone.`,
+          'Delete point', 'Delete point?'
+        ) || signal.aborted) return;
         line.points.splice(pointIndex, 1);
         if (line.points.length === 0) line.points.push({ x: '', y: '' });
       } else {
@@ -745,7 +754,7 @@ export function mountPlotTool(root: HTMLElement): () => void {
     }
   }
 
-  function handleImportClick(event: MouseEvent): void {
+  async function handleImportClick(event: MouseEvent): Promise<void> {
     const button = (event.target as Element | null)?.closest<HTMLButtonElement>('button[data-import-action]');
     if (!button) return;
     if (button.dataset.importAction === 'cancel') {
@@ -764,6 +773,11 @@ export function mountPlotTool(root: HTMLElement): () => void {
       setStatus(`Choose Replace for conflicting Line ID: ${unresolved.map((entry) => entry.line.id).join(', ')}.`, true);
       return;
     }
+    const replacements = selected.filter((entry) => lines.some((line) => line.id === entry.line.id));
+    if (replacements.length && (!await confirmAction(
+      `Replace ${replacements.length} existing curves with imported data? Their current points and settings will be lost. This cannot be undone.`,
+      'Replace and import', 'Replace existing curves?'
+    ) || signal.aborted)) return;
     selected.forEach((entry) => {
       const existingIndex = lines.findIndex((line) => line.id === entry.line.id);
       if (existingIndex >= 0) {
@@ -783,7 +797,14 @@ export function mountPlotTool(root: HTMLElement): () => void {
     scheduleSave();
   }
 
-  function clearData(resetAll: boolean): void {
+  async function clearData(resetAll: boolean): Promise<void> {
+    if (!await confirmAction(
+      resetAll
+        ? 'Reset all Plot Tool data and settings to the default example? Saved browser data will be replaced. This cannot be undone.'
+        : 'Delete all Plot Tool curves and points? Chart settings are kept. This cannot be undone.',
+      resetAll ? 'Reset all' : 'Clear data',
+      resetAll ? 'Reset Plot Tool?' : 'Clear all plot data?'
+    ) || signal.aborted) return;
     lines = resetAll ? createDefaultLines() : [];
     pendingImport = [];
     if (resetAll) {

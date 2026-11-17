@@ -1,3 +1,4 @@
+import { confirmAction } from './confirmAction';
 import './styles.css';
 import { getTheme, THEME_CHANGE_EVENT, type Theme } from './theme';
 
@@ -1463,10 +1464,10 @@ document.querySelector('#quick-top')?.addEventListener('click', () => {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 });
 
-document.querySelector('#reset-data')?.addEventListener('click', () => {
-  const confirmed = window.confirm(
-    'Reset all settings and data to the default example?\n\n' +
-    'This replaces the current chart data, filters, sync configs, and saved browser data. This cannot be undone.'
+document.querySelector('#reset-data')?.addEventListener('click', async () => {
+  const confirmed = await confirmAction(
+    'The default example will replace the current chart data, filters, sync configs, and saved browser data. This cannot be undone.',
+    'Reset all', 'Reset all settings and data?'
   );
   if (!confirmed) return;
   clearAutoRenderTimer();
@@ -1491,9 +1492,10 @@ document.querySelector('#reset-data')?.addEventListener('click', () => {
   clearMergePreview();
 });
 
-document.querySelector('#clear-data')?.addEventListener('click', () => {
-  const confirmed = window.confirm(
-    'Clear all chart data?\n\nAll lines and points will be removed. Sync configs are kept. This cannot be undone.'
+document.querySelector('#clear-data')?.addEventListener('click', async () => {
+  const confirmed = await confirmAction(
+    'All lines and points will be removed. Sync configs are kept. This cannot be undone.',
+    'Clear data', 'Clear all chart data?'
   );
   if (!confirmed) return;
   clearAutoRenderTimer();
@@ -2378,7 +2380,7 @@ function formatDateTimeShort(value: string): string {
   });
 }
 
-function handleInferenceXSyncClick(event: MouseEvent): void {
+async function handleInferenceXSyncClick(event: MouseEvent): Promise<void> {
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-sync-action]');
   if (!button) return;
   const action = button.dataset.syncAction;
@@ -2394,9 +2396,9 @@ function handleInferenceXSyncClick(event: MouseEvent): void {
   } else if (action === 'reload-availability') {
     void loadInferenceXAvailability();
   } else if (action === 'reset-configs') {
-    const confirmed = window.confirm(
-      'Reset sync configs to the defaults?\n\n' +
-      'All custom sync configs will be replaced by the default configs. Chart data is not changed.'
+    const confirmed = await confirmAction(
+      'All custom sync configs will be replaced by the default configs. Chart data is not changed.',
+      'Reset configs', 'Reset sync configs?'
     );
     if (confirmed) resetInferenceXSyncConfigs();
   } else if (action === 'add-config') {
@@ -2499,11 +2501,18 @@ async function checkInferenceXUpdates({ automatic }: { automatic: boolean }): Pr
   }
 }
 
-function applyStagedInferenceXSyncUpdate(): void {
+async function applyStagedInferenceXSyncUpdate(): Promise<void> {
   if (!inferenceXSync.stagedResult || inferenceXSync.availableUpdateCount === 0) {
     setStatus('No staged InferenceX update to apply.', true);
     return;
   }
+
+  const staged = inferenceXSync.stagedResult;
+  if (!await confirmAction(
+    `Apply ${inferenceXSync.availableUpdateCount} line updates? Matching curves and their point data will be replaced, including local data edits. Curve styles are kept. This cannot be undone.`,
+    'Apply update', 'Update chart data?'
+  )) return;
+  if (inferenceXSync.stagedResult !== staged) return;
 
   try {
     inferenceXSync.status = 'updating';
@@ -2895,7 +2904,7 @@ function inferenceXAvailabilityRowMatchesSequence(
   return row.isl === draft.isl && row.osl === draft.osl;
 }
 
-function removeInferenceXSyncConfig(index: number): void {
+async function removeInferenceXSyncConfig(index: number): Promise<void> {
   if (!Number.isInteger(index)) return;
   if (inferenceXSync.configs.length <= 1) {
     inferenceXSync.lastError = 'At least one InferenceX sync config is required.';
@@ -2903,6 +2912,12 @@ function removeInferenceXSyncConfig(index: number): void {
     renderInferenceXSyncPanel();
     return;
   }
+  const config = inferenceXSync.configs[index];
+  if (!config || !await confirmAction(
+    `Remove sync config "${config.id}"? Chart data is kept, but this config will no longer be checked for updates.`,
+    'Remove config', 'Remove sync config?'
+  )) return;
+  if (inferenceXSync.configs[index] !== config) return;
   const [removed] = inferenceXSync.configs.splice(index, 1);
   if (removed) {
     delete inferenceXSync.fingerprints[removed.id];
@@ -3265,10 +3280,15 @@ function syncCurveGroupSelection(): void {
   updateCurveGroupScrollMargin();
 }
 
-function deleteSelectedCurves(): void {
+async function deleteSelectedCurves(): Promise<void> {
   commitSeriesDom();
   const removed = seriesDrafts.filter((draft) => selectedGroupDrafts.has(draft));
   if (!removed.length) return;
+  if (!await confirmAction(
+    `Delete ${removed.length} selected curves and all their point data? This cannot be undone.`,
+    'Delete curves', 'Delete selected curves?'
+  )) return;
+  if (!removed.every((draft) => seriesDrafts.includes(draft))) return;
   clearAutoRenderTimer();
   const removedIds = new Set(removed.map((draft) => draft.id.trim()));
   seriesDrafts = seriesDrafts.filter((draft) => !selectedGroupDrafts.has(draft));
@@ -3617,7 +3637,7 @@ function attachEditorGroupEvents(): void {
     });
   });
   seriesEditorEl.querySelectorAll<HTMLButtonElement>('[data-editor-group-action]').forEach((button) => {
-    button.addEventListener('click', () => {
+    button.addEventListener('click', async () => {
       commitSeriesDom();
       const group = button.closest<HTMLElement>('[data-editor-group]')!.dataset.editorGroup!;
       const action = button.dataset.editorGroupAction;
@@ -3636,6 +3656,10 @@ function attachEditorGroupEvents(): void {
         editorSelectionMode = false;
         applyCurveGroupChanges();
       } else if (action === 'dissolve') {
+        if (!await confirmAction(
+          `Ungroup all curves in "${group}"? Curves and point data are kept, but the group will be removed.`,
+          'Ungroup curves', 'Remove curve group?'
+        )) return;
         seriesDrafts.forEach((draft) => { if (draft.group?.trim() === group) draft.group = ''; });
         state.collapsedEditorGroups.delete(group);
         state.collapsedCurveGroups.delete(group);
@@ -4369,7 +4393,7 @@ function attachSeriesEditorEvents(): void {
   });
 
   seriesEditorEl.querySelectorAll<HTMLButtonElement>('button[data-series-action]').forEach((button) => {
-    button.addEventListener('click', () => {
+    button.addEventListener('click', async () => {
       commitSeriesDom();
       const seriesIndex = Number(button.dataset.seriesIndex);
       const action = button.dataset.seriesAction;
@@ -4404,6 +4428,11 @@ function attachSeriesEditorEvents(): void {
           setStatus('At least one line is required.', true);
           return;
         }
+        if (!await confirmAction(
+          `Delete "${draft.name || draft.id}" and all its point data? This cannot be undone.`,
+          'Delete curve', 'Delete curve?'
+        )) return;
+        if (seriesDrafts[seriesIndex] !== draft) return;
         seriesDrafts.splice(seriesIndex, 1);
       }
 
@@ -4431,7 +4460,7 @@ function attachSeriesEditorEvents(): void {
   });
 
   seriesEditorEl.querySelectorAll<HTMLButtonElement>('button[data-point-action]').forEach((button) => {
-    button.addEventListener('click', () => {
+    button.addEventListener('click', async () => {
       commitSeriesDom();
       const seriesIndex = Number(button.dataset.seriesIndex);
       const rowIndex = Number(button.dataset.row);
@@ -4446,6 +4475,11 @@ function attachSeriesEditorEvents(): void {
         focusPointCell(seriesIndex, rowIndex + 1, 0);
         setStatus(`Copied point ${rowIndex + 1} in ${draft.name || `Line ${seriesIndex + 1}`}`);
       } else if (action === 'delete') {
+        if (!await confirmAction(
+          `Delete point ${rowIndex + 1} from "${draft.name || draft.id}"? This cannot be undone.`,
+          'Delete point', 'Delete point?'
+        )) return;
+        if (seriesDrafts[seriesIndex] !== draft) return;
         if (draft.points.length <= 1) {
           draft.points = [makeEmptyPointRow()];
         } else {
@@ -6789,12 +6823,17 @@ function handleMergePreviewClick(event: MouseEvent): void {
   }
 }
 
-function mergeSelectedLines(): void {
+async function mergeSelectedLines(): Promise<void> {
   const groups = pendingMergeGroups.filter((group) => getSelectedMergeLines(group).length >= 2);
   if (groups.length === 0) {
     setStatus('Select at least two lines in a candidate group.', true);
     return;
   }
+
+  if (!await confirmAction(
+    `Merge selected curves in ${groups.length} groups? Point rows are kept, but only each main curve's name and settings are retained. The other curves are removed. This cannot be undone.`,
+    'Merge curves', 'Merge selected curves?'
+  )) return;
 
   try {
     commitSeriesDom();
@@ -7301,7 +7340,7 @@ function handleImportPreviewClick(event: MouseEvent): void {
   }
 }
 
-function addSelectedImportLines(): void {
+async function addSelectedImportLines(): Promise<void> {
   const selectedDrafts = pendingImportDrafts
     .filter((entry) => entry.selected)
     .map((entry) => structuredClone(entry.draft));
@@ -7325,7 +7364,7 @@ function addSelectedImportLines(): void {
       const details = ids.slice(0, 10).map((id) => `• ${id}`).join('\n');
       const remaining = ids.length > 10 ? `
 … and ${ids.length - 10} more` : '';
-      const confirmed = window.confirm(
+      const confirmed = await confirmAction(
         `${ids.length} duplicate Line ID(s) found:
 
 ${details}${remaining}
@@ -7333,7 +7372,8 @@ ${details}${remaining}
 ` +
         'Lines with the same ID will be merged, keeping the first line’s name and settings. ' +
         'Duplicate points will be removed. They will not be added as separate curves.\n\n' +
-        'Continue merging? Cancel to change the Line ID or ID suffix before importing.'
+        'Continue merging? Cancel to change the Line ID or ID suffix before importing.',
+        'Merge and import', 'Merge duplicate Line IDs?'
       );
       if (!confirmed) {
         setImportStatus('Import cancelled. Change the Line ID or ID suffix to add separate curves.');
