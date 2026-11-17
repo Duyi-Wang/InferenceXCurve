@@ -1464,6 +1464,11 @@ document.querySelector('#quick-top')?.addEventListener('click', () => {
 });
 
 document.querySelector('#reset-data')?.addEventListener('click', () => {
+  const confirmed = window.confirm(
+    'Reset all settings and data to the default example?\n\n' +
+    'This replaces the current chart data, filters, sync configs, and saved browser data. This cannot be undone.'
+  );
+  if (!confirmed) return;
   clearAutoRenderTimer();
   editorSelectionMode = false;
   editingEditorGroup = null;
@@ -1487,6 +1492,10 @@ document.querySelector('#reset-data')?.addEventListener('click', () => {
 });
 
 document.querySelector('#clear-data')?.addEventListener('click', () => {
+  const confirmed = window.confirm(
+    'Clear all chart data?\n\nAll lines and points will be removed. Sync configs are kept. This cannot be undone.'
+  );
+  if (!confirmed) return;
   clearAutoRenderTimer();
   editorSelectionMode = false;
   editingEditorGroup = null;
@@ -2385,7 +2394,11 @@ function handleInferenceXSyncClick(event: MouseEvent): void {
   } else if (action === 'reload-availability') {
     void loadInferenceXAvailability();
   } else if (action === 'reset-configs') {
-    resetInferenceXSyncConfigs();
+    const confirmed = window.confirm(
+      'Reset sync configs to the defaults?\n\n' +
+      'All custom sync configs will be replaced by the default configs. Chart data is not changed.'
+    );
+    if (confirmed) resetInferenceXSyncConfigs();
   } else if (action === 'add-config') {
     addInferenceXSyncConfig();
   } else if (action === 'remove-config') {
