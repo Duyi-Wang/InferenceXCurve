@@ -4849,6 +4849,10 @@ function renderLegend(): void {
         <button id="legend-options-toggle" class="legend-options-toggle" type="button" aria-expanded="${!legendOptionsCollapsed}" aria-controls="legend-extra-options">
           <span>${legendOptionsCollapsed ? 'Expand options' : 'Collapse options'}</span>${renderIcon(legendOptionsCollapsed ? 'chevron-right' : 'chevron-down')}
         </button>
+        ${labelsEnabled && state.hiddenLabelSeriesIds.size > 0 ? `
+          <button id="reset-all-labels" class="legend-line-action" type="button"
+            title="Restore label visibility for every line, including lines outside the current filters">Reset all labels</button>
+        ` : ''}
         <button
           id="show-all-lines"
           class="legend-line-action"
@@ -4862,11 +4866,6 @@ function renderLegend(): void {
         ${renderSwitch('hidePointLabels', 'Hide Labels', state.hidePointLabels)}
         ${renderSwitch('showLineLabels', 'Line Labels', state.showLineLabels,
           'Drag a label along its curve or nearer/farther (0.5–4× gap); cross the curve to switch sides. Drag around an endpoint or a single point to change direction. Double-click to reset.')}
-        ${labelsEnabled ? `
-          <button id="reset-all-labels" class="legend-line-action legend-reset-labels" type="button"
-            title="Restore label visibility for every line, including lines outside the current filters"
-            ${state.hiddenLabelSeriesIds.size === 0 ? 'disabled' : ''}>Reset all labels</button>
-        ` : ''}
         <div id="legend-extra-options" class="legend-extra-options" ${legendOptionsCollapsed ? 'hidden' : ''}>
         ${
           precisionKey
@@ -4994,7 +4993,7 @@ function renderLegend(): void {
     state.hiddenLabelSeriesIds.clear();
     renderAll();
     scheduleLocalSave();
-    legendEl.querySelector<HTMLButtonElement>('#reset-all-labels')?.focus({ preventScroll: true });
+    legendEl.querySelector<HTMLButtonElement>('#legend-options-toggle')?.focus({ preventScroll: true });
   });
   legendEl.querySelectorAll<HTMLButtonElement>('button[data-series-labels]').forEach((button) => {
     button.addEventListener('click', () => {
