@@ -3359,7 +3359,14 @@ p {
 }
 
 .point-table-expanded-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0 14px 8px;
+}
+
+.point-table-expanded-head .series-action-button {
+  flex: 0 0 auto;
 }
 
 .point-data-toggle {
@@ -3485,6 +3492,24 @@ p {
   white-space: nowrap;
 }
 
+.point-hide-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 4px;
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+.point-hide-control input {
+  margin: 0;
+}
+
+.point-table .point-hidden td.point-cell {
+  color: var(--muted-foreground);
+  background: color-mix(in srgb, var(--accent) 55%, var(--background));
+}
+
 .point-action-button {
   display: inline-grid;
   width: 22px;
@@ -3559,9 +3584,9 @@ p {
 
 .point-table th.point-actions-head,
 .point-table td.point-actions-cell {
-  width: 64px;
-  min-width: 64px;
-  max-width: 64px;
+  width: 114px;
+  min-width: 114px;
+  max-width: 114px;
 }
 
 .point-table th.point-cell-interactivity,

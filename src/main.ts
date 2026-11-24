@@ -784,6 +784,7 @@ function restorePersistedPointRows(value: unknown): PointRow[] {
     ].forEach((key) => {
       row[key] = formatPointFieldValue(point[key]);
     });
+    if (point.hidden === 'true') row.hidden = 'true';
     row.shape = normalizePointShapeValue(row.shape);
     return row;
   });
@@ -4097,6 +4098,10 @@ function renderPointTable(series: SeriesDraft, seriesIndex: number, pointCount: 
   return `
     <div class="point-table-expanded-head">
       ${renderPointDataToggle(seriesIndex, pointCount, false)}
+      <button type="button" class="series-action-button" data-series-action="reset-hidden-points"
+        data-series-index="${seriesIndex}" ${series.points.some((row) => row.hidden === 'true') ? '' : 'disabled'}>
+        Reset hidden points
+      </button>
     </div>
     <div class="table-wrap point-table-wrap">
       <table class="data-table point-table" aria-label="${escapeAttribute(series.name || `Line ${seriesIndex + 1}`)} point data">
@@ -4189,9 +4194,14 @@ function formatPointCellDisplay(key: string, value: string | undefined): string 
 function renderPointRow(row: PointRow, seriesIndex: number, rowIndex: number): string {
   const editorPointColumns = getEditorPointColumns();
   return `
-    <tr>
+    <tr class="${row.hidden === 'true' ? 'point-hidden' : ''}">
       <td class="row-num">${rowIndex + 1}</td>
       <td class="point-actions-cell">
+        <label class="point-hide-control">
+          <input type="checkbox" data-hide-point data-series-index="${seriesIndex}" data-row="${rowIndex}"
+            aria-label="Hide point ${rowIndex + 1}" ${row.hidden === 'true' ? 'checked' : ''}>
+          Hide
+        </label>
         <button
           type="button"
           class="point-action-button"
@@ -4403,6 +4413,8 @@ function attachSeriesEditorEvents(): void {
       let copiedSeriesId: string | undefined;
       if (action === 'toggle-data') {
         draft.collapsed = !draft.collapsed;
+      } else if (action === 'reset-hidden-points') {
+        draft.points.forEach((row) => delete row.hidden);
       } else if (action === 'copy-series') {
         const copy = copySeriesDraft(draft);
         insertCopiedDraftsAfter(draft, [copy]);
@@ -4444,6 +4456,22 @@ function attachSeriesEditorEvents(): void {
       if (copiedSeriesId) locateSeriesInEditor(copiedSeriesId);
       scheduleLocalSave();
       if (action !== 'toggle-data') markChartDirty();
+    });
+  });
+
+  seriesEditorEl.querySelectorAll<HTMLInputElement>('input[data-hide-point]').forEach((input) => {
+    input.addEventListener('change', () => {
+      const draft = seriesDrafts[Number(input.dataset.seriesIndex)]!;
+      const row = draft.points[Number(input.dataset.row)]!;
+      if (input.checked) row.hidden = 'true';
+      else delete row.hidden;
+      input.closest('tr')?.classList.toggle('point-hidden', input.checked);
+      const reset = input.closest('[data-series-card]')?.querySelector<HTMLButtonElement>(
+        '[data-series-action="reset-hidden-points"]'
+      );
+      if (reset) reset.disabled = !draft.points.some((point) => point.hidden === 'true');
+      scheduleLocalSave();
+      markChartDirty();
     });
   });
 
@@ -5308,6 +5336,7 @@ function seriesToDrafts(series: InferenceCurveSeries[]): SeriesDraft[] {
       const strategyMetadata = parsePointStrategy(point.strategy);
       const dcp = getInferenceCurvePointDcp(point);
       const row: PointRow = {
+        ...(point.hidden === true ? { hidden: 'true' } : {}),
         interactivity: formatPointFieldValue(point.interactivity),
         throughput: String(point.throughput),
         ttft: formatPointFieldValue(point.ttft),
@@ -5480,6 +5509,7 @@ function draftsToSeriesInternal(drafts: SeriesDraft[]): InferenceCurveSeries[] {
           concurrency: parseNumber(row.concurrency) ?? undefined,
           label: row.label.trim() || undefined
         };
+        if (row.hidden === 'true') point.hidden = true;
         if (interactivity !== null) point.interactivity = interactivity;
         if (interactivityPercentiles) point.interactivityPercentiles = interactivityPercentiles;
         const pointShape = normalizePointShapeValue(row.shape);

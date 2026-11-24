@@ -1,6 +1,7 @@
 import * as d3 from 'd3';
 
 export interface InferenceCurvePoint {
+  hidden?: boolean;
   interactivity?: number;
   interactivityPercentiles?: InferenceCurveLatencyPercentiles;
   throughput: number;
@@ -634,6 +635,7 @@ export function prepareInferenceCurveSeries(
     const lineDasharray = resolveLineDasharray(line.lineStyle);
     const points: ChartPoint[] = [];
     line.points.forEach((point, pointIndex) => {
+      if (point.hidden === true) return;
       const x = getPointXValue(point, xMetric, latencyPercentile);
       const y = getInferenceCurvePointYValue(point, line, yMetric, tcoHourlyCosts);
       if (!Number.isFinite(x) || !Number.isFinite(y)) return;
@@ -704,6 +706,7 @@ function getEndToEndParetoPointIndexes(
   >();
 
   series.points.forEach((point, pointIndex) => {
+    if (point.hidden === true) return;
     const x = readPointMetricValue(point, 'endToEnd', latencyPercentile);
     const y = readFiniteNumber(point.throughput);
     if (x === undefined || x <= 0 || y === undefined) return;
